@@ -1,12 +1,21 @@
-// Boot sequence: config (done by the caller) -> ensure DATA_DIR -> listen on 127.0.0.1:PORT.
-// Throws on any failure; the entry point turns the throw into one fatal line (log.ts).
+// Boot sequence (spec, In scope): config (done by the caller) -> ensure DATA_DIR -> open the
+// database -> migrate -> listen on 127.0.0.1:PORT. Throws on any failure; the entry point turns
+// the throw into one fatal line (log.ts). Paths are arguments so tests can inject them.
 import { accessSync, constants, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createApp } from "./app.ts";
 import { ConfigError, type Config } from "./config.ts";
+import { openDatabase, type Db } from "./db.ts";
 import { createLogger, type Logger } from "./log.ts";
+import { migrate } from "./migrate.ts";
 
 export const HOST = "127.0.0.1";
+export const DB_FILE = "djvisuals.sqlite";
+
+export interface BootPaths {
+  /** The folder of NNNN_<slug>.sql files. */
+  migrationsDir: string;
+}
 
 export interface Booted {
   close(): Promise<void>;
@@ -29,12 +38,40 @@ export function ensureDirectories(dataDir: string): { dataDir: string; assetsDir
   return { dataDir: root, assetsDir };
 }
 
-export async function boot(config: Config, log: Logger = createLogger(config.LOG_LEVEL)) {
+/** Ensure directories, open the database and apply pending migrations. Shared by boot and
+ *  `pnpm migrate` (spec SD7, AC8). The caller owns the returned database. */
+export function openAndMigrate(
+  config: Config,
+  paths: BootPaths,
+  log: Logger,
+): { db: Db; schemaVersion: number } {
   const dirs = ensureDirectories(config.DATA_DIR);
   log.debug({ dataDir: dirs.dataDir, assetsDir: dirs.assetsDir }, "directories ensured");
+  const file = join(dirs.dataDir, DB_FILE);
+  const db = openDatabase(file);
+  log.info({ file }, "database opened");
+  try {
+    const { schemaVersion } = migrate(db, paths.migrationsDir, log);
+    return { db, schemaVersion };
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
 
+export async function boot(
+  config: Config,
+  paths: BootPaths,
+  log: Logger = createLogger(config.LOG_LEVEL),
+): Promise<Booted> {
+  const { db } = openAndMigrate(config, paths, log);
   const app = createApp(log);
-  await app.listen({ host: HOST, port: config.PORT });
+  try {
+    await app.listen({ host: HOST, port: config.PORT });
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   const address = app.server.address();
   log.info(
     {
@@ -43,6 +80,10 @@ export async function boot(config: Config, log: Logger = createLogger(config.LOG
     },
     "listening",
   );
-  const booted: Booted = { close: () => app.close() };
-  return booted;
+  return {
+    async close() {
+      await app.close();
+      db.close();
+    },
+  };
 }

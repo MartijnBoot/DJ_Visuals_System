@@ -11,7 +11,8 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "typecheck": "tsc -p tests/tsconfig.json && pnpm -r --workspace-concurrency=1 exec tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "migrate": "node --env-file-if-exists=.env.local server/src/migrate-cli.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
