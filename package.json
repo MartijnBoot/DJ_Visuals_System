@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tests/tsconfig.json && pnpm -r --workspace-concurrency=1 exec tsc -p tsconfig.json",
     "test": "vitest run",
+    "dev": "node --env-file-if-exists=.env.local scripts/dev.ts",
     "migrate": "node --env-file-if-exists=.env.local server/src/migrate-cli.ts",
     "build": "vite build web"
   },
