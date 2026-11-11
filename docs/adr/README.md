@@ -15,4 +15,4 @@ next number, never reuse one.
 
 | # | Title | Status |
 |---|---|---|
-| [0001](0001-setup-decision-record.md) | Setup Decision Record | Draft |
+| [0001](0001-setup-decision-record.md) | Setup Decision Record | Approved |

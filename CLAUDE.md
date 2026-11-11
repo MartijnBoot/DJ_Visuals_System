@@ -11,8 +11,12 @@ Replace every <...>; delete what does not apply.
 
 ## Project
 
-<Name> — <one sentence: what it is, for whom>. <Stack in one line: e.g. FastAPI (`app/`) +
-React (`web/`), Postgres (`db/`)>.
+DJ Visuals System — a web app that renders live visuals from live audio and a live camera on a
+DJ's or VJ's screen machine, shaped by saved visual profiles. TypeScript end to end:
+framework-free WebGL2 + Web Audio renderer (`engine/`), React + Vite UI (`web/`), Node.js
+server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQLite + local
+`assets/` folder. Rendering stays in the browser on the screen machine (latency); self-hosted on
+`localhost`, cloud deferred — see [docs/adr/0001-setup-decision-record.md](docs/adr/0001-setup-decision-record.md).
 
 ## Commands
 

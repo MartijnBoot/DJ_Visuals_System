@@ -1,6 +1,13 @@
-# <Project name>
+# DJ Visuals System
 
-<One paragraph: what it is, for whom, and the problem it solves.>
+A web app that turns a live set's audio and a live camera into visuals that move with the beat on
+the venue screen, for a DJ or a VJ working a single screen machine. Audio comes from device
+capture or a microphone, the camera from a webcam or a phone; rendering happens in the browser on
+the screen machine to keep audio-to-pixel latency minimal, and visual profiles — built in the app
+or authored with Claude Code — are stored so they survive a redeploy. Stack: TypeScript end to
+end — a WebGL2 + Web Audio renderer and a React + Vite UI (`web/`), a Node.js server (`server/`),
+SQLite. It is self-hosted on the owner's machine for now; cloud hosting is deferred
+([Setup Decision Record](docs/adr/0001-setup-decision-record.md)).
 
 ## Setup
 
