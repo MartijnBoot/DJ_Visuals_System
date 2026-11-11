@@ -1,93 +1,9 @@
 // The Start flow and the `s` panel in a real browser on the fake devices (B-01 AC1 to AC5, AC9,
-// AC14; plan PD11, PD12, T7). A recorder installed before the page loads logs every media
-// request and AudioContext, and can make the system-audio share fail.
-import { expect, test, type Page } from "@playwright/test";
+// AC14; plan PD11, PD12, T7). The recorder from `helpers.ts` logs every media request and
+// AudioContext, and can make the system-audio share fail.
+import { expect, test } from "@playwright/test";
 import { LEFT_RGB, RIGHT_RGB } from "./fixtures/media.ts";
-
-interface Recorded {
-  calls: { fn: string; constraints: unknown }[];
-  contexts: number;
-}
-
-/** Installs the recorder; `display` makes getDisplayMedia reject or return video only. */
-async function record(page: Page, display: "real" | "reject" | "video-only" | "absent" = "real") {
-  await page.addInitScript((mode) => {
-    const w = window as unknown as {
-      __media: { calls: unknown[]; contexts: AudioContext[] };
-    };
-    w.__media = { calls: [], contexts: [] };
-    const md = navigator.mediaDevices;
-    if (mode === "absent") delete (MediaDevices.prototype as Partial<MediaDevices>).getDisplayMedia;
-    const getUserMedia = md.getUserMedia.bind(md);
-    md.getUserMedia = (constraints) => {
-      w.__media.calls.push({ fn: "getUserMedia", constraints });
-      return getUserMedia(constraints);
-    };
-    if (md.getDisplayMedia) {
-      const getDisplayMedia = md.getDisplayMedia.bind(md);
-      md.getDisplayMedia = (constraints) => {
-        w.__media.calls.push({ fn: "getDisplayMedia", constraints });
-        if (mode === "reject") return Promise.reject(new DOMException("no", "NotAllowedError"));
-        if (mode === "video-only") return getUserMedia({ video: true });
-        return getDisplayMedia(constraints);
-      };
-    }
-    const Base = window.AudioContext;
-    window.AudioContext = class extends Base {
-      constructor(options?: AudioContextOptions) {
-        super(options);
-        w.__media.contexts.push(this);
-      }
-    };
-  }, display);
-}
-
-async function recorded(page: Page): Promise<Recorded> {
-  return page.evaluate(() => {
-    const m = (window as unknown as { __media: { calls: never[]; contexts: unknown[] } }).__media;
-    return { calls: m.calls, contexts: m.contexts.length };
-  });
-}
-
-/**
- * The mean colour of a square patch of the canvas, read in a frame callback queued after the
- * engine's, so the WebGL drawing buffer still holds the frame just drawn.
- */
-async function patch(page: Page, x: number, y: number, size = 8): Promise<number[]> {
-  return page.evaluate(
-    ([px, py, s]) =>
-      new Promise<number[]>((resolve) => {
-        requestAnimationFrame(() => {
-          const canvas = document.querySelector<HTMLCanvasElement>("[data-testid=screen]")!;
-          const copy = document.createElement("canvas");
-          copy.width = canvas.width;
-          copy.height = canvas.height;
-          const g = copy.getContext("2d")!;
-          g.drawImage(canvas, 0, 0);
-          const data = g.getImageData(px! - s! / 2, py! - s! / 2, s!, s!).data;
-          const sum = [0, 0, 0];
-          for (let i = 0; i < data.length; i += 4)
-            for (let c = 0; c < 3; c++) sum[c]! += data[i + c]!;
-          resolve(sum.map((v) => v / (data.length / 4)));
-        });
-      }),
-    [x, y, size],
-  );
-}
-
-const near = (a: number[], b: readonly number[], tolerance: number) =>
-  a.every((v, i) => Math.abs(v - b[i]!) <= tolerance);
-
-async function meter(page: Page, name: string): Promise<number> {
-  return Number(await page.getByTestId(`meter-${name}`).getAttribute("data-value"));
-}
-
-async function start(page: Page) {
-  await page.getByRole("button", { name: "Start" }).click();
-  await expect(page.getByTestId("panel")).toHaveCount(0); // PD12: a successful Start closes it
-  await page.keyboard.press("s");
-  await expect(page.getByTestId("panel")).toBeVisible();
-}
+import { meter, near, patch, record, recorded, slide, start } from "./helpers.ts";
 
 const OFF = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
 
@@ -144,7 +60,7 @@ test("the pickers list the fake devices and offer system audio (AC3)", async ({ 
 });
 
 test("without getDisplayMedia there is no system audio option (AC3)", async ({ page }) => {
-  await record(page, "absent");
+  await record(page, { display: "absent" });
   await page.goto("/");
   await start(page);
   const audioOptions = await page.getByTestId("audio-picker").locator("option").allTextContents();
@@ -158,7 +74,7 @@ for (const [mode, reason] of [
   test(`a system share that ${mode === "reject" ? "is cancelled" : "has no audio"} keeps the previous source (AC4)`, async ({
     page,
   }) => {
-    await record(page, mode);
+    await record(page, { display: mode });
     await page.goto("/");
     await start(page);
     await page.getByTestId("audio-picker").selectOption({ label: "System audio" });
@@ -206,10 +122,8 @@ test("moving a dial changes the next frame and asks for nothing (AC9)", async ({
   const y = height / 2;
   const fixture = (p: number[]) => near(p, LEFT_RGB, 12) || near(p, RIGHT_RGB, 12);
 
-  await page.getByTestId("slider-reactivity").focus();
-  await page.keyboard.press("Home");
-  await page.getByTestId("slider-recognisability").focus();
-  await page.keyboard.press("Home");
+  await slide(page, "reactivity", "Home");
+  await slide(page, "recognisability", "Home");
   await expect.poll(async () => fixture(await patch(page, x, y)), { timeout: 3000 }).toBe(true);
 
   // Recognisability 1: 4 posterise levels, every channel a multiple of 85.
