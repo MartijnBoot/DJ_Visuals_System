@@ -19,10 +19,11 @@ breaks; "review only" is honest but is a debt, and the next task near it should 
 
 | Since | Invariant | Enforced by |
 |---|---|---|
-| 0 | The environment is read in one module (`<path/to/config>`), validated at boot; nowhere else | `<tests/meta/test_config_boundary.py>` |
+| 0 | The environment is read in one module (`server/src/config.ts`), validated at boot; nowhere else | ESLint `no-restricted-properties` (`eslint.config.js`); `tests/meta/config-boundary.test.ts` |
 | 0 | No secret, key or personal data in code, tests, logs or fixtures | gitleaks in CI; review |
-| 0 | Migrations are append-only: a migration that has a successor is never edited | `.claude/guard-paths.json` → `append_only` |
-| <n> | <...> | <...> |
+| 0 | Migrations are append-only: a migration that has a successor is never edited | `.claude/guard-paths.json` → `append_only` (`server/migrations`); `tests/workflow/test_guard_paths.py` |
+| 0 | The engine is framework-free: `engine/package.json` declares no dependency of any kind, and its compiled output imports no package | `tests/meta/engine-boundary.test.ts` |
+| 0 | The server listens on `127.0.0.1` only; the machine's LAN address is refused | `server/test/boot.int.test.ts` |
 
 ## Guarded areas
 
@@ -33,10 +34,9 @@ is an owner stop (CLAUDE.md).
 
 | Paths | Extra check (`/verify`) | Guardian (`/review`) | Why |
 |---|---|---|---|
-| `<src/engine/**>` | `<pytest tests/engine>` (golden fixtures) | `invariant-guardian` | <what breaks, and why nobody would notice> |
 
-Delete the table's example row if nothing qualifies yet — and delete
-`.claude/agents/invariant-guardian.md` with it, or leave it for the day something does.
+None yet: after Phase 0 the system holds nothing a person made (Phase 0 plan, PD17).
+`.claude/agents/invariant-guardian.md` is left as a template for the day something qualifies.
 
 ## Interview probes
 

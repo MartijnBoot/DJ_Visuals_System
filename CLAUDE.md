@@ -3,12 +3,6 @@
 Guidance for Claude Code in this repo. Fuller context: [README.md](README.md),
 [docs/way-of-working.md](docs/way-of-working.md), [docs/invariants.md](docs/invariants.md).
 
-<!--
-Keep this under a page (way-of-working 4.4). For every line ask: would removing it cause a
-mistake? If not, cut it. A rule ignored twice becomes a hook or a test, not a louder line.
-Replace every <...>; delete what does not apply.
--->
-
 ## Project
 
 DJ Visuals System — a web app that renders live visuals from live audio and a live camera on a
@@ -21,12 +15,16 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
 ## Commands
 
 - `bash scripts/setup.sh` — clone to running stack. Idempotent.
-- `bash scripts/check.sh` — the gate: <format, lint, types, unit, integration>, stopping at the
-  first failure. CI runs this same script. Run it before calling any task done.
+- `bash scripts/check.sh` — the gate: format, lint, types, build, unit, integration, browser,
+  stopping at the first failure. CI runs this same script. Run it before calling any task done.
 - `python scripts/check_plans.py --graph docs/plans/<plan>.md` — a plan's build order.
-- `<the command to run the app>`
-- `<the command to create / apply a migration>`
-- `<any command an agent cannot guess>`
+- `pnpm start` — builds `web/dist`, then one process serves it and `/api` on `127.0.0.1:PORT`.
+- `pnpm dev` — the server under `node --watch` (API only) and Vite with hot reload on
+  `localhost:5173`, proxying `/api` to the server (`scripts/dev.ts`).
+- `pnpm migrate` — applies pending migrations without listening; boot applies them too. A new
+  migration is a new file `server/migrations/NNNN_<slug>.sql` with the next number.
+- `pnpm test --project unit` (`*.test.ts`), `pnpm test --project integration`
+  (`*.int.test.ts`), `pnpm test:browser` (Playwright, `tests/browser/`).
 
 ## Workflow
 
@@ -44,12 +42,25 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
 
 ## Conventions
 
-- <Where configuration is read — one module, validated at boot; nowhere else reads the env.>
-- <Folder meanings that are not obvious. Define `lib/`, `core/`, `utils/` here or do not use them.>
+- The environment is read only in `server/src/config.ts` (`APP_ENV`, `LOG_LEVEL`, `PORT`,
+  `DATA_DIR`, validated with zod at boot, no defaults in code). ESLint's
+  `no-restricted-properties` and `tests/meta/config-boundary.test.ts` fail any other
+  `process.env`. Root scripts that need a value import `config.ts` (`scripts/dev.ts` does).
+- `engine/` — the framework-free WebGL2 renderer; no dependency of any kind
+  (`tests/meta/engine-boundary.test.ts`). `web/` — the React + Vite screen page; imports
+  `engine/` and `shared/`, never `server/`. `server/` — Fastify, SQLite, migrations, static
+  serving. `shared/` — zod schemas both sides validate against. `tests/meta/` — tests about
+  the codebase's own boundaries. `tests/browser/` — Playwright against `pnpm start`.
 - Types at the boundary: every external input is validated before use.
 - A new dependency needs justification (what, why not the standard library, licence,
   maintenance) — ask first.
-- <Environment quirks and gotchas that cost someone an afternoon.>
+- Node 24 runs the TypeScript directly (type stripping): erasable syntax only (no `enum`,
+  `namespace` or parameter properties) and relative imports carry `.ts`. `.npmrc`
+  `engine-strict` makes pnpm refuse another Node major.
+- Dev is on `5173` (Vite); start is on `PORT`. Without `--api-only` the server refuses to boot
+  when `web/dist/index.html` is missing; `pnpm dev` and the integration tests pass the flag.
+- The browser check needs software WebGL in headless Chromium (`--use-gl=angle`
+  `--use-angle=swiftshader` `--enable-unsafe-swiftshader`, in `playwright.config.ts`).
 
 ## Never
 
@@ -57,7 +68,7 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
   (`.claude/guard-paths.json` blocks Write/Edit; it does not see Bash, so no `sed -i` either).
 - Never commit `.env*` (except `.env.example`), real secrets or credentials.
 - Never use production credentials, or connect to production, from a dev or agent session.
-- <Files nobody hand-edits: generated code, golden fixtures, vendored copies.>
+- Never hand-edit `pnpm-lock.yaml` (pnpm writes it) or `web/dist` (`pnpm build` writes it).
 
 ## Hard stops — the owner's, never an agent's
 

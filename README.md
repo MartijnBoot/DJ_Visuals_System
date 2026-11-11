@@ -17,7 +17,14 @@ bash scripts/check.sh     # the gate — the same script CI runs
 ```
 
 Requirements: git, bash (Git Bash on Windows), Python 3.9+ for the workflow's guard and plan
-checker, and <the stack's tools>.
+checker, Node 24 (`.nvmrc`; pnpm refuses another major) and pnpm 9 (`packageManager` in
+`package.json`). Setup installs the dependencies and Playwright's Chromium, and creates
+`.env.local` from `.env.example`.
+
+```bash
+pnpm start                # build the app and serve it on http://127.0.0.1:8000 (PORT)
+pnpm dev                  # hot reload on http://localhost:5173, /api proxied to the server
+```
 
 ## How work is done here
 
@@ -37,8 +44,8 @@ never break is in [docs/invariants.md](docs/invariants.md); what only the owner 
 
 1. Fill in this README, [CLAUDE.md](CLAUDE.md) and [docs/adr/0001-setup-decision-record.md](docs/adr/0001-setup-decision-record.md)
    — the Setup Decision Record comes first: database, hosting, auth, cost. Default answer "no".
-2. `bash scripts/check.sh` — green on the workflow checks, with a warning that no project checks
-   are wired yet.
+2. `bash scripts/check.sh` — green on the workflow checks, then the project steps format, lint,
+   types, build, unit, integration and browser.
 3. Run `/spec 0` for **Phase 0 — foundations**: the stack skeleton, `scripts/setup.sh` and
    `scripts/check.sh` wired to it, CI green, the config module that fails fast. Its exit condition:
    a fresh clone plus two commands gives a running app and a green gate.
