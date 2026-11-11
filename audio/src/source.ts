@@ -80,13 +80,17 @@ export async function createFeatureSource(
       if (now - refreshedAt >= CLOCK_REFRESH_MS) refresh(now);
       if (!latest) return ZERO_FEATURES;
       const { frame, contextTime } = latest;
+      // The clock map gives when a context time is heard; the graph processed it this much
+      // earlier, which is when the window's newest sample was in hand (PD2). SD15 then adds
+      // baseLatency once more as the input side's share.
+      const aheadMs = (context.baseLatency + (context.outputLatency ?? 0)) * 1000;
       const features: AudioFeatures = {
         level: frame.level,
         low: frame.low,
         mid: frame.mid,
         high: frame.high,
         beat: frame.beat,
-        capturedAt: clock.toPerformance(contextTime) - context.baseLatency * 1000,
+        capturedAt: clock.toPerformance(contextTime) - aheadMs - context.baseLatency * 1000,
       };
       return decayFeatures(features, now - lastBlockAt);
     },

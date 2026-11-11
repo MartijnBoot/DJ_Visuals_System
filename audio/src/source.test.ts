@@ -36,7 +36,7 @@ class FakeNode {
   }
 }
 
-function fakeContext(baseLatency = 0.01) {
+function fakeContext(baseLatency = 0.01, outputLatency = 0) {
   const input = {
     connectedTo: null as unknown,
     disconnected: false,
@@ -49,6 +49,7 @@ function fakeContext(baseLatency = 0.01) {
   };
   const context = {
     baseLatency,
+    outputLatency,
     audioWorklet: { addModule: vi.fn(async (_url: string) => {}) },
     createMediaStreamSource: vi.fn((_stream: MediaStream) => input),
     // Context time 0 s was performance time 1000 ms.
@@ -101,15 +102,25 @@ describe("createFeatureSource", () => {
     node.post({ frame: { ...frame, level: 0.1 }, contextTime: 0.49 });
     node.post({ frame, contextTime: 0.5 });
     expect(source.lastBlockAt()).toBe(1505);
-    // 0.5 s of context time is performance 1500 ms; minus baseLatency 10 ms.
+    // 0.5 s of context time is heard at performance 1500 ms. The graph processed it
+    // baseLatency + outputLatency (10 ms) earlier, and SD15 adds baseLatency (10 ms) once more.
     expect(source.read(1510)).toEqual({
       level: 0.5,
       low: 0.9,
       mid: 0.2,
       high: 0.1,
       beat: 1,
-      capturedAt: 1490,
+      capturedAt: 1480,
     });
+  });
+
+  it("puts capturedAt at the processing instant, before the output latency (PD2)", async () => {
+    // getOutputTimestamp maps context time to when it is heard; the graph runs ahead of that
+    // by baseLatency + outputLatency, so without both the sample lands in the future.
+    const { asContext } = fakeContext(0.01, 0.05);
+    const source = await createFeatureSource(asContext, stream, "u");
+    FakeNode.created[0]!.post({ frame, contextTime: 0.5 });
+    expect(source.read(now).capturedAt).toBeCloseTo(1500 - 60 - 10, 9);
   });
 
   it("ignores a message that is not a feature window", async () => {
@@ -119,7 +130,7 @@ describe("createFeatureSource", () => {
     node.post({ frame, contextTime: 0.5 });
     node.post({ frame: { level: "loud" }, contextTime: 0.6 });
     node.post("hello");
-    expect(source.read(now).capturedAt).toBeCloseTo(1490, 9);
+    expect(source.read(now).capturedAt).toBeCloseTo(1480, 9);
   });
 
   it("refreshes the clock map from getOutputTimestamp once a second", async () => {
