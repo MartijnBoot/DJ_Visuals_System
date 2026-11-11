@@ -53,20 +53,22 @@ test("the beat fires on each click of the track and not between (AC6)", async ({
   const samples = await sampleMeter(page, "beat", 3000, 50);
   const rises = samples.filter((s, i) => s.v >= 0.5 && (i === 0 || samples[i - 1]!.v < 0.5));
   const gaps = rises.slice(1).map((r, i) => Math.round(r.t - rises[i]!.t));
-  // The middle 200 ms of each 470 ms gap between 30 ms bursts, measured from the meter's rise.
-  const middles = rises.map((r) =>
-    samples.filter((s) => s.t >= r.t + 165 && s.t <= r.t + 365).map((s) => s.v),
+  // The last 200 ms of each gap, measured from the meter's rise and stopping short of the next
+  // click (owner's decision of 2026-11-11: PD7's 120 ms decay is kept, so a gap's middle still
+  // carries the tail of the pulse; its end must not).
+  const ends = rises.map((r) =>
+    samples.filter((s) => s.t >= r.t + 280 && s.t <= r.t + 480).map((s) => s.v),
   );
-  const worstMiddle = Math.max(...middles.flat());
+  const worstEnd = Math.max(...ends.flat());
   note(
     "AC6 rises (ms)",
     rises.map((r) => Math.round(r.t)),
   );
   note("AC6 rise spacing (ms)", gaps);
-  note("AC6 worst beat in a gap's middle 200 ms (threshold ≤ 0.1)", worstMiddle);
+  note("AC6 worst beat in a gap's last 200 ms (threshold ≤ 0.1)", worstEnd);
   expect(rises.length).toBeGreaterThanOrEqual(5);
   for (const gap of gaps) expect(Math.abs(gap - PERIOD_MS)).toBeLessThanOrEqual(100);
-  expect(worstMiddle).toBeLessThanOrEqual(0.1);
+  expect(worstEnd).toBeLessThanOrEqual(0.1);
 });
 
 test("reactivity 0 ignores the beat; at 0.7 a click changes the picture (AC7)", async ({
@@ -203,17 +205,20 @@ test("recognisability 0 shows the camera; at 1 nothing finer than a block (AC8, 
     .toBe(true);
 });
 
-test("the overlay's in-app latency p95 is at most 50 ms after 10 s (AC10, PD13)", async ({
+test("the overlay's in-app latency p95 is at most 50 ms once start-up has left the window (AC10, PD13)", async ({
   page,
 }) => {
   await record(page);
   await page.goto("/");
   await start(page, { reopen: false });
   await page.keyboard.press("o");
-  await page.waitForTimeout(10_000);
+  // The window is 10 s. Start-up (module loading, the first frames, the refresh estimate) is
+  // inside it for the first 10 s; the owner decided (2026-11-11) to read it once that has
+  // left, so the number is the set's, not the page load's.
+  await page.waitForTimeout(20_000);
   const line = (await page.getByTestId("overlay-latency").textContent())!;
   const match = /latency ms ([\d.]+) \/ p95 ([\d.]+) \/ worst ([\d.]+)/.exec(line);
-  note("AC10 overlay after 10 s", line);
+  note("AC10 overlay after 20 s", line);
   note("AC10 scale and fps", [
     await page.getByTestId("overlay-scale").textContent(),
     await page.getByTestId("overlay-fps").textContent(),

@@ -86,6 +86,22 @@ rows and the owner answered each; the answers are the Decision column.
 | PD21 · Confirm (audit) | When the engine records a latency sample (SD15, AC10). | Only when `features.capturedAt` has changed since the last recorded sample, i.e. a new window arrived. Stale features (loss, decay, before Start) record nothing, so the 10 s window empties and the overlay reads `–` rather than ever-growing numbers. | Otherwise a lost source fills the window with the age of the last block and the p95 lies. |
 | PD22 · Confirm (audit) | The camera path at dials 0/0 and the audio terms at recognisability 1 (AC8, PD8). | The drift tint is applied only to the noise input (`uHasSource` 0); with a source and dials 0/0 the pass is the exact identity. Every audio term (displacement, grain, edges, flash) is evaluated per block, not per pixel, so at recognisability 1 the block property holds at any reactivity, including the default 0.7. | AC8 is tested in pixels in T9; without this the default dials break it. |
 
+**Changed at build (owner, 2026-11-11).** Four decisions above contradicted what the machine
+showed; the builder stopped and the owner decided, and the code and the T9 tests follow these:
+
+- **PD2.** `getOutputTimestamp()` maps a context time to when it is *heard*; the graph
+  processed it `baseLatency + outputLatency` earlier (63 ms in headless Chromium), so the
+  formula as written put `capturedAt` in the future and the overlay read negative latency.
+  `capturedAt` now subtracts both, then `baseLatency` once more as SD15 says.
+- **PD6.** Headroom is "not above budget" (the one-second mean ≤ 1.1 × the refresh period),
+  not "under 0.8 ×": a loop locked to the display never reads under the period, so the old rule
+  never stepped up. A step up undone within 10 s doubles the next wait (20, 40, 80 s); one that
+  holds 10 s resets it.
+- **PD7 / T9 (AC6).** The 120 ms decay stays; the browser test asserts ≤ 0.1 over the *last*
+  200 ms of each gap, not the middle, where the pulse's tail still reads about 0.25.
+- **PD13 (AC10).** The browser test reads the overlay after 20 s, once start-up has left the
+  10 s window; the 50 ms threshold stays (measured p95 20.7 ms on SwiftShader at 640×360).
+
 ## Files
 
 | Path | Create/Modify | Purpose |
