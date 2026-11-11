@@ -109,8 +109,11 @@ describe("migrations at boot (AC3, AC5, AC6)", () => {
 });
 
 describe("a locked database (AC7)", () => {
-  it("makes boot exit non-zero with one line", async () => {
-    mkdirSync(dataDir, { recursive: true });
+  it("makes boot exit non-zero with one line, even with nothing pending (PD8)", async () => {
+    // Migrate first: with every migration recorded, only the runner's always-taken
+    // BEGIN IMMEDIATE can see the lock. On a fresh file the CREATE TABLE would fail first.
+    const setup = track(spawnServer(await env(), { entry: migrateCli }));
+    expect((await setup.exited).code).toBe(0);
     const holder = track(
       spawnServer(await env(), {
         entry: join(fixtures, "hold-lock.ts"),

@@ -50,3 +50,14 @@ describe("frame statistics", () => {
     expect(frameTimeMs).toBeCloseTo(16.7, 1);
   });
 });
+
+describe("frame buffer bound", () => {
+  it("record keeps no more than one second of frames even when read is never called", () => {
+    const stats = createFrameStats();
+    for (let i = 0; i < 100_000; i++) stats.record(i * FRAME); // ~28 minutes, never read
+    expect(stats.size()).toBeLessThanOrEqual(Math.ceil(WINDOW_MS / FRAME) + 1);
+    const { fps, frameTimeMs } = stats.read(99_999 * FRAME);
+    expect(fps).toBe(60);
+    expect(frameTimeMs).toBeCloseTo(16.7, 1);
+  });
+});

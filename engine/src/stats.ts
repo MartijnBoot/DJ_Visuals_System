@@ -16,19 +16,29 @@ export interface FrameStats {
 export interface FrameStatsRecorder {
   record(timestamp: number): void;
   read(now: number): FrameStats;
+  /** Frames currently held; bounded to the window, so a hidden overlay cannot grow it. */
+  size(): number;
 }
 
 export function createFrameStats(): FrameStatsRecorder {
   let frames: number[] = [];
   let lastFrameAt = 0;
 
+  // Drops frames older than the window measured from `now`. Called on every record as well as
+  // on every read, so the buffer never holds more than about one second of frames however long
+  // the overlay stays hidden.
+  const prune = (now: number) => {
+    frames = frames.filter((t) => t > now - WINDOW_MS && t <= now);
+  };
+
   return {
     record(timestamp) {
       frames.push(timestamp);
       lastFrameAt = timestamp;
+      prune(timestamp);
     },
     read(now) {
-      frames = frames.filter((t) => t > now - WINDOW_MS && t <= now);
+      prune(now);
       const fps = frames.length;
       let frameTimeMs = 0;
       if (frames.length >= 2) {
@@ -37,6 +47,9 @@ export function createFrameStats(): FrameStatsRecorder {
         frameTimeMs = (last - first) / (frames.length - 1);
       }
       return { fps, frameTimeMs, lastFrameAt };
+    },
+    size() {
+      return frames.length;
     },
   };
 }

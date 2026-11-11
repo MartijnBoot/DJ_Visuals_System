@@ -65,7 +65,7 @@ overrule; **Owner** rows are user-visible choices the spec left open, and each o
 | PD8 · Confirm | What is "the database file is locked by another process" (AC7)? Probed: with WAL, a second process can open, set the pragma and read while another holds a write lock; only `BEGIN IMMEDIATE` fails (`errcode 5`, "database is locked"). | The runner takes `BEGIN IMMEDIATE` on every boot, also when nothing is pending, with the driver's busy timeout at 0. A held write lock therefore fails boot at once with one line. | Otherwise a fully migrated database boots happily beside a process that holds the lock, and AC7 is untestable. |
 | PD9 · Confirm | How does the Vite dev server learn the server's port (AC18) without reading the environment (AC15)? | `pnpm dev` runs a root script, `scripts/dev.ts`, that calls `loadConfig()` from `server/src/config.ts`, starts the server under `node --watch`, and starts Vite through its JavaScript API with `/api` proxied to `http://127.0.0.1:<PORT>`. The dev page is on Vite's default port, 5173, strict. | One reader of the environment; `web/` imports nothing from `server/`. |
 | PD10 · Confirm | `pnpm dev` runs the server before any `web/dist` exists. What does the server do without a build? | `scripts/dev.ts` passes `--api-only`. Without that flag a missing `web/dist/index.html` is a boot failure: one line, non-zero exit. | `pnpm start` can never come up serving 404 for `/`. A command-line flag is not the environment. |
-| PD11 · Confirm | How are unit and integration tests told apart (SD9 has two gate steps)? | Vitest projects `unit` (`*.test.ts`, including `tests/meta/`) and `integration` (`*.int.test.ts`). Gate commands: `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm test --project unit`, `pnpm test --project integration`, `pnpm test:browser`. | One root `test` script, as the spec lists. If the installed Vitest has retired the workspace file, the projects live in the root `vitest.config.ts`. |
+| PD11 · Confirm | How are unit and integration tests told apart (SD9 has two gate steps)? | Vitest projects `unit` (`*.test.ts`, including `tests/meta/`) and `integration` (`*.int.test.ts`). Gate commands: `pnpm format:check`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, `pnpm run test --project unit`, `pnpm run test --project integration`, `pnpm test:browser`. | One root `test` script, as the spec lists. If the installed Vitest has retired the workspace file, the projects live in the root `vitest.config.ts`. |
 | PD12 · Confirm | What does Prettier cover? | Source, config and test files. `.prettierignore` excludes `*.md`, `docs/`, `.claude/`, `pnpm-lock.yaml`, `web/dist`. | Otherwise T2 reformats 2,300 lines of `docs/way-of-working.md` and every workflow file, and the diff is unreviewable. `.editorconfig` already governs Markdown. |
 | PD13 · Confirm | AC16: "the engine's compiled output contains an import". | No bare module specifier, static or dynamic, in the compiler's output for any non-test file under `engine/src`; relative imports inside the package are allowed. The test also fails on `devDependencies` or `peerDependencies` in `engine/package.json`. | A multi-file engine imports itself. Stricter than AC16 on the manifest, cheaper than arguing later. |
 | PD14 · Confirm | AC19 in an automated test on a machine that may have no LAN address. | Assert the listening address is exactly `127.0.0.1`, and that a connection to every non-internal IPv4 address of the machine is refused. Zero such addresses does not fail the test; H3 repeats it by hand. | CI runners and laptops differ; the address assertion never passes vacuously. |
@@ -138,7 +138,7 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   `shared/src/index.test.ts` proves it accepts the spec's example body and rejects a missing
   field, a wrong status and a non-integer version. `.gitignore` ignores `data/`, `test-results/`
   and `playwright-report/`. About 90 source lines, 10 files.
-- **Verification:** `pnpm install --frozen-lockfile && pnpm typecheck && pnpm test --project unit`
+- **Verification:** `pnpm install --frozen-lockfile && pnpm typecheck && pnpm run test --project unit`
 - **Depends on:** —
 - **Autonomy note:** Builder settles package names (suggested `@djv/shared` and so on), tsconfig
   layout, and exact versions (latest stable that are mutually compatible; see Risks on
@@ -185,7 +185,7 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   stdout line parses as JSON, `debug` lines are absent at `info`, and both lines of a request
   carry the same `reqId`; no line carries an inherited environment key (PD7); listening address
   per PD14. About 230 source lines, 10 files.
-- **Verification:** `pnpm test --project unit server/src/config.test.ts && pnpm test --project integration server/test/boot.int.test.ts`
+- **Verification:** `pnpm run test --project unit server/src/config.test.ts && pnpm run test --project integration server/test/boot.int.test.ts`
 - **Depends on:** T2
 - **Autonomy note:** Builder settles module internals, log message wording and how the test
   finds a free port. The spawn helper passes an explicit `env` and never reads `process.env`
@@ -213,7 +213,7 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   `tests/workflow/test_guard_paths.py` gains a case that plants the real configuration's
   `append_only` value and asserts `0001_init.sql` is blocked once `0002_x.sql` exists and
   editable before. About 220 source lines, 7 files.
-- **Verification:** `pnpm test --project unit server/src/migrate.test.ts && pnpm test --project integration server/test/migrate.int.test.ts && python -m unittest tests/workflow/test_guard_paths.py`
+- **Verification:** `pnpm run test --project unit server/src/migrate.test.ts && pnpm run test --project integration server/test/migrate.int.test.ts && python -m unittest tests/workflow/test_guard_paths.py`
 - **Depends on:** T3
 - **Autonomy note:** Builder settles the wrapper's shape, the fixture entry and SQL splitting
   (the driver's `exec` runs a whole file). The SQL in the spec's Data section is not to be
@@ -229,7 +229,7 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   `server/test/health.int.test.ts`: against a booted server the body parses with the shared
   schema and `schemaVersion` is 1; with a second temporary migration it is 2; the request's log
   lines carry one `reqId`. About 50 source lines, 5 files.
-- **Verification:** `pnpm test --project integration server/test/health.int.test.ts`
+- **Verification:** `pnpm run test --project integration server/test/health.int.test.ts`
 - **Depends on:** T4
 - **Autonomy note:** Builder settles the route module's shape. Stop if the response needs any
   field the spec's contract does not list.
@@ -248,7 +248,7 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   some channel; period 60 s); `tests/meta/engine-boundary.test.ts` (PD13), with a self-check
   that the detector does flag a sample containing a bare import. About 130 source lines, 5
   files.
-- **Verification:** `pnpm test --project unit engine tests/meta/engine-boundary.test.ts && pnpm typecheck`
+- **Verification:** `pnpm run test --project unit engine tests/meta/engine-boundary.test.ts && pnpm typecheck`
 - **Depends on:** T3 (serialised after T3 only because both write pnpm-lock.yaml; shares no file with its group neighbour)
 - **Autonomy note:** Builder settles internal structure and how the boundary test compiles the
   sources (compiler API or `tsc` to a temporary folder). Stop if anything needs a dependency in
@@ -282,7 +282,7 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   port 5173 with hot reload and `/api` proxied. Test `web/src/health.test.ts` with an injected
   fetch: valid body gives `ok`; rejected fetch, status 500 and a body missing `schemaVersion`
   each give `unreachable`. About 150 source lines, 6 files.
-- **Verification:** `pnpm test --project unit web/src/health.test.ts && pnpm typecheck`, then with
+- **Verification:** `pnpm run test --project unit web/src/health.test.ts && pnpm typecheck`, then with
   `pnpm dev` running: `curl -s http://localhost:5173/api/health` returns the health JSON and
   `curl -s http://localhost:5173/` contains `/@vite/client`
 - **Depends on:** T7
@@ -300,7 +300,7 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   `server/test/static.int.test.ts`: with a temporary folder holding an `index.html`, `/` returns
   it, `/nope` is 404, `/api/health` still answers, a `..` path does not escape the folder; with
   an empty folder and no flag, boot fails with one line. About 70 source lines, 7 files.
-- **Verification:** `pnpm test --project integration server/test/static.int.test.ts`, then
+- **Verification:** `pnpm run test --project integration server/test/static.int.test.ts`, then
   `pnpm start` and `curl -s http://127.0.0.1:8000/` returns the built page
 - **Depends on:** T8
 - **Autonomy note:** Builder settles plugin options. Stop if PD1's `@fastify/static` answer is

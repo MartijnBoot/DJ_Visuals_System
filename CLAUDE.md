@@ -23,7 +23,7 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
   `localhost:5173`, proxying `/api` to the server (`scripts/dev.ts`).
 - `pnpm migrate` — applies pending migrations without listening; boot applies them too. A new
   migration is a new file `server/migrations/NNNN_<slug>.sql` with the next number.
-- `pnpm test --project unit` (`*.test.ts`), `pnpm test --project integration`
+- `pnpm run test --project unit` (`*.test.ts`), `pnpm run test --project integration`
   (`*.int.test.ts`), `pnpm test:browser` (Playwright, `tests/browser/`).
 
 ## Workflow
