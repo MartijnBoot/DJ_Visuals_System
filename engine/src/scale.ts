@@ -1,6 +1,10 @@
-// Automatic render scaling (spec SD8, AC15; plan PD6). A pure controller of frame timestamps:
-// it estimates the display's refresh rate once, then compares the one-second mean frame time
-// from the engine's `FrameStatsRecorder` (`stats.ts`) with that budget, one step at a time.
+// Automatic render scaling (spec SD8, AC15; plan PD6 as the owner decided at build,
+// 2026-11-11). A pure controller of frame timestamps: it estimates the display's refresh rate
+// once, then compares the one-second mean frame time from the engine's `FrameStatsRecorder`
+// (`stats.ts`) with that budget, one step at a time. Headroom is "not above budget": a loop
+// locked to the display never reads under the refresh period, so a stricter test would never
+// step up. A step up that fails within the hold doubles the next wait, so a GPU on the edge
+// does not bounce between two steps.
 import type { FrameStatsRecorder } from "./stats.ts";
 
 export type RenderScale = 1 | 0.75 | 0.5;
@@ -17,12 +21,12 @@ export const ESTIMATE_FRAMES = 60;
 /** Above budget: the one-second mean exceeds this × budget (PD6). */
 export const ABOVE_BUDGET = 1.1;
 
-/** Headroom: the one-second mean is under this × budget (PD6). */
-export const HEADROOM = 0.8;
-
-/** Time above budget before a step down, and with headroom before a step up (SD8). */
+/** Time above budget before a step down, and not above it before a step up (SD8). */
 export const STEP_DOWN_AFTER_MS = 2000;
 export const STEP_UP_AFTER_MS = 10_000;
+
+/** The wait before a step up doubles per failed attempt, up to this. */
+export const STEP_UP_MAX_WAIT_MS = 80_000;
 
 export interface ScaleController {
   /** Call once per frame, after the frame-stats recorder has recorded the same timestamp. */
@@ -41,6 +45,8 @@ export function createScaleController(frameStats: FrameStatsRecorder): ScaleCont
   let capIndex = 0;
   let aboveSince: number | null = null;
   let headroomSince: number | null = null;
+  let stepUpWait = STEP_UP_AFTER_MS;
+  let lastStepUpAt: number | null = null;
 
   const estimate = () => {
     const intervals = firstFrames
@@ -55,7 +61,14 @@ export function createScaleController(frameStats: FrameStatsRecorder): ScaleCont
     budget = 1000 / snapped;
   };
 
-  const step = (to: number) => {
+  const step = (to: number, at: number) => {
+    if (to < index) {
+      lastStepUpAt = at;
+    } else {
+      // A step down soon after a step up is that attempt failing; one long after is new load.
+      if (lastStepUpAt !== null) stepUpWait = Math.min(stepUpWait * 2, STEP_UP_MAX_WAIT_MS);
+      lastStepUpAt = null;
+    }
     index = to;
     aboveSince = null;
     headroomSince = null;
@@ -70,19 +83,21 @@ export function createScaleController(frameStats: FrameStatsRecorder): ScaleCont
       }
       const { frameTimeMs } = frameStats.read(timestamp);
       if (frameTimeMs === 0) return;
+      // A step up that has held for the full hold succeeded: the next wait is the plain one.
+      if (lastStepUpAt !== null && timestamp - lastStepUpAt >= STEP_UP_AFTER_MS) {
+        lastStepUpAt = null;
+        stepUpWait = STEP_UP_AFTER_MS;
+      }
       if (frameTimeMs > ABOVE_BUDGET * budget) {
         headroomSince = null;
         aboveSince ??= timestamp;
         if (timestamp - aboveSince >= STEP_DOWN_AFTER_MS && index < SCALES.length - 1) {
-          step(index + 1);
+          step(index + 1, timestamp);
         }
-      } else if (frameTimeMs < HEADROOM * budget) {
-        aboveSince = null;
-        headroomSince ??= timestamp;
-        if (timestamp - headroomSince >= STEP_UP_AFTER_MS && index > capIndex) step(index - 1);
       } else {
         aboveSince = null;
-        headroomSince = null;
+        headroomSince ??= timestamp;
+        if (timestamp - headroomSince >= stepUpWait && index > capIndex) step(index - 1, timestamp);
       }
     },
     setCap(cap) {

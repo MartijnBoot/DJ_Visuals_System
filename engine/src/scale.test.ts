@@ -85,27 +85,72 @@ describe("stepping (SD8, AC15)", () => {
     expect(changes).toEqual([1, 0.75, 0.5]);
   });
 
-  it("10 s under 0.8 × budget steps up once, and again after another 10 s", () => {
+  it("10 s not above budget steps up once, and again after another 10 s (PD6, owner 2026-11-11)", () => {
     const { controller, run, settle } = rig();
     settle();
     run(25, 5000);
     expect(controller.scale()).toBe(0.5);
-    run(10, 9000);
+    run(1000 / 60, 9000); // at the display's rate, as a vsync-locked loop delivers
     expect(controller.scale()).toBe(0.5);
-    run(10, 2000);
+    run(1000 / 60, 2000);
     expect(controller.scale()).toBe(0.75);
-    run(10, 8000);
+    run(1000 / 60, 8000);
     expect(controller.scale()).toBe(0.75);
-    run(10, 2500);
+    run(1000 / 60, 2500);
     expect(controller.scale()).toBe(1);
   });
 
-  it("holds between the two thresholds", () => {
+  it("frames just inside 1.1 × budget still count as not above it", () => {
     const { controller, run, settle } = rig();
     settle();
     run(25, 5000);
-    run(1000 / 60, 60_000); // at budget: neither above 1.1× nor under 0.8×
+    run(18, 11_000); // 18 ms < 1.1 × 16.67 ms
+    expect(controller.scale()).toBe(0.75);
+  });
+
+  // After 25 ms frames the one-second mean needs about 0.4 s of fast frames to drop under
+  // budget, so every wait below carries a second of margin.
+  it("a step up that fails within 10 s doubles the next wait; one that holds resets it", () => {
+    const { controller, run, settle } = rig();
+    settle();
+    run(25, 5000);
     expect(controller.scale()).toBe(0.5);
+    run(1000 / 60, 11_000);
+    expect(controller.scale()).toBe(0.75); // the attempt
+    run(25, 2500);
+    expect(controller.scale()).toBe(0.5); // failed within 10 s: the next wait is 20 s
+    run(1000 / 60, 15_000);
+    expect(controller.scale()).toBe(0.5);
+    run(1000 / 60, 6000);
+    expect(controller.scale()).toBe(0.75);
+    run(25, 2500);
+    expect(controller.scale()).toBe(0.5); // failed again: 40 s
+    run(1000 / 60, 35_000);
+    expect(controller.scale()).toBe(0.5);
+    run(1000 / 60, 6000);
+    expect(controller.scale()).toBe(0.75);
+    run(1000 / 60, 12_000); // held past 10 s: this one stuck, and the wait is 10 s again
+    expect(controller.scale()).toBe(1);
+    run(1000 / 60, 10_000); // and so does the step to 100%
+    run(25, 2500); // new load, long after the last step up: the wait is still 10 s
+    expect(controller.scale()).toBe(0.75);
+    run(1000 / 60, 11_000);
+    expect(controller.scale()).toBe(1);
+  });
+
+  it("never waits longer than 80 s", () => {
+    const { controller, run, settle } = rig();
+    settle();
+    run(25, 5000);
+    expect(controller.scale()).toBe(0.5);
+    for (const waitS of [10, 20, 40, 80, 80]) {
+      run(1000 / 60, waitS * 1000 - 1000);
+      expect(controller.scale(), `still waiting at ${waitS} s`).toBe(0.5);
+      run(1000 / 60, 2000);
+      expect(controller.scale(), `stepped up after ${waitS} s`).toBe(0.75);
+      run(25, 2500); // fails at once
+      expect(controller.scale()).toBe(0.5);
+    }
   });
 
   it("a cap of 75% holds: never above it, even with headroom", () => {
@@ -114,10 +159,10 @@ describe("stepping (SD8, AC15)", () => {
     expect(controller.scale()).toBe(0.75);
     settle();
     const seen: number[] = [];
-    run(10, 30_000, (s) => seen.push(s));
+    run(1000 / 60, 30_000, (s) => seen.push(s));
     run(25, 5000, (s) => seen.push(s));
     expect(controller.scale()).toBe(0.5);
-    run(10, 30_000, (s) => seen.push(s));
+    run(1000 / 60, 30_000, (s) => seen.push(s));
     expect(controller.scale()).toBe(0.75);
     expect(Math.max(...seen)).toBe(0.75);
   });
@@ -129,7 +174,7 @@ describe("stepping (SD8, AC15)", () => {
     expect(controller.scale()).toBe(0.5);
     controller.setCap(1);
     expect(controller.scale()).toBe(0.5);
-    run(10, 25_000);
+    run(1000 / 60, 25_000);
     expect(controller.scale()).toBe(1);
   });
 });
