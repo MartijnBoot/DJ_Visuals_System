@@ -18,9 +18,9 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 
 | # | ID | Feature | Size | Status |
 |---|---|---|---|---|
-| 1 | B-01 | Live visual engine | L | idea |
-| 2 | B-02 | Visual profiles with an in-app builder | L | idea |
-| 3 | B-04 | Live set controls | M | idea |
+| 1 | B-02 | Visual profiles with an in-app builder | L | idea |
+| 2 | B-04 | Live set controls | M | idea |
+| 3 | B-05 | Phone as camera source | M | idea |
 | 4 | B-03 | Claude Code-authored profiles | M | idea |
 
 ## Items
@@ -50,7 +50,7 @@ mark it as one.
 
 ### B-01 — Live visual engine
 
-- **Status:** idea
+- **Status:** specced → `docs/specs/phase-b-01-live-visual-engine.md`
 - **Added:** 2026-11-11
 - **Size:** L
 
@@ -144,8 +144,9 @@ is at the controls may be the DJ with one hand free or a VJ (Visual Jockey) with
 attention.
 
 **Idea.** A control surface, separate from the output screen, to switch profiles, change base
-colours live with a colour picker, raise or lower camera recognisability, and switch camera
-source. One or two taps for the DJ, more detail for the VJ.
+colours live with a colour picker, raise or lower camera recognisability and audio reactivity
+(the two dials B-01 defines, spec SD5), and switch camera source. One or two taps for the DJ,
+more detail for the VJ.
 
 **Why it matters.** Without it the set is locked to whatever was prepared beforehand.
 
@@ -160,4 +161,34 @@ mixing.
 - Whether a DJ layout and a VJ layout are two views or one view with a toggle.
 
 **Touches.** B-01 settings, B-02 profiles, a second client view. Guess: a realtime channel
-between the control surface and the renderer.
+between the control surface and the renderer. Its pairing-token and bind-address design is
+reused by B-05.
+
+### B-05 — Phone as camera source
+
+- **Status:** idea
+- **Added:** 2026-11-11
+- **Size:** M
+
+**Problem.** A wired webcam sits where its cable reaches. The DJ wants a camera that someone
+can carry into the crowd, or point at the booth from the floor.
+
+**Idea.** A phone opens a page on the screen machine's server, its camera streams to the screen
+page, and the renderer takes it as just another camera source.
+
+**Why it matters.** The crowd camera is the shot that makes the room see itself. B-01 cannot
+give it without a cable.
+
+**Not this.** A streaming app the phone has to install. A camera that lags visibly behind the
+wired one.
+
+**Open questions.**
+
+- The server must accept connections from the LAN, which breaks the `127.0.0.1`-only invariant
+  (`docs/invariants.md`) and needs B-04's pairing token and bind-address design first.
+- HTTPS on a LAN address: a locally trusted certificate, and how the phone trusts it.
+- WebRTC signalling through the server; whether a travel router or hotspot is required at
+  venues with client isolation (SDR §8).
+
+**Touches.** Server bind address and TLS, B-04 pairing, WebRTC signalling, the B-01 camera
+source seam (spec SD1). Depends on B-01 and B-04. Split out of B-01 at its spec interview.
