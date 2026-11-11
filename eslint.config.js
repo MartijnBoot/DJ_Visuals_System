@@ -13,9 +13,14 @@ export default defineConfig(
     languageOptions: { globals: globals.node },
   },
   {
-    // Browser code: the renderer and the web app see no Node globals.
-    files: ["engine/**", "web/**"],
+    // Browser code: the renderer, the audio analysis and the web app see no Node globals.
+    files: ["engine/**", "audio/**", "web/**"],
     languageOptions: { globals: globals.browser },
+  },
+  {
+    // The AudioWorklet processor runs in AudioWorkletGlobalScope, not a window (B-01 PD18).
+    files: ["audio/src/processor.ts"],
+    languageOptions: { globals: globals.audioWorklet },
   },
   {
     files: ["**/*.{ts,tsx,js}"],
