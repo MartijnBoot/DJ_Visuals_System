@@ -96,6 +96,29 @@ class AppendOnly(PlantedRepo):
         self.assertFalse(self.decide("DB/Migrations/0001_BASELINE.sql")[0])
 
 
+class RealMigrationsFolder(PlantedRepo):
+    """AC17: the repository's own configuration guards server/migrations."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_config(guard.load_config(REPO_ROOT))
+        self.folder = self.root / "server" / "migrations"
+        self.folder.mkdir(parents=True)
+        (self.folder / "0001_init.sql").write_text("-- x\n", encoding="utf-8")
+
+    def test_the_real_configuration_names_the_folder(self) -> None:
+        self.assertIn("server/migrations", guard.load_config(REPO_ROOT)["append_only"])
+
+    def test_the_newest_migration_is_editable(self) -> None:
+        self.assertTrue(self.decide("server/migrations/0001_init.sql")[0])
+
+    def test_a_migration_with_a_successor_is_blocked(self) -> None:
+        (self.folder / "0002_x.sql").write_text("-- x\n", encoding="utf-8")
+        allowed, message = self.decide("server/migrations/0001_init.sql")
+        self.assertFalse(allowed)
+        self.assertIn("0002_x.sql", message)
+
+
 class Protected(PlantedRepo):
     def test_a_protected_path_is_blocked_at_any_depth(self) -> None:
         allowed, message = self.decide("tests/fixtures/golden/scenario/one.json")

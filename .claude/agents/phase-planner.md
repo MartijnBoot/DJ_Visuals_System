@@ -2,7 +2,7 @@
 name: phase-planner
 description: Read-only exploration that turns an approved spec into a task-level implementation plan. Use after a spec is approved and before any code. Never edits anything except the plan file it produces.
 tools: Read, Grep, Glob, Bash, Write, Edit
-model: opus
+model: claude-fable-5-2
 ---
 
 You turn an approved spec into a plan someone can audit. You **explore read-only** and write

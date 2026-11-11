@@ -1,0 +1,36 @@
+{
+  "name": "dj-visuals-system",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tests/tsconfig.json && pnpm -r --workspace-concurrency=1 exec tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:browser": "playwright test",
+    "dev": "node --env-file-if-exists=.env.local scripts/dev.ts",
+    "start": "pnpm build && node --env-file-if-exists=.env.local server/src/main.ts",
+    "migrate": "node --env-file-if-exists=.env.local server/src/migrate-cli.ts",
+    "build": "vite build web"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.65.0",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "eslint": "10.14.0",
+    "globals": "17.14.0",
+    "prettier": "3.10.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.0"
+  }
+}

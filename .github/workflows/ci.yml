@@ -38,18 +38,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      # --- the project's toolchain: uncomment what the gate uses --------------------------
-      # - uses: astral-sh/setup-uv@v5
-      #   with: { enable-cache: true }
-      # - run: uv sync --frozen
-      #
-      # - uses: pnpm/action-setup@v4
-      # - uses: actions/setup-node@v4
-      #   with: { node-version-file: .nvmrc, cache: pnpm }
-      # - run: pnpm install --frozen-lockfile
-      #
-      # A database for integration tests: a service container with the same image and major
-      # version as production, credentials matching .env.example.
+      # --- the project's toolchain --------------------------------------------------------
+      # pnpm's version comes from the root package.json (packageManager), Node's from .nvmrc.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # The browser step needs Chromium and, on a bare runner, its system libraries.
+      - run: pnpm exec playwright install --with-deps chromium
 
       - name: Run the gate
         run: bash scripts/check.sh

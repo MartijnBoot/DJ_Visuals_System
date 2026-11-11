@@ -2,7 +2,7 @@
 description: Fresh-context review of the current diff against its spec and plan
 argument-hint: [phase id, optional] [task id, optional]
 allowed-tools: Read, Grep, Glob, Bash(git*), Bash(bash scripts/*), Bash(python*), Bash(py*), Bash(pytest*), Bash(npm*), Bash(pnpm*), Bash(uv run*)
-model: opus
+model: claude-fable-5-2
 ---
 
 Review the current diff.

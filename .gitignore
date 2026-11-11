@@ -26,3 +26,8 @@ Thumbs.db
 
 # Claude Code: personal settings stay personal; the shared ones are committed.
 .claude/settings.local.json
+
+# Project: the SQLite file and assets live here; Playwright writes its reports here.
+data/
+test-results/
+playwright-report/

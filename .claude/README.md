@@ -28,19 +28,23 @@ everything after. Files follow it: `docs/specs/phase-b-07-<slug>.md`,
 | Command | Purpose | Model |
 |---|---|---|
 | `/adopt` | Bring an existing repo under the workflow: analyse, draft the docs, wire the gate | opus |
-| `/backlog` | Brainstorm an idea into `docs/backlog.md`; order it; promote it to `/spec` | opus |
+| `/backlog` | Brainstorm an idea into `docs/backlog.md`; order it; promote it to `/spec` | fable |
 | `/analyse` | Fan out `codebase-analyst` agents over a slice of the code | sonnet |
-| `/spec` | Interview, then write a spec | opus |
-| `/plan` | Read-only exploration → an auditable, schedulable task plan | opus |
-| `/audit` | `check_plans.py`, the traceability table and the checklist, walked with you | sonnet |
+| `/spec` | Interview, then write a spec | fable |
+| `/plan` | Read-only exploration → an auditable, schedulable task plan | fable |
+| `/audit` | `check_plans.py`, the traceability table and the checklist, walked with you | opus |
 | `/build` | Implement one task, or a whole plan, from an audited plan | opus |
 | `/verify` | Run the gate and the guarded-area checks, report actual output | haiku |
-| `/review` | Fresh-context review against spec, plan and invariants | opus |
+| `/review` | Fresh-context review against spec, plan and invariants | fable |
 | `/human` | Guide you through a plan's human-only steps | sonnet |
 
 Model tiers follow way-of-working 4.1: specs, planning and review get the most capable model,
 because errors there propagate into everything downstream. Running a check and reporting its
 output does not. Re-check the mapping when models change.
+
+`fable` = `claude-fable-5-2`. Specs, plans and reviews run on Fable; the plan is audited and
+the code built on Opus, so the model that writes an artefact never also checks it. Before the
+Fable switch, `/audit` ran on sonnet and every `fable` row here was opus.
 
 ## Agents
 

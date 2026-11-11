@@ -1,6 +1,13 @@
-# <Project name>
+# DJ Visuals System
 
-<One paragraph: what it is, for whom, and the problem it solves.>
+A web app that turns a live set's audio and a live camera into visuals that move with the beat on
+the venue screen, for a DJ or a VJ working a single screen machine. Audio comes from device
+capture or a microphone, the camera from a webcam or a phone; rendering happens in the browser on
+the screen machine to keep audio-to-pixel latency minimal, and visual profiles — built in the app
+or authored with Claude Code — are stored so they survive a redeploy. Stack: TypeScript end to
+end — a WebGL2 + Web Audio renderer and a React + Vite UI (`web/`), a Node.js server (`server/`),
+SQLite. It is self-hosted on the owner's machine for now; cloud hosting is deferred
+([Setup Decision Record](docs/adr/0001-setup-decision-record.md)).
 
 ## Setup
 
@@ -10,7 +17,14 @@ bash scripts/check.sh     # the gate — the same script CI runs
 ```
 
 Requirements: git, bash (Git Bash on Windows), Python 3.9+ for the workflow's guard and plan
-checker, and <the stack's tools>.
+checker, Node 24 (`.nvmrc`; pnpm refuses another major) and pnpm 9 (`packageManager` in
+`package.json`). Setup installs the dependencies and Playwright's Chromium, and creates
+`.env.local` from `.env.example`.
+
+```bash
+pnpm start                # build the app and serve it on http://127.0.0.1:8000 (PORT)
+pnpm dev                  # hot reload on http://localhost:5173, /api proxied to the server
+```
 
 ## How work is done here
 
@@ -30,8 +44,8 @@ never break is in [docs/invariants.md](docs/invariants.md); what only the owner 
 
 1. Fill in this README, [CLAUDE.md](CLAUDE.md) and [docs/adr/0001-setup-decision-record.md](docs/adr/0001-setup-decision-record.md)
    — the Setup Decision Record comes first: database, hosting, auth, cost. Default answer "no".
-2. `bash scripts/check.sh` — green on the workflow checks, with a warning that no project checks
-   are wired yet.
+2. `bash scripts/check.sh` — green on the workflow checks, then the project steps format, lint,
+   types, build, unit, integration and browser.
 3. Run `/spec 0` for **Phase 0 — foundations**: the stack skeleton, `scripts/setup.sh` and
    `scripts/check.sh` wired to it, CI green, the config module that fails fast. Its exit condition:
    a fresh clone plus two commands gives a running app and a green gate.

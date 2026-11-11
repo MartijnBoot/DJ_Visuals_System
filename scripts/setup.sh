@@ -37,11 +37,12 @@ if [ -f .env.example ] && [ ! -f .env.local ]; then
 fi
 
 # --- project -----------------------------------------------------------------------------
-# Examples; keep what applies:
-#   require uv "https://docs.astral.sh/uv/"         && uv sync --frozen
-#   require pnpm "https://pnpm.io/installation"     && pnpm install --frozen-lockfile
-#   require docker "https://docs.docker.com/get-docker/" && docker compose up -d db
-#   uv run alembic upgrade head                      # migrate
-#   uv run python -m app.seed                        # dev seed data only
+# Node 24 (.nvmrc) and pnpm (root package.json -> packageManager). pnpm refuses another Node
+# major (.npmrc engine-strict). The install needs the network and says so itself when it fails.
+require node "https://nodejs.org/ (version in .nvmrc)"
+require pnpm "https://pnpm.io/installation"
+pnpm install --frozen-lockfile
+# The browser check (spec SD9) runs Chromium through Playwright. Skips when already installed.
+pnpm exec playwright install chromium
 
 echo "scripts/setup.sh: done. Next: bash scripts/check.sh"

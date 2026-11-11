@@ -7,5 +7,7 @@
     ".env.*.local",
     ".env.production"
   ],
-  "append_only": []
+  "append_only": [
+    "server/migrations"
+  ]
 }
