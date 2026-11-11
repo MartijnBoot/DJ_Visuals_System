@@ -1,0 +1,5 @@
+packages:
+  - shared
+  - engine
+  - server
+  - web
