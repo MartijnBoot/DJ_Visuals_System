@@ -1,0 +1,11 @@
+{
+  "_help": "Read by scripts/hooks/guard_paths.py on every Write/Edit. protected: globs (repo-relative, '/' separators, '*' crosses folders) no agent may write. append_only: folders of ordered history (migrations); only the newest entry by name may change, new entries may be added. Example: \"append_only\": [\"db/migrations\"], \"protected\": [\"tests/fixtures/golden/*\"]. Bash is not covered: a sed -i is not stopped.",
+  "protected": [
+    ".git/*",
+    ".env",
+    ".env.local",
+    ".env.*.local",
+    ".env.production"
+  ],
+  "append_only": []
+}

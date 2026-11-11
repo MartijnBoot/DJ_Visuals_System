@@ -1,0 +1,28 @@
+# Environment: .env.example is the committed contract; real values never are.
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Editors and OS
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Claude Code: personal settings stay personal; the shared ones are committed.
+.claude/settings.local.json

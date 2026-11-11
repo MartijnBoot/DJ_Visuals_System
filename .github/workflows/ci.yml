@@ -1,0 +1,67 @@
+# The gate, in CI. One workflow on every PR and every push to main (way-of-working 7.3).
+#
+# `check` runs the identical script a developer and an agent run locally -- scripts/check.sh is
+# called, never restated here -- so "green locally" and "green in CI" are one claim. Add a tool
+# the gate needs as a setup step below; add the check itself to scripts/check.sh.
+#
+# Called as `bash scripts/check.sh`, not `./scripts/check.sh`: a script committed from Windows
+# often lacks the executable bit, and Linux would refuse to run it.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  # Weekly, so the full-history secret scan and a rebuild against current dependencies run even
+  # in a quiet week.
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The workflow's own checks (plan checker, guard tests) need only the standard library.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # --- the project's toolchain: uncomment what the gate uses --------------------------
+      # - uses: astral-sh/setup-uv@v5
+      #   with: { enable-cache: true }
+      # - run: uv sync --frozen
+      #
+      # - uses: pnpm/action-setup@v4
+      # - uses: actions/setup-node@v4
+      #   with: { node-version-file: .nvmrc, cache: pnpm }
+      # - run: pnpm install --frozen-lockfile
+      #
+      # A database for integration tests: a service container with the same image and major
+      # version as production, credentials matching .env.example.
+
+      - name: Run the gate
+        run: bash scripts/check.sh
+
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: a secret committed and later deleted still leaked.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

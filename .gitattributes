@@ -1,0 +1,18 @@
+# Text files are stored with LF and checked out with LF on every platform.
+#
+# Shell scripts must be LF: a CRLF bash script fails on CI's Linux runner with errors about
+# `$'\r'`, and editors and Windows text-mode writes (including a Python script's
+# `open(path, "w")`) produce CRLF silently. `eol=lf` makes git normalise them.
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
