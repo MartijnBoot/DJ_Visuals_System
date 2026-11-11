@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { createApp } from "./app.ts";
 import { ConfigError, type Config } from "./config.ts";
 import { openDatabase, type Db } from "./db.ts";
+import { registerHealth } from "./health.ts";
 import { createLogger, type Logger } from "./log.ts";
 import { migrate } from "./migrate.ts";
 
@@ -64,14 +65,20 @@ export async function boot(
   paths: BootPaths,
   log: Logger = createLogger(config.LOG_LEVEL),
 ): Promise<Booted> {
-  const { db } = openAndMigrate(config, paths, log);
+  const { db, schemaVersion } = openAndMigrate(config, paths, log);
   const app = createApp(log);
+  let listenedAt = Date.now();
+  registerHealth(app, {
+    schemaVersion,
+    uptimeSeconds: () => Math.floor((Date.now() - listenedAt) / 1000),
+  });
   try {
     await app.listen({ host: HOST, port: config.PORT });
   } catch (error) {
     db.close();
     throw error;
   }
+  listenedAt = Date.now();
   const address = app.server.address();
   log.info(
     {

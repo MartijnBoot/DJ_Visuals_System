@@ -37,6 +37,9 @@ importers:
 
   server:
     dependencies:
+      '@djv/shared':
+        specifier: workspace:*
+        version: link:../shared
       fastify:
         specifier: 5.12.8
         version: 5.12.8
