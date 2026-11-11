@@ -58,9 +58,10 @@ export function compiledSpecifiers(source: string, fileName = "sample.ts"): stri
   return found;
 }
 
+/** Every file that compiles to JavaScript: not tests, and not `.d.ts` (no output, no imports). */
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { recursive: true, encoding: "utf8" })
-    .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))
+    .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && !/\.d\.ts$/.test(f))
     .map((f) => join(dir, f));
 }
 
