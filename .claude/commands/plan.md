@@ -2,7 +2,7 @@
 description: Turn an approved spec into an auditable task plan (read-only)
 argument-hint: [phase id, e.g. 3 or b-07]
 allowed-tools: Read, Grep, Glob, Bash(git*), Bash(ls*), Bash(find*), Bash(rg*), Bash(python*), Bash(py*), Write, Edit
-model: opus
+model: claude-fable-5-2
 ---
 
 Plan **$1**.

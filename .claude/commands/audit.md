@@ -2,7 +2,7 @@
 description: Walk me through the human audit of a plan — the step teams skip
 argument-hint: [phase id, e.g. 3 or b-07]
 allowed-tools: Read, Grep, Glob, Edit, Bash(git*), Bash(python*), Bash(py*)
-model: sonnet
+model: opus
 ---
 
 Audit the plan for **$1** with me.
