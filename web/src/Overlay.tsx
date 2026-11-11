@@ -1,16 +1,32 @@
-// The overlay (spec SD8, SD13, AC12): fps, frame time and server health, top left. It is only
-// mounted while shown, so health is asked on show and every 5 s after, never while hidden.
-// The server line reads `…` until the first answer (plan PD2).
-import type { FrameStats } from "@djv/engine";
+// The overlay (spec SD8, SD13, AC12; B-01 SD18): fps, frame time and server health, then the
+// in-app latency (last / p95 / worst over 10 s), the render scale, the audio and camera states
+// and the wake lock, top left. It is only mounted while shown, so health is asked on show and
+// every 5 s after, never while hidden. The server line reads `…` until the first answer (plan
+// PD2); the latency reads `–` until the first sample (B-01 PD21).
+import type { EngineStats, LatencyReading } from "@djv/engine";
 import { useEffect, useState } from "react";
+import type { SourceState } from "./capture/session.ts";
 import { checkHealth, type ServerStatus } from "./health.ts";
+import type { WakeLockState } from "./wake-lock.ts";
 
 const HEALTH_EVERY_MS = 5000;
 const STATS_EVERY_MS = 250;
 
-export function Overlay({ stats }: { stats: () => FrameStats | null }) {
+export interface OverlayProps {
+  stats: () => EngineStats | null;
+  latency: () => LatencyReading | null;
+  wakeLock: () => WakeLockState;
+  audio: SourceState;
+  camera: SourceState;
+}
+
+const ms = (v: number) => v.toFixed(1);
+
+export function Overlay({ stats, latency, wakeLock, audio, camera }: OverlayProps) {
   const [server, setServer] = useState<ServerStatus | null>(null);
   const [frame, setFrame] = useState(stats);
+  const [lag, setLag] = useState(latency);
+  const [lock, setLock] = useState(wakeLock);
 
   useEffect(() => {
     let mounted = true;
@@ -28,9 +44,18 @@ export function Overlay({ stats }: { stats: () => FrameStats | null }) {
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => setFrame(stats()), STATS_EVERY_MS);
+    const id = setInterval(() => {
+      setFrame(stats());
+      setLag(latency());
+      setLock(wakeLock());
+    }, STATS_EVERY_MS);
     return () => clearInterval(id);
-  }, [stats]);
+  }, [stats, latency, wakeLock]);
+
+  const latencyLine =
+    lag && lag.samples > 0
+      ? `latency ms ${ms(lag.last)} / p95 ${ms(lag.p95)} / worst ${ms(lag.worst)}`
+      : "latency ms – / p95 – / worst –";
 
   return (
     <pre
@@ -54,6 +79,18 @@ export function Overlay({ stats }: { stats: () => FrameStats | null }) {
       </span>
       {"\n"}
       <span data-testid="overlay-server">server: {server ?? "…"}</span>
+      {"\n"}
+      <span data-testid="overlay-latency">{latencyLine}</span>
+      {"\n"}
+      <span data-testid="overlay-scale">
+        scale {frame ? Math.round(frame.renderScale * 100) : 100}%
+      </span>
+      {"\n"}
+      <span data-testid="overlay-audio">audio: {audio}</span>
+      {"\n"}
+      <span data-testid="overlay-camera">camera: {camera}</span>
+      {"\n"}
+      <span data-testid="overlay-wake-lock">wake lock: {lock}</span>
     </pre>
   );
 }

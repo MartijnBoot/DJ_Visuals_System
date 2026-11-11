@@ -1,7 +1,8 @@
 // The one route, `/` (spec UI): a full-window canvas running the engine, no chrome. If the
 // engine cannot get a WebGL2 context, one line of text takes the canvas's place. Keys, with no
-// modifier: `o` toggles the overlay (Phase 0), `s` the settings panel (B-01 SD6). The panel is
-// open on load with Start; capture begins only from that click (AC1, AC2, PD12).
+// modifier: `o` toggles the overlay (Phase 0), `s` the settings panel (B-01 SD6), `f` fullscreen
+// (SD13). The panel is open on load with Start; capture begins only from that click (AC1, AC2,
+// PD12), and from then on the page holds a screen wake lock (AC16).
 import { createFeatureSource, ZERO_FEATURES } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
 import {
@@ -18,6 +19,7 @@ import { createSession, type Session, type SessionState } from "./capture/sessio
 import { audioToEngine } from "./features-compat.ts";
 import { Overlay } from "./Overlay.tsx";
 import { Panel } from "./Panel.tsx";
+import { createWakeLock } from "./wake-lock.ts";
 
 const IDLE: SessionState = { camera: "idle", audio: "idle", video: null, contextState: "none" };
 
@@ -47,6 +49,7 @@ export function Screen() {
     audioInputs: [],
   });
   const [remembered] = useState(() => loadRemembered());
+  const [wakeLock] = useState(() => createWakeLock(navigator, document));
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -109,24 +112,29 @@ export function Screen() {
     const session = sessionRef.current;
     if (!session) return;
     setStarted(true);
-    await session.start(remembered); // within the click: the context and requests need it
+    const capturing = session.start(remembered); // within the click: the context and requests need it
+    void wakeLock.hold();
+    await capturing;
     refreshDevices(); // labels and ids are readable once permission is granted
     const { camera, audio } = session.state();
     const down = (s: string) => s === "none" || s === "lost";
     if (!(down(camera) && down(audio))) setPanel(false); // both failed: keep the reasons up
-  }, [remembered, refreshDevices]);
+  }, [remembered, refreshDevices, wakeLock]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === "o") setOverlay((shown) => !shown);
       if (e.key === "s") setPanel((shown) => !shown);
+      if (e.key === "f") toggleFullscreen();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   const stats = useCallback(() => engineRef.current?.stats() ?? null, []);
+  const latency = useCallback(() => engineRef.current?.latency() ?? null, []);
+  const lockState = useCallback(() => wakeLock.state(), [wakeLock]);
   const read = useCallback((now: number) => sessionRef.current?.read(now) ?? ZERO_FEATURES, []);
 
   return (
@@ -145,7 +153,15 @@ export function Screen() {
           style={{ display: "block", width: "100vw", height: "100vh" }}
         />
       )}
-      {overlay && <Overlay stats={stats} />}
+      {overlay && (
+        <Overlay
+          stats={stats}
+          latency={latency}
+          wakeLock={lockState}
+          audio={capture.audio}
+          camera={capture.camera}
+        />
+      )}
       {panel && !error && (
         <Panel
           started={started}
@@ -167,4 +183,12 @@ export function Screen() {
       )}
     </>
   );
+}
+
+/** `f`: the whole page, so the overlay and panel stay reachable in fullscreen. */
+function toggleFullscreen() {
+  const request = document.fullscreenElement
+    ? document.exitFullscreen()
+    : document.documentElement.requestFullscreen();
+  request.catch((e: unknown) => console.warn("fullscreen request refused", e));
 }
