@@ -78,6 +78,9 @@ importers:
 
   web:
     dependencies:
+      '@djv/audio':
+        specifier: workspace:*
+        version: link:../audio
       '@djv/engine':
         specifier: workspace:*
         version: link:../engine

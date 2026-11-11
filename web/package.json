@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@djv/audio": "workspace:*",
     "@djv/engine": "workspace:*",
     "@djv/shared": "workspace:*",
     "react": "19.3.1",
