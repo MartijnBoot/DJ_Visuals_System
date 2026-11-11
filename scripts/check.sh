@@ -64,33 +64,13 @@ step "plans: structure and traceability" $PY scripts/check_plans.py
 step "workflow tests (guard, plan checker)" $PY -m unittest discover -s tests/workflow -p "test_*.py"
 
 # --- the project's checks -------------------------------------------------------------------
-# Fast and static first, so most failures surface in seconds. Uncomment and adapt; delete the
-# examples you do not use. Order: format, lint, types, build, unit, integration, e2e.
-#
-# Python (uv):
-#   project_step "format" uv run ruff format --check .
-#   project_step "lint" uv run ruff check .
-#   project_step "types" uv run mypy src tests
-#   project_step "unit tests" uv run pytest tests/unit
-#   project_step "integration tests" uv run pytest tests/integration
-#
-# Node (pnpm):
-#   project_step "format" pnpm format:check
-#   project_step "lint" pnpm lint
-#   project_step "types" pnpm exec tsc --noEmit
-#   project_step "build" pnpm build
-#   project_step "unit tests" pnpm test --run
-#   project_step "e2e" pnpm e2e
-#
-# .NET:
-#   project_step "format" dotnet format --verify-no-changes
-#   project_step "build" dotnet build --warnaserror
-#   project_step "tests" dotnet test --no-build
+# Fast and static first, so most failures surface in seconds. Order per the Phase 0 spec (AC2):
+# format, lint, types, build, unit, integration, browser.
+project_step "format" pnpm format:check
+project_step "lint" pnpm lint
+project_step "types" pnpm typecheck
+project_step "unit" pnpm run test --project unit
 
 # --- done -----------------------------------------------------------------------------------
 
-if [ "$PROJECT_STEPS" -eq 0 ]; then
-  printf '\nscripts/check.sh: WARNING -- no project checks are wired yet. This green proves only\n'
-  printf 'the workflow files. Wiring the stack into this script is Phase 0 (docs/plans/).\n'
-fi
 printf '\nscripts/check.sh: all %d step(s) passed\n' "$STEP"

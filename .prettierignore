@@ -1,0 +1,10 @@
+# Source, config and test files only (plan PD12). Markdown is governed by .editorconfig.
+*.md
+docs/
+.claude/
+pnpm-lock.yaml
+web/dist/
+**/dist/
+**/node_modules/
+test-results/
+playwright-report/
