@@ -72,6 +72,7 @@ project_step "types" pnpm typecheck
 project_step "build" pnpm build
 project_step "unit" pnpm run test --project unit
 project_step "integration" pnpm run test --project integration
+project_step "browser" pnpm test:browser
 
 # --- done -----------------------------------------------------------------------------------
 

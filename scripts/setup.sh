@@ -42,5 +42,7 @@ fi
 require node "https://nodejs.org/ (version in .nvmrc)"
 require pnpm "https://pnpm.io/installation"
 pnpm install --frozen-lockfile
+# The browser check (spec SD9) runs Chromium through Playwright. Skips when already installed.
+pnpm exec playwright install chromium
 
 echo "scripts/setup.sh: done. Next: bash scripts/check.sh"
