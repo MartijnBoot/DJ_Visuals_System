@@ -1,0 +1,11 @@
+{
+  "name": "@djv/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "fastify": "5.12.8",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  }
+}
