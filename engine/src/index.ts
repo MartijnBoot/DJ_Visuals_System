@@ -11,23 +11,31 @@ import {
   FULLSCREEN_VERTEX,
   type Target,
 } from "./gl.ts";
+import { createLatencyWindow, type LatencyReading } from "./latency.ts";
 import { LOOK_FRAGMENT, lookUniforms } from "./look.ts";
-import { createFrameStats, type FrameStats } from "./stats.ts";
+import { createScaleController, type RenderScale } from "./scale.ts";
+import { createFrameStats, type EngineStats } from "./stats.ts";
 
-export type { FrameStats } from "./stats.ts";
+export type { EngineStats, FrameStats } from "./stats.ts";
+export type { LatencyReading } from "./latency.ts";
+export type { RenderScale } from "./scale.ts";
 export type { AudioFeatures, Dials } from "./features.ts";
 export { DEFAULT_DIALS, ZERO_FEATURES } from "./features.ts";
 
 export interface Engine {
   start(): void;
   stop(): void;
-  stats(): FrameStats;
+  stats(): EngineStats;
+  /** In-app audio-to-frame latency over the last 10 s (SD15). */
+  latency(): LatencyReading;
   /** The newest audio features; read by the next frame. */
   setFeatures(features: AudioFeatures): void;
   /** The two dials; applied on the next frame (AC9). */
   setDials(dials: Dials): void;
   /** The camera, or `null` for the generative input (SD10). */
   setSource(video: HTMLVideoElement | null): void;
+  /** The panel's quality cap: the automatic render scale never exceeds it (SD8). */
+  setScaleCap(cap: RenderScale): void;
 }
 
 /** Thrown by `createEngine` when the canvas gives no WebGL2 context. */
@@ -70,6 +78,8 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   const sourceTexture = createTexture(gl);
 
   const frames = createFrameStats();
+  const scaler = createScaleController(frames);
+  const latency = createLatencyWindow();
   let handle: number | null = null;
   let features: AudioFeatures = ZERO_FEATURES;
   let dials: Dials = DEFAULT_DIALS;
@@ -108,11 +118,20 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       canvas.width = width;
       canvas.height = height;
     }
-    if (width > 0 && height > 0) draw(timestamp, width, height);
+    if (width > 0 && height > 0) {
+      draw(timestamp, width, height);
+      // Submit time minus capture time, once per new window of audio (SD15, PD21).
+      latency.recordFrame(features.capturedAt, performance.now());
+    }
     frames.record(timestamp);
+    scaler.record(timestamp);
   };
 
-  const draw = (timestamp: number, width: number, height: number) => {
+  const draw = (timestamp: number, canvasWidth: number, canvasHeight: number) => {
+    // The internal resolution (SD8): the pass runs at canvas size × scale, the blit scales up.
+    const scale = scaler.scale();
+    const width = Math.max(1, Math.round(canvasWidth * scale));
+    const height = Math.max(1, Math.round(canvasHeight * scale));
     const pair = targetsFor(width, height);
     const target = pair[current]!;
     const previous = pair[1 - current]!;
@@ -154,7 +173,18 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.framebuffer);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+    gl.blitFramebuffer(
+      0,
+      0,
+      width,
+      height,
+      0,
+      0,
+      canvasWidth,
+      canvasHeight,
+      gl.COLOR_BUFFER_BIT,
+      gl.LINEAR,
+    );
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     current = 1 - current;
   };
@@ -168,7 +198,10 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       handle = null;
     },
     stats() {
-      return frames.read(performance.now());
+      return { ...frames.read(performance.now()), renderScale: scaler.scale() };
+    },
+    latency() {
+      return latency.read(performance.now());
     },
     setFeatures(next) {
       features = next;
@@ -178,6 +211,9 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     },
     setSource(next) {
       video = next;
+    },
+    setScaleCap(cap) {
+      scaler.setCap(cap);
     },
   };
 }

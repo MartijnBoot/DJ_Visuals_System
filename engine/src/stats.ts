@@ -13,6 +13,12 @@ export interface FrameStats {
   lastFrameAt: number;
 }
 
+/** What `Engine.stats()` reports: the frame statistics and the render scale (B-01 SD8, SD18). */
+export interface EngineStats extends FrameStats {
+  /** The internal render resolution as a share of the canvas: 1, 0.75 or 0.5. */
+  renderScale: number;
+}
+
 export interface FrameStatsRecorder {
   record(timestamp: number): void;
   read(now: number): FrameStats;
