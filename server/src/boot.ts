@@ -1,9 +1,9 @@
 // Boot sequence (spec, In scope): config (done by the caller) -> ensure DATA_DIR -> open the
 // database -> migrate -> listen on 127.0.0.1:PORT. Throws on any failure; the entry point turns
 // the throw into one fatal line (log.ts). Paths are arguments so tests can inject them.
-import { accessSync, constants, mkdirSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { createApp } from "./app.ts";
+import { createApp, registerStatic } from "./app.ts";
 import { ConfigError, type Config } from "./config.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { registerHealth } from "./health.ts";
@@ -16,6 +16,8 @@ export const DB_FILE = "djvisuals.sqlite";
 export interface BootPaths {
   /** The folder of NNNN_<slug>.sql files. */
   migrationsDir: string;
+  /** The built web app to serve; absent means API only (`--api-only`, plan PD10). */
+  staticDir?: string;
 }
 
 export interface Booted {
@@ -65,6 +67,10 @@ export async function boot(
   paths: BootPaths,
   log: Logger = createLogger(config.LOG_LEVEL),
 ): Promise<Booted> {
+  // Checked first: `pnpm start` must never come up serving 404 for `/` (plan PD10).
+  if (paths.staticDir !== undefined && !existsSync(join(paths.staticDir, "index.html"))) {
+    throw new Error(`no index.html in ${resolve(paths.staticDir)}; run pnpm build`);
+  }
   const { db, schemaVersion } = openAndMigrate(config, paths, log);
   const app = createApp(log);
   let listenedAt = Date.now();
@@ -73,6 +79,7 @@ export async function boot(
     uptimeSeconds: () => Math.floor((Date.now() - listenedAt) / 1000),
   });
   try {
+    if (paths.staticDir !== undefined) await registerStatic(app, resolve(paths.staticDir));
     await app.listen({ host: HOST, port: config.PORT });
   } catch (error) {
     db.close();

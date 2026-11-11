@@ -16,7 +16,7 @@ async function main(): Promise<void> {
 
   const server = spawn(
     process.execPath,
-    ["--watch", "--env-file-if-exists=.env.local", "server/src/main.ts"],
+    ["--watch", "--env-file-if-exists=.env.local", "server/src/main.ts", "--api-only"],
     { cwd: root, stdio: "inherit" },
   );
 

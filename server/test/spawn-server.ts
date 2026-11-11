@@ -28,7 +28,9 @@ export interface SpawnOptions {
 
 export function spawnServer(
   env: Record<string, string>,
-  { entry = mainEntry, args = [] }: SpawnOptions = {},
+  // The real entry runs API-only unless a test says otherwise: the gate builds web/dist only
+  // in its build step, and these tests are about the server (plan PD10).
+  { entry = mainEntry, args = entry === mainEntry ? ["--api-only"] : [] }: SpawnOptions = {},
 ): SpawnedServer {
   const child = spawn(process.execPath, [entry, ...args], {
     cwd: repoRoot,
