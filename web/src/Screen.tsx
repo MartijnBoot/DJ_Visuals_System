@@ -124,6 +124,8 @@ export function Screen() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      // A focused picker does type-ahead on these letters: leave form controls to themselves.
+      if (e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === "o") setOverlay((shown) => !shown);
       if (e.key === "s") setPanel((shown) => !shown);
       if (e.key === "f") toggleFullscreen();

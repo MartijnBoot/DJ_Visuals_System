@@ -129,6 +129,29 @@ test("chosen devices are remembered and asked for after a reload (AC5, PD11)", a
   expect(calls.map((c) => exactId(c.constraints, "video")).filter(Boolean)).toEqual([cameraValue]);
 });
 
+test("o, s and f typed into a focused picker do not toggle the page or switch the source (review)", async ({
+  page,
+}) => {
+  // Chromium does type-ahead on a focused <select>: `s` would pick "System audio" and open the
+  // share dialog mid-set. The page keys must leave a focused form control alone.
+  await record(page);
+  await page.goto("/");
+  await start(page);
+  for (const picker of ["audio-picker", "camera-picker"]) {
+    const select = page.getByTestId(picker);
+    const before = await select.inputValue();
+    await select.focus();
+    for (const key of ["o", "s", "f"]) await page.keyboard.press(key);
+    await expect(page.getByTestId("overlay")).toHaveCount(0);
+    await expect(page.getByTestId("panel")).toBeVisible();
+    expect(await page.evaluate(() => document.fullscreenElement === null)).toBe(true);
+    await page.waitForTimeout(300);
+    expect(await select.inputValue()).toBe(before);
+  }
+  const { calls } = await recorded(page);
+  expect(calls.some((c) => JSON.stringify(c.fn).includes("getDisplayMedia"))).toBe(false);
+});
+
 test("moving a dial changes the next frame and asks for nothing (AC9)", async ({ page }) => {
   await record(page);
   await page.goto("/");
