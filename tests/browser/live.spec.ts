@@ -391,6 +391,11 @@ for (const look of LOOKS) {
       window.requestAnimationFrame = (cb) =>
         w.__slowFrames ? (setTimeout(() => raf(cb), 60) as unknown as number) : raf(cb);
     });
+    // PD17's fallback, chosen by the owner 2026-11-12: software WebGL cannot hold the
+    // twelve-effect profile at rest at 640x360 (about 31 ms a frame at 100%, 18 to 20 ms even at
+    // 50%, so a step up can never hold). Only this look's scale check runs on a quarter of the
+    // pixels; the 50 ms latency check keeps the full size, and the real GPU is checked by hand (H3).
+    if (look.profile) await page.setViewportSize({ width: 320, height: 180 });
     await record(page);
     await page.goto("/");
     await startOn(page, request, look);
