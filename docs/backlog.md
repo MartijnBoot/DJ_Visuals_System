@@ -50,7 +50,9 @@ mark it as one.
 
 ### B-01 — Live visual engine
 
-- **Status:** specced → `docs/specs/phase-b-01-live-visual-engine.md`
+- **Status:** built → `docs/specs/phase-b-01-live-visual-engine.md`,
+  `docs/plans/phase-b-01-live-visual-engine.md` (H2 to H4 on the screen machine are the
+  owner's)
 - **Added:** 2026-11-11
 - **Size:** L
 

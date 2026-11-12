@@ -22,8 +22,10 @@ breaks; "review only" is honest but is a debt, and the next task near it should 
 | 0 | The environment is read in one module (`server/src/config.ts`), validated at boot; nowhere else | ESLint `no-restricted-properties` (`eslint.config.js`); `tests/meta/config-boundary.test.ts` |
 | 0 | No secret, key or personal data in code, tests, logs or fixtures | gitleaks in CI; review |
 | 0 | Migrations are append-only: a migration that has a successor is never edited | `.claude/guard-paths.json` → `append_only` (`server/migrations`); `tests/workflow/test_guard_paths.py` |
-| 0 | The engine is framework-free: `engine/package.json` declares no dependency of any kind, and its compiled output imports no package | `tests/meta/engine-boundary.test.ts` |
+| 0 | `engine/` and `audio/` are framework-free: neither `package.json` declares a dependency of any kind, and neither compiled output imports a package (`audio/` since B-01) | `tests/meta/engine-boundary.test.ts` |
 | 0 | The server listens on `127.0.0.1` only; the machine's LAN address is refused | `server/test/boot.int.test.ts` |
+| B-01 | No media reaches the server: `server/` has no endpoint for audio or video, and a running set makes no request beyond `GET /`, `/assets/*` and `/api/health` | review (`server/` diff); `tests/browser/live.spec.ts` (AC17) |
+| B-01 | `audio/` and `engine/` each declare `AudioFeatures`; `web/` passes one to the other, so the type check fails when they drift | `web/src/features-compat.ts`; `tests/meta/features-compat.test.ts` |
 
 ## Guarded areas
 

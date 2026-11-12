@@ -46,9 +46,10 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
   `DATA_DIR`, validated with zod at boot, no defaults in code). ESLint's
   `no-restricted-properties` and `tests/meta/config-boundary.test.ts` fail any other
   `process.env`. Root scripts that need a value import `config.ts` (`scripts/dev.ts` does).
-- `engine/` — the framework-free WebGL2 renderer; no dependency of any kind
+- `engine/` — the framework-free WebGL2 renderer; `audio/` — the framework-free AudioWorklet
+  analysis; neither has a dependency of any kind and neither imports the other
   (`tests/meta/engine-boundary.test.ts`). `web/` — the React + Vite screen page; imports
-  `engine/` and `shared/`, never `server/`. `server/` — Fastify, SQLite, migrations, static
+  `engine/`, `audio/` and `shared/`, never `server/`. `server/` — Fastify, SQLite, migrations, static
   serving. `shared/` — zod schemas both sides validate against. `tests/meta/` — tests about
   the codebase's own boundaries. `tests/browser/` — Playwright against `pnpm start`.
 - Types at the boundary: every external input is validated before use.
