@@ -78,3 +78,21 @@ describe("buildFragment (PD3)", () => {
     }
   });
 });
+
+describe("the new effects (T6, PD3, PD6)", () => {
+  it("appear in the source when listed", () => {
+    expect(body(buildFragment(["paletteMap"]), 1)).toContain("uPalette");
+    expect(body(buildFragment(["paletteMap"]), 1)).toContain("uPaletteMix");
+    expect(body(buildFragment(["mirror"]), 1)).toContain("uSegments");
+    expect(body(buildFragment(["mirror"]), 1)).toContain("uMirror");
+    expect(body(buildFragment(["rgbSplit"]), 1)).toContain("uRgbSplit");
+  });
+
+  it("samples the predecessor three times for rgbSplit, once for mirror and paletteMap", () => {
+    const calls = (type: EffectType) =>
+      (body(buildFragment([type]), 1).match(/\bfx0\(/g) ?? []).length;
+    expect(calls("rgbSplit")).toBe(3);
+    expect(calls("mirror")).toBe(1);
+    expect(calls("paletteMap")).toBe(1);
+  });
+});

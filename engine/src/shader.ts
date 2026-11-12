@@ -116,6 +116,28 @@ const SNIPPETS: Partial<Record<EffectType, Snippet>> = {
   return ${p}(uv) * (1.0 + uBrightness);`,
   grain: (p) => `
   return ${p}(uv) + (hash(blockCell() + noiseSeed() + 31.0) - 0.5) * uGrain * uGrainColour;`,
+  // The picture's luma spread over the palette from slot 0 (dark) to the last (light).
+  paletteMap: (p) => `
+  vec3 colour = ${p}(uv);
+  float position = clamp(dot(colour, vec3(0.299, 0.587, 0.114)), 0.0, 1.0) * (uPaletteSize - 1.0);
+  int low = int(floor(position));
+  int high = int(min(float(low) + 1.0, uPaletteSize - 1.0));
+  vec3 mapped = mix(uPalette[low], uPalette[high], position - float(low));
+  return mix(colour, mapped, uPaletteMix);`,
+  // A kaleidoscope: the coordinate folded into mirrored wedges about the centre (aspect
+  // corrected), moved toward that from the plain one by the strength.
+  mirror: (p) => `
+  float aspect = uResolution.x / uResolution.y;
+  vec2 q = (uv - 0.5) * vec2(aspect, 1.0);
+  float wedge = 6.283185307 / uSegments;
+  float angle = mod(atan(q.y, q.x), wedge);
+  angle = abs(angle - 0.5 * wedge);
+  vec2 folded = vec2(cos(angle), sin(angle)) * length(q);
+  return ${p}(mix(uv, folded / vec2(aspect, 1.0) + 0.5, uMirror));`,
+  // Red and blue sampled either side of green, uRgbSplit frame widths apart.
+  rgbSplit: (p) => `
+  vec2 offset = vec2(uRgbSplit, 0.0);
+  return vec3(${p}(uv + offset).r, ${p}(uv).g, ${p}(uv - offset).b);`,
   // Bounded by the uniform alone (spec AC24): the engine never sets uFlash above FLASH_MAX.
   flash: (p) => `
   return mix(${p}(uv), uFlashColour, uFlash);`,
