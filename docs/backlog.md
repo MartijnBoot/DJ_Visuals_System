@@ -83,7 +83,7 @@ config, app shell). Guess: a client-side rendering module and an audio-analysis 
 
 ### B-02 — Visual profiles with an in-app builder
 
-- **Status:** specced → `docs/specs/phase-b-02-visual-profiles.md`
+- **Status:** built → `docs/plans/phase-b-02-visual-profiles.md`
 - **Added:** 2026-11-11
 - **Size:** L
 
@@ -134,6 +134,12 @@ complexity into the app.
 - How inspiration images are referenced: copied into the repo, uploaded, or only described.
 
 **Touches.** Profile format from B-02, repo tooling under `.claude/`. Depends on B-02.
+
+**Note from B-02.** The format is built: `{ formatVersion: 1, profiles: [...] }`, validated by
+`profileFileSchema` in `shared/` and imported through `POST /api/profiles/import` (all or
+nothing, names made unique). A profile is configuration only (B-02 SD1); if B-03 wants code in a
+profile, it would arrive as one more effect type, with its own sandboxing question, not as a
+change to this model.
 
 ### B-04 — Live set controls
 
@@ -263,6 +269,11 @@ that lose their video source when the device disconnects, with no fallback.
 - Whether a scene stores the feed by device identity or by a role such as "crowd".
 - How scenes are stored and ordered, and whether they move with profile import and export.
 - Whether saving a live-built scene overwrites or creates a new one.
+
+**Note from B-02.** A scene would reference a profile by id. Ids are stable across saves
+(a rename keeps the id), but an import gives every profile a new id and the built-in's id is the
+reserved `builtin`, so scenes that must survive an export and import need to reference profiles
+by name or carry the profile with them. That is this item's question to settle.
 
 **Touches.** Scene storage (a table, migration), B-04 controls, B-02 profiles, B-06 feeds. A
 guess. Depends on B-02 and B-06. Overlaps B-04's profile switching and live colour changes.

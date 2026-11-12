@@ -26,6 +26,7 @@ breaks; "review only" is honest but is a debt, and the next task near it should 
 | 0 | The server listens on `127.0.0.1` only; the machine's LAN address is refused | `server/test/boot.int.test.ts` |
 | B-01 | No media reaches the server: `server/` has no endpoint for audio or video, and a running set requests only `GET /`, `/assets/*`, `/api/health`, `/api/profiles` and `/api/profiles/:id` — the last two only on a user action (B-02 SD6) | review (`server/` diff); `tests/browser/live.spec.ts` (AC17, B-02 AC18) |
 | B-01 | `audio/` and `engine/` each declare `AudioFeatures`; `web/` passes one to the other, so the type check fails when they drift | `web/src/features-compat.ts`; `tests/meta/features-compat.test.ts` |
+| B-02 | `engine/` and `shared/` each declare `Profile` (`engine/` never imports `shared/`); `web/` passes one to the other, so the type check fails when they drift | `web/src/profile-compat.ts`; `tests/meta/profile-compat.test.ts` |
 
 ## Guarded areas
 

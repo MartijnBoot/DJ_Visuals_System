@@ -26,6 +26,9 @@ pnpm start                # build the app and serve it on http://127.0.0.1:8000 
 pnpm dev                  # hot reload on http://localhost:5173, /api proxied to the server
 ```
 
+The output screen is `/`; the profile builder is `/builder` (also linked from the screen's
+settings panel, key `s`).
+
 ## How work is done here
 
 Every change goes through the loop in [docs/way-of-working.md](docs/way-of-working.md) §4.2,
