@@ -102,6 +102,16 @@ showed; the builder stopped and the owner decided, and the code and the T9 tests
 - **PD13 (AC10).** The browser test reads the overlay after 20 s, once start-up has left the
   10 s window; the 50 ms threshold stays (measured p95 20.7 ms on SwiftShader at 640×360).
 
+**Changed at build (owner, 2026-11-12).** The gate on the T10 tip was red on AC6 in two of
+three runs (a gap read 449 ms, then 601 ms; the beat itself fired at every click):
+
+- **T7 / T9 (AC6).** The panel's meters follow the features once per animation frame, not
+  every 100 ms. The AC6 test samples the beat meter per frame and measures each gap's last
+  200 ms back from the next rise, stopping short of it. At 100 ms resolution the test's
+  ±100 ms spacing tolerance equalled its own quantisation, and a gap read short enough for the
+  fixed 280–480 ms window to reach the next click. The 120 ms decay, the ±100 ms spacing and
+  the ≤ 0.1 threshold are unchanged.
+
 ## Files
 
 | Path | Create/Modify | Purpose |

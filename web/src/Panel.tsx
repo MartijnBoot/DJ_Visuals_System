@@ -9,7 +9,6 @@ import type { DeviceOption } from "./capture/devices.ts";
 import type { AudioChoice } from "./capture/remembered.ts";
 import type { SessionState } from "./capture/session.ts";
 
-const METERS_EVERY_MS = 100;
 const METERS = ["level", "low", "mid", "high", "beat"] as const;
 
 export interface PanelProps {
@@ -65,9 +64,14 @@ export function Panel(props: PanelProps) {
   const { started, capture, dials, read } = props;
   const [features, setFeatures] = useState(() => read(performance.now()));
 
+  // The meters follow the features once per animation frame, so a test reading them sees
+  // each beat no later than one frame after it (AC6; changed at build 2026-11-12).
   useEffect(() => {
-    const id = setInterval(() => setFeatures(read(performance.now())), METERS_EVERY_MS);
-    return () => clearInterval(id);
+    let id = requestAnimationFrame(function tick() {
+      id = requestAnimationFrame(tick);
+      setFeatures(read(performance.now()));
+    });
+    return () => cancelAnimationFrame(id);
   }, [read]);
 
   const camera = props.cameraId ?? "";

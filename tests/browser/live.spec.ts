@@ -24,24 +24,22 @@ function note(name: string, value: unknown) {
   console.log(`${name}: ${JSON.stringify(value)}`);
 }
 
-/** Samples a panel meter every `everyMs` in the page, for `forMs`. */
-async function sampleMeter(page: Page, name: string, forMs: number, everyMs: number) {
+/** Samples a panel meter once per animation frame in the page, for `forMs`. */
+async function sampleMeter(page: Page, name: string, forMs: number) {
   return page.evaluate(
-    ([n, total, every]) =>
+    ([n, total]) =>
       new Promise<{ t: number; v: number }[]>((resolve) => {
         const el = document.querySelector(`[data-testid=meter-${n}]`)!;
         const out: { t: number; v: number }[] = [];
         const t0 = performance.now();
-        const id = setInterval(() => {
+        requestAnimationFrame(function each() {
           const t = performance.now() - t0;
           out.push({ t, v: Number(el.getAttribute("data-value")) });
-          if (t >= (total as number)) {
-            clearInterval(id);
-            resolve(out);
-          }
-        }, every as number);
+          if (t < (total as number)) requestAnimationFrame(each);
+          else resolve(out);
+        });
       }),
-    [name, forMs, everyMs] as const,
+    [name, forMs] as const,
   );
 }
 
@@ -50,15 +48,16 @@ test("the beat fires on each click of the track and not between (AC6)", async ({
   await page.goto("/");
   await start(page);
   await page.waitForTimeout(1000); // past the first second: the adaptive threshold has history
-  const samples = await sampleMeter(page, "beat", 3000, 50);
+  const samples = await sampleMeter(page, "beat", 3000);
   const rises = samples.filter((s, i) => s.v >= 0.5 && (i === 0 || samples[i - 1]!.v < 0.5));
   const gaps = rises.slice(1).map((r, i) => Math.round(r.t - rises[i]!.t));
-  // The last 200 ms of each gap, measured from the meter's rise and stopping short of the next
-  // click (owner's decision of 2026-11-11: PD7's 120 ms decay is kept, so a gap's middle still
-  // carries the tail of the pulse; its end must not).
-  const ends = rises.map((r) =>
-    samples.filter((s) => s.t >= r.t + 280 && s.t <= r.t + 480).map((s) => s.v),
-  );
+  // The last 200 ms of each gap, measured back from the next rise and stopping short of it
+  // (owner's decision of 2026-11-11: PD7's 120 ms decay is kept, so a gap's middle still
+  // carries the tail of the pulse; its end must not). Measured from the next rise, not the
+  // previous one, so the window never reaches the next click however the gap jitters.
+  const ends = rises
+    .slice(1)
+    .map((next) => samples.filter((s) => s.t >= next.t - 200 && s.t < next.t).map((s) => s.v));
   const worstEnd = Math.max(...ends.flat());
   note(
     "AC6 rises (ms)",
