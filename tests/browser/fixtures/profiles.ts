@@ -34,6 +34,40 @@ export const red = (name = "Aaa Red") =>
 export const blue = (name = "Bbb Blue") =>
   flat(name, "#0000ff", { recognisability: 0.1, reactivity: 0.4 });
 
+/**
+ * The worst case (B-02 SD12, PD17): all twelve effects, each at strength 0.5 and each bound to an
+ * audio feature, with a three-colour palette. The latency and render-scale checks run on it.
+ */
+export function twelveEffects(): Definition {
+  const features = ["level", "low", "mid", "high", "beat"] as const;
+  const types = [
+    "pixelate",
+    "posterise",
+    "smear",
+    "zoom",
+    "displace",
+    "flash",
+    "grain",
+    "edges",
+    "brightness",
+    "paletteMap",
+    "mirror",
+    "rgbSplit",
+  ];
+  return {
+    name: "Twelve effects",
+    palette: ["#0a0014", "#d946ef", "#a3e635"],
+    dials: { recognisability: 0.5, reactivity: 0.5 },
+    effects: types.map((type, i) => ({
+      type,
+      amount: 0.5,
+      binding: { feature: features[i % features.length], amount: 0.5 },
+      ...(type === "flash" || type === "grain" || type === "edges" ? { colourSlot: 1 } : {}),
+      ...(type === "mirror" ? { segments: 6 } : {}),
+    })),
+  };
+}
+
 export async function createProfile(
   request: APIRequestContext,
   definition: Definition,
