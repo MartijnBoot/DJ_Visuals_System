@@ -1,4 +1,5 @@
-// The settings panel (spec SD6, SD18, UI "Panel (s)"; plan PD12): Start, the two pickers, the
+// The settings panel (spec SD6, SD18, UI "Panel (s)"; plan PD12; B-02 SD6, SD13): Start, the
+// two device pickers, the profile picker with its reason line and a link to the builder, the
 // two dials, the quality cap, the feature meters, the source states and one reason line. It is
 // scaffolding over the canvas that B-04's control surface replaces. Keyboard-operable: native
 // controls in tab order, each labelled.
@@ -8,6 +9,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import type { DeviceOption } from "./capture/devices.ts";
 import type { AudioChoice } from "./capture/remembered.ts";
 import type { SessionState } from "./capture/session.ts";
+import type { ActiveState } from "./profiles/active.ts";
 
 const METERS = ["level", "low", "mid", "high", "beat"] as const;
 
@@ -27,6 +29,8 @@ export interface PanelProps {
   cap: RenderScale;
   onCap(cap: RenderScale): void;
   read(now: number): AudioFeatures;
+  profiles: ActiveState;
+  onProfile(id: string): void;
 }
 
 const audioValue = (c: AudioChoice | undefined) =>
@@ -146,6 +150,27 @@ export function Panel(props: PanelProps) {
           </select>
         )}
       </Row>
+      <Row label="profile">
+        {(id) => (
+          <select
+            id={id}
+            data-testid="profile-picker"
+            disabled={!props.profiles.loaded}
+            value={props.profiles.selectedId}
+            onChange={(e) => props.onProfile(e.target.value)}
+          >
+            {props.profiles.entries.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </Row>
+      {props.profiles.reason && <div data-testid="profile-reason">{props.profiles.reason}</div>}
+      <a href="/builder" data-testid="open-builder" style={{ color: "#fff" }}>
+        Open builder
+      </a>
       {(["recognisability", "reactivity"] as const).map((dial) => (
         <Row key={dial} label={dial === "reactivity" ? "audio reactivity" : dial}>
           {(id) => (

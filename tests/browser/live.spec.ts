@@ -4,6 +4,7 @@
 // to the report next to the thresholds they are held to.
 import { expect, test, type Page } from "@playwright/test";
 import { LEFT_RGB, RIGHT_RGB } from "./fixtures/media.ts";
+import { blue, createProfile, deleteAll } from "./fixtures/profiles.ts";
 import {
   expectCanvasChanging,
   meanRgb,
@@ -400,16 +401,29 @@ test("with the cap at 75% the scale never reads 100% (AC15)", async ({ page }) =
   expect(seen.filter((s) => s === "scale 100%")).toEqual([]);
 });
 
-test("nothing but the page, its assets and health is ever requested (AC17)", async ({ page }) => {
+test("nothing but the page, its assets, health and the two profile reads is ever requested, the profile reads only after a user action (AC17, B-02 AC18)", async ({
+  page,
+  request,
+}) => {
+  await deleteAll(request);
+  const stored = await createProfile(request, blue());
   const requests: string[] = [];
   page.on("request", (r) => requests.push(`${r.method()} ${new URL(r.url()).pathname}`));
   page.on("websocket", (ws) => requests.push(`WS ${ws.url()}`));
   await record(page);
   await page.goto("/");
+  await page.waitForTimeout(1500);
+  expect(requests.filter((r) => r.includes("/api/profiles"))).toEqual([]); // no user action yet
   await start(page);
   await page.keyboard.press("o");
+  await expect(page.getByTestId("profile-picker")).toBeEnabled();
+  await page.getByTestId("profile-picker").selectOption(stored.id);
+  await expect(page.getByTestId("overlay-profile")).toHaveText("profile: Bbb Blue");
   await page.waitForTimeout(6000); // past one health poll after the first
   note("AC17 requests", [...new Set(requests)]);
-  const allowed = /^GET (\/|\/assets\/[^/]+|\/api\/health)$/;
+  const allowed = /^GET (\/|\/assets\/[^/]+|\/api\/health|\/api\/profiles|\/api\/profiles\/[^/]+)$/;
   expect(requests.filter((r) => !allowed.test(r))).toEqual([]);
+  expect(requests).toContain("GET /api/profiles");
+  expect(requests).toContain(`GET /api/profiles/${stored.id}`);
+  await deleteAll(request);
 });
