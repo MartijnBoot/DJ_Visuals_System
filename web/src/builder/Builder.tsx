@@ -1,17 +1,13 @@
-// The builder (B-02 spec SD13, UI "/builder"; plan T10): the profile list, with create, duplicate,
-// rename and delete. States: loading, empty (the built-in only), error (the built-in and one
-// line; writes disabled). The page scrolls inside its own container, because `index.html` hides
-// overflow for the screen page (PD14).
+// The builder (B-02 spec SD13, UI "/builder"; plan T10, T11): the profile list, with create,
+// duplicate, rename and delete, and the editor for the selected profile. States: loading, empty
+// (the built-in only), error (the built-in and one line; writes disabled). The page scrolls
+// inside its own container, because `index.html` hides overflow for the screen page (PD14).
 import { nextFreeName, type Profile, type StoredProfile } from "@djv/shared";
 import { useCallback, useEffect, useState } from "react";
-import {
-  createProfile,
-  deleteProfile,
-  listProfiles,
-  updateProfile,
-  type Failure,
-} from "../profiles/api.ts";
+import { createProfile, deleteProfile, listProfiles, updateProfile } from "../profiles/api.ts";
 import { BUILTIN_ID, builtinEntry } from "../profiles/builtin.ts";
+import { Editor } from "./Editor.tsx";
+import { describeFailure } from "./failure.ts";
 import { ProfileList, type CreateSource } from "./ProfileList.tsx";
 import { fromBuiltin, fromPreset, PRESETS } from "./presets.ts";
 
@@ -28,22 +24,7 @@ const definitionOf = ({ name, palette, dials, effects }: StoredProfile): Profile
   effects,
 });
 
-function describe(failure: Failure, doing: string): string {
-  switch (failure.kind) {
-    case "conflict":
-      return "that name is taken";
-    case "invalid":
-      return failure.issues[0]
-        ? `${failure.issues[0].path}: ${failure.issues[0].message}`
-        : "invalid";
-    case "missing":
-      return `${doing}: that profile no longer exists`;
-    case "unreachable":
-      return `${doing}: the server cannot be reached`;
-    default:
-      return `${doing}: the server's answer could not be used`;
-  }
-}
+const describe = describeFailure;
 
 export function Builder() {
   const [load, setLoad] = useState<Load>("loading");
@@ -71,6 +52,7 @@ export function Builder() {
   // The built-in is not stored, but its name is not for a stored profile to take either.
   const takenNames = () => ["Built-in", ...stored.map((p) => p.name)];
   const readOnly = load !== "ready";
+  const selected = entries.find((e) => e.id === selectedId);
 
   const add = useCallback((profile: StoredProfile) => {
     setStored((list) => [...list.filter((p) => p.id !== profile.id), profile].sort(byName));
@@ -159,16 +141,28 @@ export function Builder() {
           {notice}
         </p>
       )}
-      <ProfileList
-        entries={entries}
-        selectedId={selectedId}
-        readOnly={readOnly}
-        onSelect={setSelectedId}
-        onCreate={(source) => void create(source)}
-        onDuplicate={(entry) => void duplicate(entry)}
-        onRename={rename}
-        onDelete={(entry) => void remove(entry)}
-      />
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 340px) 1fr", gap: 24 }}>
+        <ProfileList
+          entries={entries}
+          selectedId={selectedId}
+          readOnly={readOnly}
+          onSelect={setSelectedId}
+          onCreate={(source) => void create(source)}
+          onDuplicate={(entry) => void duplicate(entry)}
+          onRename={rename}
+          onDelete={(entry) => void remove(entry)}
+        />
+        {selected && (
+          <Editor
+            // A new revision is a new draft: the saved profile is what the editor starts from.
+            key={`${selected.id}:${selected.revision}`}
+            saved={selected}
+            readOnly={selected.id === BUILTIN_ID}
+            offline={readOnly}
+            onSaved={add}
+          />
+        )}
+      </div>
     </main>
   );
 }
