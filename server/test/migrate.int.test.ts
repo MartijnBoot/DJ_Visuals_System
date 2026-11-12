@@ -75,12 +75,12 @@ function brokenMigrations(): string {
 }
 
 describe("migrations at boot (AC3, AC5, AC6)", () => {
-  it("first boot applies 0001_init.sql and app_meta holds schema_created_at", async () => {
+  it("first boot applies every migration and app_meta holds schema_created_at", async () => {
     const first = track(spawnServer(await env()));
     await first.waitForLine((l) => l.msg === "listening");
-    expect(appliedNames(first)).toEqual(["0001_init.sql"]);
+    expect(appliedNames(first)).toEqual(["0001_init.sql", "0002_profiles.sql"]);
     await first.kill();
-    expect(readRecorded()).toEqual(["0001_init.sql"]);
+    expect(readRecorded()).toEqual(["0001_init.sql", "0002_profiles.sql"]);
     expect(readAppMeta().schema_created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -105,6 +105,33 @@ describe("migrations at boot (AC3, AC5, AC6)", () => {
     expect(String(fatal[0]!.reason)).toContain("0002_broken.sql");
     expect(s.lines().filter((l) => l.msg === "listening")).toHaveLength(0);
     expect(readRecorded()).toEqual(["0001_init.sql"]);
+  });
+});
+
+describe("an upgrade from schema version 1 (B-02 AC20)", () => {
+  it("applies 0002_profiles.sql alone, leaves 0001 recorded once, and health reads 2", async () => {
+    const dir = join(tmp, "migrations");
+    mkdirSync(dir);
+    copyFileSync(join(realMigrations, "0001_init.sql"), join(dir, "0001_init.sql"));
+    const old = track(
+      spawnServer(await env(), { entry: join(fixtures, "boot-entry.ts"), args: [dir] }),
+    );
+    await old.waitForLine((l) => l.msg === "listening");
+    expect(appliedNames(old)).toEqual(["0001_init.sql"]);
+    await old.kill();
+    const createdAt = readAppMeta().schema_created_at;
+
+    const port = await freePort();
+    const upgraded = track(spawnServer(await env({ PORT: String(port) })));
+    await upgraded.waitForLine((l) => l.msg === "listening");
+    expect(appliedNames(upgraded)).toEqual(["0002_profiles.sql"]);
+    const health = (await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()) as {
+      schemaVersion: number;
+    };
+    expect(health.schemaVersion).toBe(2);
+    await upgraded.kill();
+    expect(readRecorded()).toEqual(["0001_init.sql", "0002_profiles.sql"]);
+    expect(readAppMeta().schema_created_at).toBe(createdAt);
   });
 });
 
@@ -135,7 +162,7 @@ describe("pnpm migrate (AC8)", () => {
   it("applies pending migrations, then none, and never listens", async () => {
     const first = track(spawnServer(await env(), { entry: migrateCli }));
     expect((await first.exited).code).toBe(0);
-    expect(appliedNames(first)).toEqual(["0001_init.sql"]);
+    expect(appliedNames(first)).toEqual(["0001_init.sql", "0002_profiles.sql"]);
     expect(first.lines().filter((l) => l.msg === "listening")).toHaveLength(0);
     expect(readAppMeta().schema_created_at).toBeDefined();
 
