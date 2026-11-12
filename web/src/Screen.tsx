@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "./capture/devices.ts";
 import { loadRemembered, type AudioChoice } from "./capture/remembered.ts";
 import { createSession, type Session, type SessionState } from "./capture/session.ts";
+import { createVideo } from "./capture/video.ts";
 import { audioToEngine } from "./features-compat.ts";
 import { Overlay } from "./Overlay.tsx";
 import { Panel } from "./Panel.tsx";
@@ -28,16 +29,6 @@ import { loadProfileId, saveProfileId } from "./profiles/remembered.ts";
 import { createWakeLock } from "./wake-lock.ts";
 
 const IDLE: SessionState = { camera: "idle", audio: "idle", video: null, contextState: "none" };
-
-/** The camera's frames reach the engine through a muted, never-shown video element. */
-function createVideo(stream: MediaStream): HTMLVideoElement {
-  const video = document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
-  video.srcObject = stream;
-  void video.play().catch((e: unknown) => console.warn("camera video did not play", e));
-  return video;
-}
 
 export function Screen() {
   const canvasRef = useRef<HTMLCanvasElement>(null);

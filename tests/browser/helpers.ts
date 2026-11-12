@@ -108,12 +108,13 @@ export async function pixels(
   y: number,
   width: number,
   height: number,
+  testid = "screen",
 ): Promise<number[]> {
   return page.evaluate(
-    ([px, py, w, h]) =>
+    ([px, py, w, h, id]) =>
       new Promise<number[]>((resolve) => {
         requestAnimationFrame(() => {
-          const canvas = document.querySelector<HTMLCanvasElement>("[data-testid=screen]")!;
+          const canvas = document.querySelector<HTMLCanvasElement>(`[data-testid=${id}]`)!;
           const copy = document.createElement("canvas");
           copy.width = w!;
           copy.height = h!;
@@ -122,13 +123,19 @@ export async function pixels(
           resolve(Array.from(g.getImageData(0, 0, w!, h!).data));
         });
       }),
-    [x, y, width, height],
+    [x, y, width, height, testid] as const,
   );
 }
 
 /** The mean colour of a square patch centred on (x, y). */
-export async function patch(page: Page, x: number, y: number, size = 8): Promise<number[]> {
-  const data = await pixels(page, x - size / 2, y - size / 2, size, size);
+export async function patch(
+  page: Page,
+  x: number,
+  y: number,
+  size = 8,
+  testid = "screen",
+): Promise<number[]> {
+  const data = await pixels(page, x - size / 2, y - size / 2, size, size, testid);
   return meanRgb(data);
 }
 

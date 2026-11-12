@@ -9,6 +9,7 @@ import { BUILTIN_ID, builtinEntry } from "../profiles/builtin.ts";
 import { download, exportFile, fileName } from "../profiles/file.ts";
 import { Editor } from "./Editor.tsx";
 import { describeFailure } from "./failure.ts";
+import { Preview } from "./Preview.tsx";
 import { ProfileList, type CreateSource } from "./ProfileList.tsx";
 import { Transfer } from "./Transfer.tsx";
 import { fromBuiltin, fromPreset, PRESETS } from "./presets.ts";
@@ -34,6 +35,9 @@ export function Builder() {
   const [selectedId, setSelectedId] = useState<string | null>(BUILTIN_ID);
   const [notice, setNotice] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  // The draft the editor reports, with the profile it belongs to: while the editor of another
+  // profile is mounting, the preview keeps showing the saved one and never a stale draft.
+  const [reported, setReported] = useState<{ key: string; draft: Profile } | null>(null);
 
   // Leaving unsaved changes asks first (T12): another profile, a link, closing the tab.
   const confirmDiscard = () => !dirty || window.confirm("Discard your unsaved changes?");
@@ -68,6 +72,11 @@ export function Builder() {
   const takenNames = () => ["Built-in", ...stored.map((p) => p.name)];
   const readOnly = load !== "ready";
   const selected = entries.find((e) => e.id === selectedId);
+  const selectedKey = selected ? `${selected.id}:${selected.revision}` : "";
+  const onDraftChange = useCallback(
+    (draft: Profile) => setReported({ key: selectedKey, draft }),
+    [selectedKey],
+  );
 
   const add = useCallback((profile: StoredProfile) => {
     setStored((list) => [...list.filter((p) => p.id !== profile.id), profile].sort(byName));
@@ -219,16 +228,22 @@ export function Builder() {
           />
         </div>
         {selected && (
-          <Editor
-            // A new revision is a new draft: the saved profile is what the editor starts from.
-            key={`${selected.id}:${selected.revision}`}
-            saved={selected}
-            readOnly={selected.id === BUILTIN_ID}
-            offline={readOnly}
-            onSaved={add}
-            onDirtyChange={setDirty}
-            onSaveCopy={saveCopy}
-          />
+          <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
+            <Preview
+              draft={reported?.key === selectedKey ? reported.draft : definitionOf(selected)}
+            />
+            <Editor
+              // A new revision is a new draft: the saved profile is what the editor starts from.
+              key={selectedKey}
+              saved={selected}
+              readOnly={selected.id === BUILTIN_ID}
+              offline={readOnly}
+              onSaved={add}
+              onDirtyChange={setDirty}
+              onDraftChange={onDraftChange}
+              onSaveCopy={saveCopy}
+            />
+          </div>
         )}
       </div>
     </main>

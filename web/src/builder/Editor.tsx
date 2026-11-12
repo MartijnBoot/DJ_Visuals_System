@@ -20,6 +20,8 @@ export interface EditorProps {
   onSaved(profile: StoredProfile): void;
   /** Unsaved changes exist (T12): the builder asks before leaving them. */
   onDirtyChange(dirty: boolean): void;
+  /** The draft as edited, for the preview (T14): every edit, valid or not. */
+  onDraftChange(draft: Profile): void;
   /**
    * "Save mine as a copy": a new profile from the draft; the original is left as stored
    * (`current`, from the 409) or dropped from the list when it was deleted elsewhere. Resolves
@@ -50,6 +52,7 @@ export function Editor({
   offline,
   onSaved,
   onDirtyChange,
+  onDraftChange,
   onSaveCopy,
 }: EditorProps) {
   const [draft, dispatch] = useReducer(reduce, saved, fieldsOf);
@@ -69,6 +72,9 @@ export function Editor({
     onDirtyChange(dirty && !readOnly);
     return () => onDirtyChange(false);
   }, [dirty, readOnly, onDirtyChange]);
+
+  // The preview shows what is being edited, on the next frame (AC4).
+  useEffect(() => onDraftChange(draft), [draft, onDraftChange]);
 
   const save = async () => {
     setSaving(true);
