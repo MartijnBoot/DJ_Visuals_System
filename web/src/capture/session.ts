@@ -193,10 +193,22 @@ export function createSession(deps: SessionDeps): Session {
     setStatus(kind, "none", name === "NotAllowedError" ? denied : absent);
   };
 
+  /** A device id that is not there is OverconstrainedError: ask again for any device (PD9). */
+  const getMedia = async (build: (id?: string) => MediaStreamConstraints, id?: string) => {
+    try {
+      return await mediaDevices.getUserMedia(build(id));
+    } catch (e) {
+      if (id && e instanceof Error && e.name === "OverconstrainedError") {
+        return mediaDevices.getUserMedia(build());
+      }
+      throw e;
+    }
+  };
+
   const openCamera = async (id: string | undefined) => {
     let stream: MediaStream;
     try {
-      stream = await mediaDevices.getUserMedia(cameraConstraints(id));
+      stream = await getMedia(cameraConstraints, id);
     } catch (e) {
       return failed("camera", e, REASON.cameraKept, REASON.cameraDenied, REASON.cameraAbsent);
     }
@@ -221,9 +233,7 @@ export function createSession(deps: SessionDeps): Session {
     try {
       stream = system
         ? await mediaDevices.getDisplayMedia!(systemAudioConstraints())
-        : await mediaDevices.getUserMedia(
-            audioConstraints(choice?.kind === "input" ? choice.deviceId : undefined),
-          );
+        : await getMedia(audioConstraints, choice?.kind === "input" ? choice.deviceId : undefined);
     } catch (e) {
       return keep(e, REASON.systemCancelled);
     }

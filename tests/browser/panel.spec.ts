@@ -44,7 +44,9 @@ test("Start asks with processing off, starts the context and the meters move (AC
   expect(calls.some((c) => (c.constraints as { video?: unknown }).video)).toBe(true);
   await expect(page.getByTestId("panel-audio-state")).toHaveText("audio: ok");
   await expect(page.getByTestId("panel-camera-state")).toHaveText("camera: ok");
-  await expect.poll(() => meter(page, "level"), { timeout: 3000 }).toBeGreaterThan(0.05);
+  await expect
+    .poll(() => meter(page, "level"), { timeout: 3000, intervals: [25] })
+    .toBeGreaterThan(0.05);
 });
 
 test("the pickers list the fake devices and offer system audio (AC3)", async ({ page }) => {
@@ -80,7 +82,9 @@ for (const [mode, reason] of [
     await page.getByTestId("audio-picker").selectOption({ label: "System audio" });
     await expect(page.getByTestId("panel-reason")).toHaveText(reason);
     await expect(page.getByTestId("panel-audio-state")).toHaveText("audio: ok");
-    await expect.poll(() => meter(page, "level"), { timeout: 3000 }).toBeGreaterThan(0.05);
+    await expect
+      .poll(() => meter(page, "level"), { timeout: 3000, intervals: [25] })
+      .toBeGreaterThan(0.05);
   });
 }
 
@@ -88,12 +92,27 @@ test("chosen devices are remembered and asked for after a reload (AC5, PD11)", a
   await record(page);
   await page.goto("/");
   await start(page);
-  await page.getByTestId("audio-picker").selectOption({ label: "Fake Audio Input 2" });
+  const startValue = await page.getByTestId("audio-picker").inputValue();
+  const input2 = await page
+    .getByTestId("audio-picker")
+    .locator("option", { hasText: "Fake Audio Input 2" })
+    .getAttribute("value");
+  expect(input2).toMatch(/^input:.+/);
+  expect(input2, "Start already used Input 2, so the switch proves nothing").not.toBe(startValue);
+  await page.getByTestId("audio-picker").selectOption(input2!);
+  // The picker is controlled: it holds the old device until the session has switched, so this
+  // wait, not `audio: ok` (true before the switch), is what proves setAudio ran.
+  await expect(page.getByTestId("audio-picker")).toHaveValue(input2!);
   await expect(page.getByTestId("panel-audio-state")).toHaveText("audio: ok");
-  const audioValue = await page.getByTestId("audio-picker").inputValue();
+  const audioValue = input2!;
   const cameraValue = await page.getByTestId("camera-picker").inputValue();
-  expect(audioValue).toMatch(/^input:.+/);
   expect(cameraValue).not.toBe("");
+  const exactOf = (c: unknown) =>
+    (c as Record<string, { deviceId?: { exact?: string } }>).audio?.deviceId?.exact;
+  expect(
+    (await recorded(page)).calls.map((c) => exactOf(c.constraints)),
+    "choosing the device made no request for it",
+  ).toContain(audioValue.slice("input:".length));
 
   await page.reload();
   await expect(page.getByTestId("audio-picker")).toBeDisabled();
@@ -102,12 +121,12 @@ test("chosen devices are remembered and asked for after a reload (AC5, PD11)", a
   await page.getByRole("button", { name: "Start" }).click();
   await expect(page.getByTestId("panel")).toHaveCount(0);
   const { calls } = await recorded(page);
-  const ideal = (c: unknown, kind: "audio" | "video") =>
-    (c as Record<string, { deviceId?: { ideal?: string } }>)[kind]?.deviceId?.ideal ?? null;
-  expect(calls.map((c) => ideal(c.constraints, "audio")).filter(Boolean)).toEqual([
+  const exactId = (c: unknown, kind: "audio" | "video") =>
+    (c as Record<string, { deviceId?: { exact?: string } }>)[kind]?.deviceId?.exact ?? null;
+  expect(calls.map((c) => exactId(c.constraints, "audio")).filter(Boolean)).toEqual([
     audioValue.slice("input:".length),
   ]);
-  expect(calls.map((c) => ideal(c.constraints, "video")).filter(Boolean)).toEqual([cameraValue]);
+  expect(calls.map((c) => exactId(c.constraints, "video")).filter(Boolean)).toEqual([cameraValue]);
 });
 
 test("moving a dial changes the next frame and asks for nothing (AC9)", async ({ page }) => {
@@ -126,10 +145,13 @@ test("moving a dial changes the next frame and asks for nothing (AC9)", async ({
   await slide(page, "recognisability", "Home");
   await expect.poll(async () => fixture(await patch(page, x, y)), { timeout: 3000 }).toBe(true);
 
-  // Recognisability 1: 4 posterise levels, every channel a multiple of 85.
+  // Recognisability 1: posterised and smeared.
   await page.keyboard.press("End");
-  const posterised = (p: number[]) => p.every((v) => Math.abs(v - Math.round(v / 85) * 85) <= 2);
-  await expect.poll(async () => posterised(await patch(page, x, y)), { timeout: 3000 }).toBe(true);
+  // At 0 the picture is always a fixture colour. At 1 it posterises and smears, so after each
+  // swap of the camera halves it passes through colours that are not the fixture's.
+  await expect
+    .poll(async () => fixture(await patch(page, x, y)), { timeout: 3000, intervals: [20] })
+    .toBe(false);
 
   // Back to 0, then reactivity 1: the beat flashes the picture away from the fixture colours.
   await page.keyboard.press("Home");

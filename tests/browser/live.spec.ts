@@ -151,6 +151,7 @@ test("recognisability 0 shows the camera; at 1 nothing finer than a block (AC8, 
     [10, 9],
     [20, 3],
     [28, 14],
+    [16, 9], // the block the fixture's colour seam falls inside (x = 328 of 320 to 340)
   ];
   let worstSpread = 0;
   for (let read = 0; read < 3; read++) {
@@ -202,6 +203,36 @@ test("recognisability 0 shows the camera; at 1 nothing finer than a block (AC8, 
       { timeout: 3000 },
     )
     .toBe(true);
+});
+
+test("at recognisability 1 and reactivity 0 the picture still follows the camera (AC8, SD5; review C1)", async ({
+  page,
+}) => {
+  // No audio term at all: only the camera and the feedback smear can move the picture. The
+  // fixture swaps its halves twice a second, so the left half's red channel must cross the
+  // middle: above 170 (LEFT_RGB red 220) and below 130 (RIGHT_RGB red 30). The smear and a slow
+  // software renderer keep it from reaching either end. A shader whose feedback loop locks into
+  // one posterise level never crosses, however long it runs.
+  await record(page);
+  await page.goto("/");
+  await start(page);
+  await slide(page, "reactivity", "Home");
+  await slide(page, "recognisability", "End");
+  const { width, height } = page.viewportSize()!;
+  let high = 0;
+  let low = 255;
+  await expect
+    .poll(
+      async () => {
+        const red = (await patch(page, width / 4, height / 2))[0]!;
+        high = Math.max(high, red);
+        low = Math.min(low, red);
+        return high > 170 && low < 130;
+      },
+      { timeout: 10_000, intervals: [50] },
+    )
+    .toBe(true);
+  note("C1 left-half red range at recognisability 1, reactivity 0", { low, high });
 });
 
 test("the overlay's in-app latency p95 is at most 50 ms once start-up has left the window (AC10, PD13)", async ({

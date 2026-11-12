@@ -11,13 +11,13 @@ import {
 const OFF = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
 
 describe("constraints (AC2, SD9)", () => {
-  it("asks for a camera by id as an ideal, or any camera", () => {
-    expect(cameraConstraints("cam-2")).toEqual({ video: { deviceId: { ideal: "cam-2" } } });
+  it("asks for a camera by id as exact, or any camera", () => {
+    expect(cameraConstraints("cam-2")).toEqual({ video: { deviceId: { exact: "cam-2" } } });
     expect(cameraConstraints()).toEqual({ video: true });
   });
 
   it("turns echo cancellation, noise suppression and auto gain off on every audio request", () => {
-    expect(audioConstraints("mic-2")).toEqual({ audio: { deviceId: { ideal: "mic-2" }, ...OFF } });
+    expect(audioConstraints("mic-2")).toEqual({ audio: { deviceId: { exact: "mic-2" }, ...OFF } });
     expect(audioConstraints()).toEqual({ audio: OFF });
     expect(systemAudioConstraints()).toEqual({ audio: OFF, video: true });
   });

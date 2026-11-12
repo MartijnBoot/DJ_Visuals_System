@@ -12,13 +12,16 @@ const PROCESSING_OFF = {
   autoGainControl: false,
 } as const;
 
+// A chosen device is asked for as `exact`: Chromium does not honour an `ideal` device id (the
+// default device comes back), so a picker built on it would never switch. `exact` rejects with
+// OverconstrainedError when the device is gone; the session then asks for any device.
 export function cameraConstraints(deviceId?: string): MediaStreamConstraints {
-  return { video: deviceId ? { deviceId: { ideal: deviceId } } : true };
+  return { video: deviceId ? { deviceId: { exact: deviceId } } : true };
 }
 
 export function audioConstraints(deviceId?: string): MediaStreamConstraints {
   return {
-    audio: deviceId ? { deviceId: { ideal: deviceId }, ...PROCESSING_OFF } : PROCESSING_OFF,
+    audio: deviceId ? { deviceId: { exact: deviceId }, ...PROCESSING_OFF } : PROCESSING_OFF,
   };
 }
 

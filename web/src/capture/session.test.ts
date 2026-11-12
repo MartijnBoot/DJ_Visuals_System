@@ -59,15 +59,18 @@ function fakeMediaDevices() {
     audio: "ok",
     display: "ok",
   };
-  const idealOf = (c: boolean | MediaTrackConstraints | undefined) =>
-    typeof c === "object" ? ((c.deviceId as { ideal?: string } | undefined)?.ideal ?? null) : null;
+  // Chromium honours `exact` and answers an exact id that is not there with OverconstrainedError;
+  // an `ideal` id is not honoured (the default device comes back), so the session must not use it.
+  const exactOf = (c: boolean | MediaTrackConstraints | undefined) =>
+    typeof c === "object" ? ((c.deviceId as { exact?: string } | undefined)?.exact ?? null) : null;
   const getUserMedia = vi.fn(async (constraints: MediaStreamConstraints) => {
     const kind = constraints.video ? "video" : "audio";
     const outcome = kind === "video" ? next.camera : next.audio;
     if (outcome === "denied") throw domError("NotAllowedError");
     if (outcome === "absent") throw domError("NotFoundError");
-    const wanted = idealOf(kind === "video" ? constraints.video : constraints.audio);
-    const id = wanted && present[kind].includes(wanted) ? wanted : present[kind][0]!;
+    const wanted = exactOf(kind === "video" ? constraints.video : constraints.audio);
+    if (wanted && !present[kind].includes(wanted)) throw domError("OverconstrainedError");
+    const id = wanted ?? present[kind][0]!;
     const track = new FakeTrack(kind, id);
     tracks.push(track);
     return streamOf(track);
@@ -170,10 +173,10 @@ describe("Start (AC2, SD9)", () => {
   it("requests the chosen devices with processing off and feeds the renderer", async () => {
     const r = rig();
     await r.session.start({ cameraId: "cam-2", audio: { kind: "input", deviceId: "mic-2" } });
-    expect(r.getUserMedia).toHaveBeenCalledWith({ video: { deviceId: { ideal: "cam-2" } } });
+    expect(r.getUserMedia).toHaveBeenCalledWith({ video: { deviceId: { exact: "cam-2" } } });
     expect(r.getUserMedia).toHaveBeenCalledWith({
       audio: {
-        deviceId: { ideal: "mic-2" },
+        deviceId: { exact: "mic-2" },
         echoCancellation: false,
         noiseSuppression: false,
         autoGainControl: false,
@@ -191,6 +194,15 @@ describe("Start (AC2, SD9)", () => {
     expect(r.session.read(0)).toEqual(LOUD);
     expect(r.logged("camera", "ok")).toBe(1);
     expect(r.logged("audio", "ok")).toBe(1);
+  });
+
+  it("a remembered device that is gone falls back to any device of that kind (PD9)", async () => {
+    const r = rig();
+    await r.session.start({ cameraId: "cam-9", audio: { kind: "input", deviceId: "mic-9" } });
+    expect(r.getUserMedia).toHaveBeenCalledWith({ video: { deviceId: { exact: "cam-9" } } });
+    expect(r.getUserMedia).toHaveBeenCalledWith({ video: true });
+    expect(r.session.state()).toMatchObject({ camera: "ok", audio: "ok" });
+    expect(r.session.state().audioChoice).toEqual({ kind: "input", deviceId: "mic-1" });
   });
 
   it("with nothing remembered asks for any camera and any input", async () => {

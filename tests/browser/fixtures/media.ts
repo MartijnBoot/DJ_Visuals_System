@@ -3,8 +3,8 @@
 //
 // - click.wav: 4 s mono 16-bit PCM at 48 kHz, 120 BPM, each beat a 30 ms burst of a 60 Hz sine
 //   at −1 dBFS with silence between; low-band onsets for AC6. Chromium loops it.
-// - camera.y4m: 10 frames at 10 fps, 320×180, the left half one colour and the right half
-//   another; the last 5 frames swap the halves (AC8). Chromium loops it too.
+// - camera.y4m: 10 frames at 10 fps, 320×180, the left of the seam one colour and the right
+//   of it another; the last 5 frames swap the halves (AC8). Chromium loops it too.
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -17,7 +17,17 @@ export const CLICK = {
   amplitude: 10 ** (-1 / 20),
 } as const;
 
-export const CAMERA = { width: 320, height: 180, fps: 10, frames: 10, swapAt: 5 } as const;
+// `seam` is the column where the two colours meet. It is deliberately off the middle: on the
+// 640×360 test canvas it lands at x = 328, inside the 20 px block that spans 320 to 340, so a
+// shader that sampled the camera per pixel instead of per block would show a step there (AC8).
+export const CAMERA = {
+  width: 320,
+  height: 180,
+  fps: 10,
+  frames: 10,
+  swapAt: 5,
+  seam: 164,
+} as const;
 
 /** Two colours far apart in every channel (8-bit RGB). */
 export const LEFT_RGB = [220, 30, 40] as const;
@@ -61,7 +71,7 @@ function toYuv([r, g, b]: readonly [number, number, number]): [number, number, n
 }
 
 export function cameraY4m(): Buffer {
-  const { width, height, fps, frames, swapAt } = CAMERA;
+  const { width, height, fps, frames, swapAt, seam } = CAMERA;
   const header = Buffer.from(`YUV4MPEG2 W${width} H${height} F${fps}:1 Ip A1:1 C420\n`, "ascii");
   const frame = (left: readonly [number, number, number], right: typeof left) => {
     const [yl, ul, vl] = toYuv(left);
@@ -72,14 +82,14 @@ export function cameraY4m(): Buffer {
     const u = Buffer.alloc(cw * ch);
     const v = Buffer.alloc(cw * ch);
     for (let row = 0; row < height; row++) {
-      y.fill(yl, row * width, row * width + width / 2);
-      y.fill(yr, row * width + width / 2, (row + 1) * width);
+      y.fill(yl, row * width, row * width + seam);
+      y.fill(yr, row * width + seam, (row + 1) * width);
     }
     for (let row = 0; row < ch; row++) {
-      u.fill(ul, row * cw, row * cw + cw / 2);
-      u.fill(ur, row * cw + cw / 2, (row + 1) * cw);
-      v.fill(vl, row * cw, row * cw + cw / 2);
-      v.fill(vr, row * cw + cw / 2, (row + 1) * cw);
+      u.fill(ul, row * cw, row * cw + seam / 2);
+      u.fill(ur, row * cw + seam / 2, (row + 1) * cw);
+      v.fill(vl, row * cw, row * cw + seam / 2);
+      v.fill(vr, row * cw + seam / 2, (row + 1) * cw);
     }
     return Buffer.concat([Buffer.from("FRAME\n", "ascii"), y, u, v]);
   };

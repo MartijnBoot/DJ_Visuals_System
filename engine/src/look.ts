@@ -133,9 +133,16 @@ void main() {
                abs(source(uv + vec2(0.0, step.y)) - colour)) * uEdges;
   }
   colour *= mix(vec3(1.0), 1.5 * uTint, uTintWeight);
-  colour = mix(colour, texture(uPrevious, centre).rgb, uFeedback);
+  // Posterise the input first, then smear: the smear is then a convergent average toward the
+  // posterised camera. Quantising after the mix lets a level absorb any change under 1/(2 steps)
+  // per frame, which the 0.85 feedback never exceeds, so the picture froze (review C1).
   float steps = uLevels - 1.0;
   colour = floor(clamp(colour, 0.0, 1.0) * steps + 0.5) / steps;
+  // The previous frame holds the audio terms below; undo brightness and flash (grain is
+  // zero-mean) so they decay through the smear instead of ratcheting up through it.
+  vec3 previous = texture(uPrevious, centre).rgb;
+  previous = clamp((previous - uFlash) / (1.0 - uFlash) / (1.0 + uBrightness), 0.0, 1.0);
+  colour = mix(colour, previous, uFeedback);
 
   colour *= 1.0 + uBrightness;
   colour += (hash(cell + seed + 31.0) - 0.5) * uGrain;

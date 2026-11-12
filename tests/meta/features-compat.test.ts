@@ -37,8 +37,11 @@ function diagnostics(mutate?: (source: string) => string): string[] {
   }
   const program = ts.createProgram({ rootNames: [compatFile], options, host });
   if (mutate) expect(served, "the mutated audio/src/features.ts was never read").toBe(true);
+  // Only the compat file's own diagnostics count: a mutated audio/src/features.ts also breaks
+  // audio/ itself, and those errors must not stand in for the compat check (review finding 2).
   return ts
     .getPreEmitDiagnostics(program)
+    .filter((d) => d.file !== undefined && resolve(d.file.fileName) === compatFile)
     .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
 }
 
