@@ -6,9 +6,11 @@ import { nextFreeName, type Profile, type StoredProfile } from "@djv/shared";
 import { useCallback, useEffect, useState } from "react";
 import { createProfile, deleteProfile, listProfiles, updateProfile } from "../profiles/api.ts";
 import { BUILTIN_ID, builtinEntry } from "../profiles/builtin.ts";
+import { download, exportFile, fileName } from "../profiles/file.ts";
 import { Editor } from "./Editor.tsx";
 import { describeFailure } from "./failure.ts";
 import { ProfileList, type CreateSource } from "./ProfileList.tsx";
+import { Transfer } from "./Transfer.tsx";
 import { fromBuiltin, fromPreset, PRESETS } from "./presets.ts";
 
 type Load = "loading" | "ready" | "error";
@@ -195,16 +197,27 @@ export function Builder() {
         </p>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 340px) 1fr", gap: 24 }}>
-        <ProfileList
-          entries={entries}
-          selectedId={selectedId}
-          readOnly={readOnly}
-          onSelect={select}
-          onCreate={(source) => void create(source)}
-          onDuplicate={(entry) => void duplicate(entry)}
-          onRename={rename}
-          onDelete={(entry) => void remove(entry)}
-        />
+        <div>
+          <ProfileList
+            entries={entries}
+            selectedId={selectedId}
+            readOnly={readOnly}
+            onSelect={select}
+            onCreate={(source) => void create(source)}
+            onDuplicate={(entry) => void duplicate(entry)}
+            onExport={(entry) => {
+              const definition = definitionOf(entry);
+              download(exportFile([definition]), fileName([definition]));
+            }}
+            onRename={rename}
+            onDelete={(entry) => void remove(entry)}
+          />
+          <Transfer
+            readOnly={readOnly}
+            storedCount={stored.length}
+            onImported={(profiles) => setStored((list) => [...list, ...profiles].sort(byName))}
+          />
+        </div>
         {selected && (
           <Editor
             // A new revision is a new draft: the saved profile is what the editor starts from.

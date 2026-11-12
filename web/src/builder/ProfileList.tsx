@@ -18,6 +18,8 @@ export interface ProfileListProps {
   onSelect(id: string): void;
   onCreate(source: CreateSource): void;
   onDuplicate(entry: StoredProfile): void;
+  /** Downloads this one profile as a file; the built-in too. */
+  onExport(entry: StoredProfile): void;
   /** Resolves to the message to show beside the field, or null when the rename went through. */
   onRename(entry: StoredProfile, name: string): Promise<string | null>;
   onDelete(entry: StoredProfile): void;
@@ -142,6 +144,14 @@ export function ProfileList(props: ProfileListProps) {
                     onClick={() => props.onDuplicate(entry)}
                   >
                     Duplicate
+                  </button>
+                  <button
+                    type="button"
+                    data-testid={`profile-export-${entry.id}`}
+                    aria-label={`Export ${entry.name}`}
+                    onClick={() => props.onExport(entry)}
+                  >
+                    Export
                   </button>
                   {!builtin && (
                     <>

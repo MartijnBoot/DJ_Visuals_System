@@ -9,6 +9,7 @@ import {
   type Page,
   type Route,
 } from "@playwright/test";
+import { readFileSync } from "node:fs";
 import { createProfile, deleteAll, flat, listStored } from "./fixtures/profiles.ts";
 
 test.beforeEach(async ({ request }) => {
@@ -526,4 +527,133 @@ test("with the save request failing the draft survives, and Save works once it i
   const saved = await stored(request, "One");
   expect(saved.revision).toBe(2);
   expect(saved.effects[0]).toMatchObject({ amount: 0.4 });
+});
+
+interface ExportedFile {
+  formatVersion: number;
+  profiles: { name: string; palette: string[] }[];
+}
+
+/** Clicks `target` and reads the file the browser downloads (T13). */
+async function downloaded(page: Page, click: () => Promise<void>) {
+  const [download] = await Promise.all([page.waitForEvent("download"), click()]);
+  const text = readFileSync(await download.path(), "utf8");
+  return { text, file: JSON.parse(text) as ExportedFile, name: download.suggestedFilename() };
+}
+
+const importFile = (page: Page, name: string, content: string | Buffer) =>
+  page.getByTestId("import-file").setInputFiles({
+    name,
+    mimeType: "application/json",
+    buffer: Buffer.from(content),
+  });
+
+test("export one and export all are downloaded as files without ids or timestamps (AC9)", async ({
+  page,
+  request,
+}) => {
+  const alpha = await createProfile(request, flat("Alpha", "#112233"));
+  await createProfile(request, flat("Bravo", "#445566"));
+  await page.goto("/builder");
+
+  const one = await downloaded(page, () => page.getByTestId(`profile-export-${alpha.id}`).click());
+  expect(one.name).toBe("alpha.djv.json");
+  expect(one.file.formatVersion).toBe(1);
+  expect(one.file.profiles.map((p) => p.name)).toEqual(["Alpha"]);
+  for (const key of ["id", "revision", "createdAt", "updatedAt"]) {
+    expect(one.text).not.toContain(`"${key}"`);
+  }
+
+  const all = await downloaded(page, () => page.getByTestId("export-all").click());
+  expect(all.file.formatVersion).toBe(1);
+  expect(all.file.profiles.map((p) => p.name)).toEqual(["Alpha", "Bravo"]);
+  for (const key of ["id", "revision", "createdAt", "updatedAt"]) {
+    expect(all.text).not.toContain(`"${key}"`);
+  }
+
+  const builtin = await downloaded(page, () => page.getByTestId("profile-export-builtin").click());
+  expect(builtin.file.profiles.map((p) => p.name)).toEqual(["Built-in"]);
+});
+
+test("Export all is off while nothing is stored (AC9)", async ({ page }) => {
+  await page.goto("/builder");
+  await expect(page.getByTestId("export-all")).toBeDisabled();
+});
+
+test("delete then import the bundle: it returns with a new id; import again: 'Name (2)' (AC10)", async ({
+  page,
+  request,
+}) => {
+  const alpha = await createProfile(request, flat("Alpha", "#112233"));
+  await page.goto("/builder");
+  const bundle = await downloaded(page, () => page.getByTestId("export-all").click());
+
+  page.once("dialog", (d) => void d.accept());
+  await page.getByTestId(`profile-delete-${alpha.id}`).click();
+  await expect(rowFor(page, "Alpha")).toHaveCount(0);
+
+  await importFile(page, "bundle.json", bundle.text);
+  await expect(page.getByTestId("transfer-message")).toContainText("Imported: Alpha");
+  const back = await listStored(request);
+  expect(back.map((p) => [p.name, p.revision])).toEqual([["Alpha", 1]]);
+  expect(back[0]!.id).not.toBe(alpha.id);
+  expect(await names(page)).toEqual(["Built-in", "Alpha"]);
+
+  await importFile(page, "bundle.json", bundle.text);
+  await expect(page.getByTestId("transfer-message")).toContainText("Imported: Alpha (2)");
+  expect((await listStored(request)).map((p) => p.name)).toEqual(["Alpha", "Alpha (2)"]);
+  expect(await names(page)).toEqual(["Built-in", "Alpha", "Alpha (2)"]);
+});
+
+test("a file with one broken field, a version 2 file and a text file each store nothing and say why (AC10)", async ({
+  page,
+  request,
+}) => {
+  await createProfile(request, flat("Alpha", "#112233"));
+  await page.goto("/builder");
+  const bundle = await downloaded(page, () => page.getByTestId("export-all").click());
+  const before = await listStored(request);
+  const message = page.getByTestId("transfer-message");
+
+  const broken = JSON.parse(bundle.text) as ExportedFile;
+  broken.profiles.push({ ...broken.profiles[0]!, name: "Cool", palette: ["#000000", "#zzzzzz"] });
+  await importFile(page, "broken.json", JSON.stringify(broken));
+  await expect(message).toContainText("Cool: palette.1");
+  await expect(message).not.toContainText("Imported");
+
+  await importFile(
+    page,
+    "v2.json",
+    JSON.stringify({ ...JSON.parse(bundle.text), formatVersion: 2 }),
+  );
+  await expect(message).toHaveText("unsupported file version");
+
+  await importFile(page, "notes.txt", "these are not profiles");
+  await expect(message).toHaveText("not a JSON file");
+
+  expect(await listStored(request)).toEqual(before);
+  expect(await names(page)).toEqual(["Built-in", "Alpha"]);
+});
+
+test("a file the server refuses is reported by profile and field, and stores nothing (AC10)", async ({
+  page,
+  request,
+}) => {
+  await createProfile(request, flat("Alpha", "#112233"));
+  await page.goto("/builder");
+  const bundle = await downloaded(page, () => page.getByTestId("export-all").click());
+  const before = await listStored(request);
+  await page.route("**/api/profiles/import", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: "invalid",
+        issues: [{ path: "profiles.0.palette.1", message: "refused", profile: "Alpha" }],
+      }),
+    }),
+  );
+  await importFile(page, "bundle.json", bundle.text);
+  await expect(page.getByTestId("transfer-message")).toContainText("Alpha: palette.1 — refused");
+  expect(await listStored(request)).toEqual(before);
 });
