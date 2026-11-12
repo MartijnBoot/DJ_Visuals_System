@@ -198,3 +198,30 @@ describe("isDirty", () => {
     expect(isDirty(run(there, { type: "amount", index: 0, value: 0.2 }), base)).toBe(false);
   });
 });
+
+describe("revert and save (T12, AC5, SD10)", () => {
+  it("reset replaces the draft with the saved profile, and the draft is clean again", () => {
+    const edited = run(
+      base,
+      { type: "name", name: "Changed" },
+      { type: "effectAdd", effectType: "mirror" },
+      { type: "paletteAdd" },
+    );
+    expect(isDirty(edited, base)).toBe(true);
+    const reverted = reduce(edited, { type: "reset", profile: base });
+    expect(reverted).toEqual(base);
+    expect(isDirty(reverted, base)).toBe(false);
+  });
+
+  it("reset does not alias the saved profile, so later edits cannot change it", () => {
+    const reverted = reduce(base, { type: "reset", profile: base });
+    const edited = reduce(reverted, { type: "amount", index: 0, value: 0.9 });
+    expect(base.effects[0]).toEqual({ type: "zoom", amount: 0.2 });
+    expect(edited.effects[0]).toMatchObject({ amount: 0.9 });
+  });
+
+  it("is clean once the saved profile is what the server returned", () => {
+    const edited = run(base, { type: "name", name: "Saved" });
+    expect(isDirty(edited, { ...edited })).toBe(false);
+  });
+});

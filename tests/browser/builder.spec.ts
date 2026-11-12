@@ -1,7 +1,14 @@
 // The profile builder in a real browser (B-02 AC1, AC2, AC7; plan T10): profiles are created
 // through the real API and read back through it. Later tasks add the editor, conflicts, export
 // and import to this file.
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type BrowserContext,
+  type Page,
+  type Route,
+} from "@playwright/test";
 import { createProfile, deleteAll, flat, listStored } from "./fixtures/profiles.ts";
 
 test.beforeEach(async ({ request }) => {
@@ -347,4 +354,176 @@ test("the editor is operable by keyboard alone (AC3)", async ({ page, request })
   }
   await page.keyboard.press("Enter");
   await expect.poll(async () => (await stored(request, "One two"))?.revision).toBe(2);
+});
+
+/** Opens the builder with one stored profile selected. */
+async function openProfile(page: Page, id: string) {
+  await page.goto("/builder");
+  await page.getByTestId(`profile-name-${id}`).click();
+  await expect(page.getByTestId("editor")).toBeVisible();
+}
+
+const amountOf = (page: Page) => page.getByTestId("effect-amount-paletteMap");
+
+/** Two pages on one profile, both with an edit; the first has saved (T12, AC6). */
+async function conflictingPair(
+  page: Page,
+  context: BrowserContext,
+  request: APIRequestContext,
+  name = "Shared",
+) {
+  const shared = await createProfile(request, flat(name, "#112233"));
+  const second = await context.newPage();
+  await openProfile(page, shared.id);
+  await openProfile(second, shared.id);
+  await amountOf(page).fill("0.3");
+  await amountOf(second).fill("0.9");
+  await page.getByTestId("editor-save").click();
+  await expect.poll(async () => (await stored(request, name)).revision).toBe(2);
+  return { shared, second };
+}
+
+test("a stale save shows the choice and the API still holds the first save (AC6)", async ({
+  page,
+  context,
+  request,
+}) => {
+  const { second } = await conflictingPair(page, context, request);
+  await second.getByTestId("editor-save").click();
+  await expect(second.getByTestId("conflict")).toBeVisible();
+  await expect(second.getByTestId("conflict-reload")).toHaveText("Reload theirs");
+  await expect(second.getByTestId("conflict-copy")).toHaveText("Save mine as a copy");
+  await expect(amountOf(second)).toHaveValue("0.9"); // the draft is not lost
+  const now = await stored(request, "Shared");
+  expect(now.revision).toBe(2);
+  expect(now.effects[0]).toMatchObject({ amount: 0.3 });
+  expect(await listStored(request)).toHaveLength(1);
+});
+
+test("Reload theirs shows the first save's values (AC6)", async ({ page, context, request }) => {
+  const { second } = await conflictingPair(page, context, request);
+  await second.getByTestId("editor-save").click();
+  await second.getByTestId("conflict-reload").click();
+  await expect(second.getByTestId("conflict")).toHaveCount(0);
+  await expect(amountOf(second)).toHaveValue("0.3");
+  await expect(second.getByTestId("editor-dirty")).toHaveCount(0);
+});
+
+test("Save mine as a copy creates 'Name (2)' with the second page's values and leaves the original (AC6)", async ({
+  page,
+  context,
+  request,
+}) => {
+  const { second } = await conflictingPair(page, context, request);
+  await second.getByTestId("editor-save").click();
+  await second.getByTestId("conflict-copy").click();
+  await expect(second.getByTestId("conflict")).toHaveCount(0);
+  await expect(second.getByTestId("editor-name")).toHaveValue("Shared (2)");
+  await expect(amountOf(second)).toHaveValue("0.9");
+  const all = await listStored(request);
+  expect(all.map((p) => [p.name, p.revision])).toEqual([
+    ["Shared", 2],
+    ["Shared (2)", 1],
+  ]);
+  expect(all[0]!.effects[0]).toMatchObject({ amount: 0.3 });
+  expect(all[1]!.effects[0]).toMatchObject({ amount: 0.9 });
+  expect(await names(second)).toEqual(["Built-in", "Shared", "Shared (2)"]);
+});
+
+test("a profile deleted elsewhere offers 'Save as a new profile' and loses nothing (AC6)", async ({
+  page,
+  request,
+}) => {
+  const gone = await createProfile(request, flat("Gone", "#112233"));
+  await openProfile(page, gone.id);
+  await amountOf(page).fill("0.7");
+  await request.delete(`/api/profiles/${gone.id}`);
+  await page.getByTestId("editor-save").click();
+  await expect(page.getByTestId("conflict")).toContainText("deleted elsewhere");
+  await expect(page.getByTestId("conflict-reload")).toHaveCount(0);
+  await page.getByTestId("conflict-copy").click();
+  await expect(page.getByTestId("conflict")).toHaveCount(0);
+  const all = await listStored(request);
+  expect(all.map((p) => p.name)).toEqual(["Gone"]);
+  expect(all[0]!.id).not.toBe(gone.id);
+  expect(all[0]!.effects[0]).toMatchObject({ amount: 0.7 });
+});
+
+test("the dirty mark appears with an edit and Revert to last saved restores the saved state (AC5)", async ({
+  page,
+  request,
+}) => {
+  const one = await createProfile(request, flat("One", "#112233"));
+  await openProfile(page, one.id);
+  await expect(page.getByTestId("editor-dirty")).toHaveCount(0);
+  await expect(page.getByTestId("editor-revert")).toBeDisabled();
+  await page.getByTestId("editor-name").fill("Changed");
+  await amountOf(page).fill("0.1");
+  await expect(page.getByTestId("editor-dirty")).toHaveText("unsaved changes");
+  await page.getByTestId("editor-revert").click();
+  await expect(page.getByTestId("editor-name")).toHaveValue("One");
+  await expect(amountOf(page)).toHaveValue("1");
+  await expect(page.getByTestId("editor-dirty")).toHaveCount(0);
+  expect((await stored(request, "One")).revision).toBe(1);
+});
+
+test("leaving unsaved changes asks first: another profile, the back link, and the tab (T12)", async ({
+  page,
+  request,
+}) => {
+  const one = await createProfile(request, flat("One", "#112233"));
+  const two = await createProfile(request, flat("Two", "#112233"));
+  await openProfile(page, one.id);
+  await page.getByTestId("editor-name").fill("One edited");
+
+  const asked: string[] = [];
+  page.once("dialog", (d) => {
+    asked.push(d.message());
+    void d.dismiss();
+  });
+  await page.getByTestId(`profile-name-${two.id}`).click();
+  expect(asked).toHaveLength(1);
+  await expect(page.getByTestId("editor-name")).toHaveValue("One edited");
+
+  page.once("dialog", (d) => void d.dismiss());
+  await page.getByRole("link", { name: "Back to the screen" }).click();
+  await expect(page).toHaveURL(/\/builder$/);
+
+  // beforeunload is set while dirty only.
+  const blocks = () =>
+    page.evaluate(() => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+  expect(await blocks()).toBe(true);
+
+  page.once("dialog", (d) => void d.accept());
+  await page.getByTestId(`profile-name-${two.id}`).click();
+  await expect(page.getByTestId("editor-name")).toHaveValue("Two");
+  expect(await blocks()).toBe(false);
+});
+
+test("with the save request failing the draft survives, and Save works once it is restored (AC5)", async ({
+  page,
+  request,
+}) => {
+  const one = await createProfile(request, flat("One", "#112233"));
+  await openProfile(page, one.id);
+  const fail = (route: Route) =>
+    route.request().method() === "PUT" ? route.abort() : route.continue();
+  await page.route("**/api/profiles/*", fail);
+  await amountOf(page).fill("0.4");
+  await page.getByTestId("editor-save").click();
+  await expect(page.getByTestId("editor-save-error")).toContainText("could not save");
+  await expect(amountOf(page)).toHaveValue("0.4");
+  await expect(page.getByTestId("editor-save")).toBeEnabled();
+  expect((await stored(request, "One")).revision).toBe(1);
+
+  await page.unroute("**/api/profiles/*", fail);
+  await page.getByTestId("editor-save").click();
+  await expect(page.getByTestId("editor-dirty")).toHaveCount(0);
+  const saved = await stored(request, "One");
+  expect(saved.revision).toBe(2);
+  expect(saved.effects[0]).toMatchObject({ amount: 0.4 });
 });

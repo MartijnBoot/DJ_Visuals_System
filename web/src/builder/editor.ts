@@ -17,6 +17,8 @@ import {
 } from "@djv/shared";
 
 export type Action =
+  /** "Revert to last saved": the draft becomes a copy of the saved profile (T12). */
+  | { type: "reset"; profile: Profile }
   | { type: "name"; name: string }
   | { type: "dial"; dial: "recognisability" | "reactivity"; value: number }
   | { type: "paletteSet"; index: number; colour: string }
@@ -75,6 +77,9 @@ function withEffect(draft: Profile, index: number, change: (e: Effect) => Effect
 
 export function reduce(draft: Profile, action: Action): Profile {
   switch (action.type) {
+    case "reset":
+      return structuredClone(fieldsOf(action.profile));
+
     case "name":
       return { ...draft, name: action.name };
 

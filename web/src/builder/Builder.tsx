@@ -31,6 +31,19 @@ export function Builder() {
   const [stored, setStored] = useState<StoredProfile[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(BUILTIN_ID);
   const [notice, setNotice] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+
+  // Leaving unsaved changes asks first (T12): another profile, a link, closing the tab.
+  const confirmDiscard = () => !dirty || window.confirm("Discard your unsaved changes?");
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   useEffect(() => {
     let mounted = true;
@@ -58,7 +71,38 @@ export function Builder() {
     setStored((list) => [...list.filter((p) => p.id !== profile.id), profile].sort(byName));
   }, []);
 
+  const select = (id: string) => {
+    if (id === selectedId || !confirmDiscard()) return;
+    setSelectedId(id);
+  };
+
+  /** "Save mine as a copy" / "Save as a new profile" (T12): the draft becomes a new profile. */
+  const saveCopy = async (
+    draft: Profile,
+    original: { id: string; current: StoredProfile | null },
+  ): Promise<string | null> => {
+    const others = stored.filter((p) => p.id !== original.id);
+    const taken = [
+      "Built-in",
+      ...others.map((p) => p.name),
+      ...(original.current ? [original.current.name] : []),
+    ];
+    const result = await createProfile({ ...draft, name: nextFreeName(draft.name, taken) });
+    if (result.kind !== "ok") return describe(result, "could not save a copy");
+    setStored((list) => {
+      const rest = list.filter((p) => p.id !== original.id && p.id !== result.profile.id);
+      return [...rest, ...(original.current ? [original.current] : []), result.profile].sort(
+        byName,
+      );
+    });
+    setSelectedId(result.profile.id);
+    setDirty(false);
+    setNotice(null);
+    return null;
+  };
+
   const create = async (source: CreateSource) => {
+    if (!confirmDiscard()) return;
     const name = nextFreeName("New profile", takenNames());
     const preset =
       source === "builtin" ? undefined : PRESETS.find((p) => `preset:${p.name}` === source);
@@ -74,6 +118,7 @@ export function Builder() {
   };
 
   const duplicate = async (entry: StoredProfile) => {
+    if (!confirmDiscard()) return;
     const profile = { ...definitionOf(entry), name: nextFreeName(entry.name, takenNames()) };
     const result = await createProfile(profile);
     if (result.kind === "ok") {
@@ -87,6 +132,8 @@ export function Builder() {
 
   /** A rename is a save: same id, revision + 1 (AD1). */
   const rename = async (entry: StoredProfile, name: string): Promise<string | null> => {
+    // The editor restarts from the renamed profile, so an open draft of it would be lost.
+    if (entry.id === selectedId && !confirmDiscard()) return "rename cancelled";
     const result = await updateProfile(entry.id, { ...definitionOf(entry), name }, entry.revision);
     if (result.kind === "ok") {
       add(result.profile);
@@ -126,7 +173,13 @@ export function Builder() {
     >
       <h1 style={{ margin: "0 0 8px", fontSize: 20 }}>Profile builder</h1>
       <p style={{ margin: "0 0 12px" }}>
-        <a href="/" style={{ color: "#9cf" }}>
+        <a
+          href="/"
+          style={{ color: "#9cf" }}
+          onClick={(e) => {
+            if (!confirmDiscard()) e.preventDefault();
+          }}
+        >
           Back to the screen
         </a>
       </p>
@@ -146,7 +199,7 @@ export function Builder() {
           entries={entries}
           selectedId={selectedId}
           readOnly={readOnly}
-          onSelect={setSelectedId}
+          onSelect={select}
           onCreate={(source) => void create(source)}
           onDuplicate={(entry) => void duplicate(entry)}
           onRename={rename}
@@ -160,6 +213,8 @@ export function Builder() {
             readOnly={selected.id === BUILTIN_ID}
             offline={readOnly}
             onSaved={add}
+            onDirtyChange={setDirty}
+            onSaveCopy={saveCopy}
           />
         )}
       </div>

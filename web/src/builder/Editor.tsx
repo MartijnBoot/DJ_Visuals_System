@@ -3,8 +3,9 @@
 // (`editor.ts`); Save sends it with the revision it started from and adopts the answer. A save
 // that fails keeps the draft. The built-in is shown read-only.
 import { LIMITS, type Profile, type StoredProfile } from "@djv/shared";
-import { useReducer, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { updateProfile } from "../profiles/api.ts";
+import { Conflict } from "./Conflict.tsx";
 import { EffectRow } from "./EffectRow.tsx";
 import { availableTypes, isDirty, reduce, validate } from "./editor.ts";
 import { describeFailure } from "./failure.ts";
@@ -17,6 +18,23 @@ export interface EditorProps {
   /** The API is unreachable: Save is disabled. */
   offline: boolean;
   onSaved(profile: StoredProfile): void;
+  /** Unsaved changes exist (T12): the builder asks before leaving them. */
+  onDirtyChange(dirty: boolean): void;
+  /**
+   * "Save mine as a copy": a new profile from the draft; the original is left as stored
+   * (`current`, from the 409) or dropped from the list when it was deleted elsewhere. Resolves
+   * to why it failed, or null.
+   */
+  onSaveCopy(
+    draft: Profile,
+    original: { id: string; current: StoredProfile | null },
+  ): Promise<string | null>;
+}
+
+interface Refused {
+  kind: "changed" | "deleted";
+  /** The server's current profile, from the 409. */
+  current: StoredProfile | null;
 }
 
 const fieldsOf = ({ name, palette, dials, effects }: StoredProfile): Profile => ({
@@ -26,16 +44,31 @@ const fieldsOf = ({ name, palette, dials, effects }: StoredProfile): Profile => 
   effects,
 });
 
-export function Editor({ saved, readOnly, offline, onSaved }: EditorProps) {
+export function Editor({
+  saved,
+  readOnly,
+  offline,
+  onSaved,
+  onDirtyChange,
+  onSaveCopy,
+}: EditorProps) {
   const [draft, dispatch] = useReducer(reduce, saved, fieldsOf);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [refused, setRefused] = useState<Refused | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
   const issues = validate(draft);
   const dirty = isDirty(draft, saved);
   const nameIssue = issues.find((i) => i.path === "name");
-  const canSave = !readOnly && !offline && !saving && dirty && issues.length === 0;
+  const canSave = !readOnly && !offline && !saving && !refused && dirty && issues.length === 0;
   const addable = availableTypes(draft);
+
+  // The builder asks before leaving unsaved changes; this editor going away leaves none.
+  useEffect(() => {
+    onDirtyChange(dirty && !readOnly);
+    return () => onDirtyChange(false);
+  }, [dirty, readOnly, onDirtyChange]);
 
   const save = async () => {
     setSaving(true);
@@ -43,7 +76,19 @@ export function Editor({ saved, readOnly, offline, onSaved }: EditorProps) {
     const result = await updateProfile(saved.id, draft, saved.revision);
     setSaving(false);
     if (result.kind === "ok") onSaved(result.profile);
+    else if (result.kind === "conflict" && result.conflict.reason === "stale_revision") {
+      setRefused({ kind: "changed", current: result.conflict.current });
+    } else if (result.kind === "missing") setRefused({ kind: "deleted", current: null });
     else setSaveError(describeFailure(result, "could not save"));
+  };
+
+  const saveCopy = async () => {
+    if (!refused) return;
+    setSaving(true);
+    setCopyError(null);
+    const error = await onSaveCopy(draft, { id: saved.id, current: refused.current });
+    setSaving(false);
+    if (error) setCopyError(error); // the draft and the choice are still here
   };
 
   return (
@@ -186,14 +231,38 @@ export function Editor({ saved, readOnly, offline, onSaved }: EditorProps) {
 
       {!readOnly && (
         <div style={{ display: "grid", gap: 4 }}>
-          <button
-            type="button"
-            data-testid="editor-save"
-            disabled={!canSave}
-            onClick={() => void save()}
-          >
-            Save
-          </button>
+          {refused && (
+            <Conflict
+              kind={refused.kind}
+              busy={saving}
+              error={copyError}
+              onReload={() => refused.current && onSaved(refused.current)}
+              onCopy={() => void saveCopy()}
+            />
+          )}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              data-testid="editor-save"
+              disabled={!canSave}
+              onClick={() => void save()}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              data-testid="editor-revert"
+              disabled={!dirty || saving}
+              onClick={() => {
+                dispatch({ type: "reset", profile: saved });
+                setRefused(null);
+                setSaveError(null);
+              }}
+            >
+              Revert to last saved
+            </button>
+            {dirty && <span data-testid="editor-dirty">unsaved changes</span>}
+          </div>
           {issues.length > 0 && (
             <ul role="alert" data-testid="editor-issues" style={{ margin: 0, color: "#f88" }}>
               {issues.map((issue) => (
