@@ -21,6 +21,8 @@ export type { LatencyReading } from "./latency.ts";
 export type { RenderScale } from "./scale.ts";
 export type { AudioFeatures, Dials } from "./features.ts";
 export { DEFAULT_DIALS, ZERO_FEATURES } from "./features.ts";
+export type { Binding, Effect, EffectInfo, EffectType, FeatureName, Profile } from "./profile.ts";
+export { BUILT_IN_PROFILE, EFFECTS, effectStrength } from "./profile.ts";
 
 export interface Engine {
   start(): void;
