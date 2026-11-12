@@ -336,6 +336,38 @@ describe("loss and retry (SD7, AC12, AC13, PD9, PD17)", () => {
     expect(r.session.state().reason).toBeUndefined();
   });
 
+  it.each([
+    ["audio", "audio", "mic-2", "mic-1"],
+    ["camera", "video", "cam-2", "cam-1"],
+  ] as const)(
+    "%s: a lost chosen device is waited for by its id, never swapped for another (review C2)",
+    async (kind, track, chosen, other) => {
+      const r = rig();
+      const choice =
+        kind === "audio"
+          ? { audio: { kind: "input" as const, deviceId: chosen } }
+          : { cameraId: chosen };
+      await r.session.start(choice);
+      // Unplugged: the track ends and the device leaves the list, but another one is present.
+      r.present[track] = r.present[track].filter((id) => id !== chosen);
+      r.live(track)[0]!.end();
+      r.devicechange();
+      await settle();
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(r.session.state()[kind]).toBe("lost");
+      expect(r.live(track).map((t) => t.getSettings().deviceId)).not.toContain(other);
+      expect(loadRemembered(r.storage)).toMatchObject(
+        kind === "audio" ? { audio: { kind: "input", deviceId: chosen } } : { cameraId: chosen },
+      );
+      // Replugged: the same device comes back by itself.
+      r.present[track] = [other, chosen];
+      r.devicechange();
+      await settle();
+      expect(r.session.state()[kind]).toBe("ok");
+      expect(r.live(track)[0]!.getSettings().deviceId).toBe(chosen);
+    },
+  );
+
   it("retries at once when a device is plugged in", async () => {
     const r = rig();
     await r.session.start({});

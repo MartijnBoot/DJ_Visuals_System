@@ -75,7 +75,10 @@ export function Panel(props: PanelProps) {
   }, [read]);
 
   const camera = props.cameraId ?? "";
-  const audio = audioValue(props.audioChoice);
+  // A stopped share leaves the picker on a placeholder, so choosing "System audio" again is a
+  // change the browser reports (review C3); otherwise the select already shows it and stays mute.
+  const systemStopped = props.audioChoice?.kind === "system" && capture.audio === "lost";
+  const audio = systemStopped ? "stopped" : audioValue(props.audioChoice);
 
   return (
     <section
@@ -126,7 +129,19 @@ export function Panel(props: PanelProps) {
                 props.onAudio({ kind: "input", deviceId: v.slice(6) });
             }}
           >
-            {options(props.audioInputs, audio, (d) => `input:${d}`, "input")}
+            {systemStopped ? (
+              <option value="stopped" disabled>
+                system audio stopped
+              </option>
+            ) : (
+              options(props.audioInputs, audio, (d) => `input:${d}`, "input")
+            )}
+            {systemStopped &&
+              props.audioInputs.map((d) => (
+                <option key={d.deviceId} value={`input:${d.deviceId}`}>
+                  {d.label}
+                </option>
+              ))}
             {props.systemAudio && <option value="system">System audio</option>}
           </select>
         )}

@@ -44,6 +44,19 @@ describe("refresh estimate (PD6)", () => {
     expect(controller.budgetMs()).toBeCloseTo(6.94, 2);
   });
 
+  it.each([50, 48])("snaps a %i Hz display to its own period, not to 60 Hz (review C1)", (hz) => {
+    const { controller, settle } = rig();
+    settle(hz);
+    expect(controller.budgetMs()).toBeCloseTo(1000 / hz, 6);
+  });
+
+  it("a perfectly paced 50 Hz display never leaves 100% (review C1)", () => {
+    const { controller, run, settle } = rig();
+    settle(50);
+    run(20, 30_000);
+    expect(controller.scale()).toBe(1);
+  });
+
   it("snaps a jittery 60 Hz to 60 Hz, and a few long frames do not move it", () => {
     const { controller, tick } = rig();
     for (let n = 0; n < 60; n++) tick(n % 15 === 7 ? 50 : 16 + (n % 3) * 0.7);

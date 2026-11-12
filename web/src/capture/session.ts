@@ -193,22 +193,30 @@ export function createSession(deps: SessionDeps): Session {
     setStatus(kind, "none", name === "NotAllowedError" ? denied : absent);
   };
 
-  /** A device id that is not there is OverconstrainedError: ask again for any device (PD9). */
-  const getMedia = async (build: (id?: string) => MediaStreamConstraints, id?: string) => {
+  /**
+   * A device id that is not there is OverconstrainedError. At Start (`anyDevice`) ask again for
+   * any device (PD9); a retry after a loss waits for the same device instead, so the replug
+   * reattaches it and the remembered id is not overwritten (review C2, AC12).
+   */
+  const getMedia = async (
+    build: (id?: string) => MediaStreamConstraints,
+    id?: string,
+    anyDevice = false,
+  ) => {
     try {
       return await mediaDevices.getUserMedia(build(id));
     } catch (e) {
-      if (id && e instanceof Error && e.name === "OverconstrainedError") {
+      if (anyDevice && id && e instanceof Error && e.name === "OverconstrainedError") {
         return mediaDevices.getUserMedia(build());
       }
       throw e;
     }
   };
 
-  const openCamera = async (id: string | undefined) => {
+  const openCamera = async (id: string | undefined, anyDevice = false) => {
     let stream: MediaStream;
     try {
-      stream = await getMedia(cameraConstraints, id);
+      stream = await getMedia(cameraConstraints, id, anyDevice);
     } catch (e) {
       return failed("camera", e, REASON.cameraKept, REASON.cameraDenied, REASON.cameraAbsent);
     }
@@ -221,7 +229,7 @@ export function createSession(deps: SessionDeps): Session {
     setStatus("camera", "ok");
   };
 
-  const openAudio = async (choice: AudioChoice | undefined) => {
+  const openAudio = async (choice: AudioChoice | undefined, anyDevice = false) => {
     const system = choice?.kind === "system";
     const keep = (e: unknown, systemReason: string) => {
       if (!system)
@@ -233,7 +241,11 @@ export function createSession(deps: SessionDeps): Session {
     try {
       stream = system
         ? await mediaDevices.getDisplayMedia!(systemAudioConstraints())
-        : await getMedia(audioConstraints, choice?.kind === "input" ? choice.deviceId : undefined);
+        : await getMedia(
+            audioConstraints,
+            choice?.kind === "input" ? choice.deviceId : undefined,
+            anyDevice,
+          );
     } catch (e) {
       return keep(e, REASON.systemCancelled);
     }
@@ -340,8 +352,8 @@ export function createSession(deps: SessionDeps): Session {
       cameraId = choice.cameraId;
       wantedAudio = choice.audio;
       await Promise.all([
-        attempt("camera", () => openCamera(choice.cameraId)),
-        attempt("audio", () => openAudio(choice.audio)),
+        attempt("camera", () => openCamera(choice.cameraId, true)),
+        attempt("audio", () => openAudio(choice.audio, true)),
       ]);
       if (context.state === "suspended") onContextState();
     },

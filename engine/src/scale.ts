@@ -12,8 +12,11 @@ export type RenderScale = 1 | 0.75 | 0.5;
 /** The steps, largest first; never below the last (SD8). */
 export const SCALES: readonly RenderScale[] = [1, 0.75, 0.5];
 
-/** Refresh rates the estimate snaps to (PD6). */
-export const REFRESH_RATES_HZ = [30, 60, 75, 90, 120, 144, 165, 240];
+/**
+ * Refresh rates the estimate snaps to (PD6, plus 48 and 50 at the owner's review, 2026-11-12: a
+ * 50 Hz display snapped to 60 Hz is over its budget for ever and sank to 50%).
+ */
+export const REFRESH_RATES_HZ = [30, 48, 50, 60, 75, 90, 120, 144, 165, 240];
 
 /** Frames whose median interval gives the refresh estimate (PD6). */
 export const ESTIMATE_FRAMES = 60;
