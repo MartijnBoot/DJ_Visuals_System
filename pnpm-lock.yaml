@@ -48,6 +48,8 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2))
 
+  audio: {}
+
   engine: {}
 
   server:
@@ -76,6 +78,9 @@ importers:
 
   web:
     dependencies:
+      '@djv/audio':
+        specifier: workspace:*
+        version: link:../audio
       '@djv/engine':
         specifier: workspace:*
         version: link:../engine

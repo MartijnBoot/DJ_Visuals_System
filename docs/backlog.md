@@ -18,10 +18,11 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 
 | # | ID | Feature | Size | Status |
 |---|---|---|---|---|
-| 1 | B-01 | Live visual engine | L | idea |
-| 2 | B-02 | Visual profiles with an in-app builder | L | idea |
-| 3 | B-04 | Live set controls | M | idea |
-| 4 | B-03 | Claude Code-authored profiles | M | idea |
+| 1 | B-02 | Visual profiles with an in-app builder | L | idea |
+| 2 | B-04 | Live set controls | M | idea |
+| 3 | B-03 | Claude Code-authored profiles | M | idea |
+| 4 | B-06 | Remote input devices | L | idea |
+| 5 | B-07 | Scenes | M | idea |
 
 ## Items
 
@@ -50,7 +51,9 @@ mark it as one.
 
 ### B-01 — Live visual engine
 
-- **Status:** idea
+- **Status:** built → `docs/specs/phase-b-01-live-visual-engine.md`,
+  `docs/plans/phase-b-01-live-visual-engine.md` (H2 to H4 on the screen machine are the
+  owner's)
 - **Added:** 2026-11-11
 - **Size:** L
 
@@ -144,8 +147,9 @@ is at the controls may be the DJ with one hand free or a VJ (Visual Jockey) with
 attention.
 
 **Idea.** A control surface, separate from the output screen, to switch profiles, change base
-colours live with a colour picker, raise or lower camera recognisability, and switch camera
-source. One or two taps for the DJ, more detail for the VJ.
+colours live with a colour picker, raise or lower camera recognisability and audio reactivity
+(the two dials B-01 defines, spec SD5), and switch camera source. One or two taps for the DJ,
+more detail for the VJ.
 
 **Why it matters.** Without it the set is locked to whatever was prepared beforehand.
 
@@ -160,4 +164,106 @@ mixing.
 - Whether a DJ layout and a VJ layout are two views or one view with a toggle.
 
 **Touches.** B-01 settings, B-02 profiles, a second client view. Guess: a realtime channel
-between the control surface and the renderer.
+between the control surface and the renderer. Its pairing-token and bind-address design is
+reused by B-05.
+
+### B-05 — Phone as camera source
+
+- **Status:** dropped (superseded by B-06, which widens it to any remote device and adds remote
+  main audio; its open questions moved there)
+- **Added:** 2026-11-11
+- **Size:** M
+
+**Problem.** A wired webcam sits where its cable reaches. The DJ wants a camera that someone
+can carry into the crowd, or point at the booth from the floor.
+
+**Idea.** A phone opens a page on the screen machine's server, its camera streams to the screen
+page, and the renderer takes it as just another camera source.
+
+**Why it matters.** The crowd camera is the shot that makes the room see itself. B-01 cannot
+give it without a cable.
+
+**Not this.** A streaming app the phone has to install. A camera that lags visibly behind the
+wired one.
+
+**Open questions.**
+
+- The server must accept connections from the LAN, which breaks the `127.0.0.1`-only invariant
+  (`docs/invariants.md`) and needs B-04's pairing token and bind-address design first.
+- HTTPS on a LAN address: a locally trusted certificate, and how the phone trusts it.
+- WebRTC signalling through the server; whether a travel router or hotspot is required at
+  venues with client isolation (SDR §8).
+
+**Touches.** Server bind address and TLS, B-04 pairing, WebRTC signalling, the B-01 camera
+source seam (spec SD1). Depends on B-01 and B-04. Split out of B-01 at its spec interview.
+
+### B-06 — Remote input devices
+
+- **Status:** idea
+- **Added:** 2026-11-12
+- **Size:** L
+
+**Problem.** The DJ mixes on a laptop that already carries heavy DJ software. The cleanest audio
+is on that laptop, and its webcam is a useful shot. Other shots come from a device next to
+another screen or from phones. B-01 only reads a microphone and cameras plugged into the screen
+machine.
+
+**Idea.** Other devices on the network send streams to the screen machine, which still renders
+and analyses everything. The sending devices only capture and send. The laptop can supply the
+main audio and a webcam. Other devices supply video. There is exactly one main audio feed at a
+time. Without a laptop, a microphone on the screen machine is the main audio. The VJ can switch
+between the video feeds live.
+
+**Why it matters.** The audio signal is the best available, and the DJ laptop's load does not go
+up. It also gives crowd and booth shots without cables, which was B-05's purpose.
+
+**Not this.** Rendering or analysis on the sending devices. A screen-machine microphone that
+stops working once a laptop is connected. More than one main audio at a time. Mixing audio
+feeds. An app the sending devices must install.
+
+**Open questions.**
+
+- The latency budget for audio arriving over the network, as a separate number from B-01's
+  p95 ≤ 50 ms.
+- Whether the laptop path needs an ADR, since SDR question 2 chose same-machine audio so that
+  audio never crosses a network.
+- What happens to the main audio when the laptop drops: fall back to the microphone, or hold
+  silence.
+- How a device announces itself and is accepted: pairing token, naming, and what the VJ sees.
+- What carries system audio on each OS from a browser page on the laptop.
+- The B-05 questions: LAN bind versus the `127.0.0.1` invariant, HTTPS on a LAN address, WebRTC
+  signalling, and venue client isolation (SDR §8).
+
+**Touches.** Server bind address and TLS, pairing (from B-04's design), WebRTC signalling, the
+B-01 capture seam (spec SD1), `docs/invariants.md` rows for `127.0.0.1` and "no media reaches
+the server", SDR questions 2 and 3. A guess. Depends on B-01 and B-04. Supersedes B-05.
+
+### B-07 — Scenes
+
+- **Status:** idea
+- **Added:** 2026-11-12
+- **Size:** M
+
+**Problem.** A set has moments: a crowd shot with warm colours, a booth shot abstracted and
+fast. Switching between them today means changing a feed, a profile and the dials one by one.
+
+**Idea.** A scene is a saved combination of a video feed, a visual profile and the dial
+settings, which you can recall in one action. A VJ can also build a scene live by switching
+sources, changing colours and changing patterns, then save it as a scene.
+
+**Why it matters.** It makes changing the mood of the room a single move instead of three. It
+also lets a set be prepared beforehand.
+
+**Not this.** A timeline or auto-playing show. Scenes that only exist in browser storage. Scenes
+that lose their video source when the device disconnects, with no fallback.
+
+**Open questions.**
+
+- Transition between scenes: hard cut or crossfade.
+- What a scene does when its feed's device is offline.
+- Whether a scene stores the feed by device identity or by a role such as "crowd".
+- How scenes are stored and ordered, and whether they move with profile import and export.
+- Whether saving a live-built scene overwrites or creates a new one.
+
+**Touches.** Scene storage (a table, migration), B-04 controls, B-02 profiles, B-06 feeds. A
+guess. Depends on B-02 and B-06. Overlaps B-04's profile switching and live colour changes.

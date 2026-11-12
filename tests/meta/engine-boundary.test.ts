@@ -1,15 +1,17 @@
-// AC16 (plan PD13): the renderer is framework-free. `engine/package.json` declares no
-// dependency of any kind, and the compiled output of every non-test file under engine/src
-// has no bare module specifier, static or dynamic. Relative imports inside the package are
-// allowed. A self-check proves the detector does flag a bare import.
+// AC16 of Phase 0 for `engine/`, AC18 of B-01 for `audio/` (plan PD13, B-01 SD11): both
+// packages are framework-free. Each `package.json` declares no dependency of any kind, and the
+// compiled output of every non-test file under `src` has no bare module specifier, static or
+// dynamic. Relative imports inside a package are allowed. A self-check proves the detector does
+// flag a bare import.
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
-const engineDir = resolve(repoRoot, "engine");
-const srcDir = join(engineDir, "src");
+
+/** The framework-free packages: the renderer (Phase 0) and the audio analysis (B-01). */
+const PACKAGES = ["engine", "audio"];
 
 const dependencyFields = [
   "dependencies",
@@ -56,13 +58,17 @@ export function compiledSpecifiers(source: string, fileName = "sample.ts"): stri
   return found;
 }
 
+/** Every file that compiles to JavaScript: not tests, and not `.d.ts` (no output, no imports). */
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { recursive: true, encoding: "utf8" })
-    .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f))
+    .filter((f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && !/\.d\.ts$/.test(f))
     .map((f) => join(dir, f));
 }
 
-describe("engine boundary (AC16)", () => {
+describe.each(PACKAGES)("%s boundary (Phase 0 AC16, B-01 AC18)", (name) => {
+  const packageDir = resolve(repoRoot, name);
+  const srcDir = join(packageDir, "src");
+
   it("the detector flags a bare import, static and dynamic, and not a relative one", () => {
     expect(compiledSpecifiers('import React from "react";\nexport const a = React;')).toEqual([
       "react",
@@ -78,17 +84,17 @@ describe("engine boundary (AC16)", () => {
     );
   });
 
-  it("engine/package.json declares no dependency of any kind", () => {
-    const manifest = JSON.parse(readFileSync(join(engineDir, "package.json"), "utf8"));
+  it(`${name}/package.json declares no dependency of any kind`, () => {
+    const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
     expect(Object.keys(manifest).filter((k) => dependencyFields.includes(k))).toEqual([]);
   });
 
-  it("engine/tsconfig.json includes no Node types", () => {
-    const tsconfig = JSON.parse(readFileSync(join(engineDir, "tsconfig.json"), "utf8"));
+  it(`${name}/tsconfig.json includes no Node types`, () => {
+    const tsconfig = JSON.parse(readFileSync(join(packageDir, "tsconfig.json"), "utf8"));
     expect(tsconfig.compilerOptions?.types ?? []).toEqual([]);
   });
 
-  it("the compiled output of every engine source file imports nothing bare", () => {
+  it(`the compiled output of every ${name} source file imports nothing bare`, () => {
     const files = sourceFiles(srcDir);
     expect(files.length).toBeGreaterThan(0);
     const offenders: Record<string, string[]> = {};
