@@ -42,4 +42,7 @@ export type App = ReturnType<typeof createApp>;
  * is not a file is 404. Paths cannot leave `root`. */
 export async function registerStatic(app: App, root: string): Promise<void> {
   await app.register(fastifyStatic, { root, index: "index.html", wildcard: true });
+  // The builder is a second route of the same app (B-02 PD14): that one path gets the page, every
+  // other unknown path stays 404. Vite's dev server falls back to index.html on its own.
+  app.get("/builder", (_request, reply) => reply.sendFile("index.html"));
 }
