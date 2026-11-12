@@ -18,11 +18,10 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 
 | # | ID | Feature | Size | Status |
 |---|---|---|---|---|
-| 1 | B-02 | Visual profiles with an in-app builder | L | idea |
-| 2 | B-04 | Live set controls | M | idea |
-| 3 | B-03 | Claude Code-authored profiles | M | idea |
-| 4 | B-06 | Remote input devices | L | idea |
-| 5 | B-07 | Scenes | M | idea |
+| 1 | B-04 | Live set controls | M | idea |
+| 2 | B-03 | Claude Code-authored profiles | M | idea |
+| 3 | B-06 | Remote input devices | L | idea |
+| 4 | B-07 | Scenes | M | idea |
 
 ## Items
 
@@ -84,7 +83,7 @@ config, app shell). Guess: a client-side rendering module and an audio-analysis 
 
 ### B-02 — Visual profiles with an in-app builder
 
-- **Status:** idea
+- **Status:** specced → `docs/specs/phase-b-02-visual-profiles.md`
 - **Added:** 2026-11-11
 - **Size:** L
 
