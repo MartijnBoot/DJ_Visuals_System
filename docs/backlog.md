@@ -277,3 +277,72 @@ by name or carry the profile with them. That is this item's question to settle.
 
 **Touches.** Scene storage (a table, migration), B-04 controls, B-02 profiles, B-06 feeds. A
 guess. Depends on B-02 and B-06. Overlaps B-04's profile switching and live colour changes.
+
+### B-08 — A gate that load cannot turn red (D-02)
+
+- **Status:** specced → `docs/specs/phase-b-08-load-proof-gate.md`
+- **Added:** 2026-11-14
+- **Size:** M (two checks, a load reproduction, one gate change)
+
+**Problem.** On 2026-11-14 two of four `bash scripts/check.sh` runs on the Windows dev machine
+went red on a timing check, a different one each time, and each passed when re-run alone:
+`tests/meta/profile-compat.test.ts:12` hit vitest's default 5 s timeout (about 3 s alone), and
+the twelve-effect latency check (`tests/browser/live.spec.ts:274`, assert at `:297`) read p95
+308.8 ms while another screen page was still rendering. Neither failure was the product's
+(`docs/specs/defect-register.md`, D-02; `docs/runbooks/rehearsals/2026-11-14-b02-human-checks.md`).
+
+**Idea.** Every gate check proves something about the product that a busy machine cannot
+falsify:
+
+- The compat tests stop timing the compiler. The unmutated case is already proven by the
+  `types` step (`web/tsconfig.json` includes `src`, so `web/src/profile-compat.ts` and
+  `web/src/features-compat.ts` are type-checked there); the mutation tests keep their teeth.
+  `tests/meta/features-compat.test.ts` shares the helper (`tests/meta/compat-check.ts`) and the
+  same risk.
+- The real-time budget (p95 ≤ 50 ms, B-01 AC10, B-02 AC17) stays a check on the owner's screen
+  machine, as H3 already does (H3-8a: 23 ms). The gate's latency check proves a property load
+  cannot break, rather than a wall-clock number on whatever machine runs it (agreed
+  2026-11-14).
+- D-02 gets its own acceptance criterion: the gate's verdict does not change under a defined
+  induced load.
+
+**Why it matters.** A red gate that a re-run turns green teaches people to re-run instead of
+reading the failure, and the gate stops being the one definition of green. Today the honest
+response to red on the dev machine is "try again"; that habit will hide the first real
+regression.
+
+**Not this.**
+
+- Retries, in vitest or Playwright. A retry turns "green" into "green once in N"; it hides an
+  intermittent fault that is the product's (a real latency spike), and it automates the very
+  re-run habit D-02 is about.
+- Raising timeouts and calling it fixed: that only moves the threshold the machine has to beat.
+- A quiet-machine precondition the gate cannot check. "Close other browsers first" is a ritual,
+  not a check.
+- Weakening the guarded compat checks: their `docs/invariants.md` rows must still fail on drift.
+- The smear-above-posterise freeze, and the builder layout.
+
+**Open questions.**
+
+- What the gate's latency check measures instead: a bound relative to the same run's baseline,
+  an absolute bound with a stated margin for software WebGL, or a structural property (one
+  analysis block per submitted frame, say). It must still satisfy B-02 AC17's "the CI latency
+  check shall run against that profile", and may need a spec note on B-01 SD2/AC10 (the
+  edge-case note at `docs/specs/phase-b-01-live-visual-engine.md:278` already calls the gate's
+  check a CPU-side proxy).
+- The induced load, for the reproduction and for D-02's criterion. Proposal: CPU busy-loops
+  beside the unit step; a second headless Chromium rendering `/` beside the browser step. It
+  must turn today's gate red before the fix and leave it green after.
+- Whether `check.sh` warns up front when port 8123 is held. Proposal: warn and name the
+  orphan-node cause, never refuse; Playwright already fails on a held port
+  (`reuseExistingServer: false`), only less clearly. Port 8000 does not affect the gate.
+  "Another WebGL page is running" cannot be detected reliably from a shell, so the reproduction
+  proves the fix instead.
+- Whether dropping the duplicated "type-checks against the real shapes" tests needs a
+  `docs/invariants.md` update (B-01 and B-02 compat rows; a guarded change).
+
+**Touches.** `tests/meta/compat-check.ts`, `tests/meta/profile-compat.test.ts`,
+`tests/meta/features-compat.test.ts`, `tests/browser/live.spec.ts`, `scripts/check.sh`,
+`docs/specs/defect-register.md` (D-02), `docs/invariants.md` (B-01 and B-02 compat rows),
+B-01 SD2/AC10, B-02 AC17. Bug-fix rules apply: it starts with a failing test (the induced-load
+reproduction).
