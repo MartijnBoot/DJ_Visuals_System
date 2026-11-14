@@ -27,6 +27,7 @@ breaks; "review only" is honest but is a debt, and the next task near it should 
 | B-01 | No media reaches the server: `server/` has no endpoint for audio or video, and a running set requests only `GET /`, `/assets/*`, `/api/health`, `/api/profiles` and `/api/profiles/:id` — the last two only on a user action (B-02 SD6) | review (`server/` diff); `tests/browser/live.spec.ts` (AC17, B-02 AC18) |
 | B-01 | `audio/` and `engine/` each declare `AudioFeatures`; `web/` passes one to the other, so the type check fails when they drift | the `types` step (`pnpm typecheck` compiles `web/src/features-compat.ts` against the real shapes); `tests/meta/compat-coverage.test.ts` (`web/tsconfig.json` covers the compat file); the mutation tests in `tests/meta/features-compat.test.ts` (fail on drift) (B-08 SD6) |
 | B-02 | `engine/` and `shared/` each declare `Profile` (`engine/` never imports `shared/`); `web/` passes one to the other, so the type check fails when they drift | the `types` step (`pnpm typecheck` compiles `web/src/profile-compat.ts` against the real shapes); `tests/meta/compat-coverage.test.ts` (`web/tsconfig.json` covers the compat file); the mutation tests in `tests/meta/profile-compat.test.ts` (fail on drift) (B-08 SD6) |
+| B-04 | Every control message is validated against `shared/src/control.ts` on receipt, and only an approved device's socket may send a control (B-04 SD28) | `server/src/control/channel.test.ts`; `server/test/control-screen.int.test.ts` |
 
 ## Guarded areas
 

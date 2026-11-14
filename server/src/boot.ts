@@ -3,8 +3,11 @@
 // the throw into one fatal line (log.ts). Paths are arguments so tests can inject them.
 import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { MAX_SCREEN_MESSAGE } from "@djv/shared";
 import { createApp, registerStatic } from "./app.ts";
 import { ConfigError, type Config } from "./config.ts";
+import { createHub } from "./control/hub.ts";
+import { routeUpgrades, socketServer } from "./control/upgrade.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { registerHealth } from "./health.ts";
 import { createLogger, type Logger } from "./log.ts";
@@ -14,6 +17,20 @@ import { createProfileStore } from "./profiles/store.ts";
 
 export const HOST = "127.0.0.1";
 export const DB_FILE = "djvisuals.sqlite";
+/** The screen socket's path on the main listener (B-04 API contract). */
+export const SCREEN_SOCKET = "/api/control/screen";
+/** Vite's dev server, whose proxy forwards the screen page's Origin (B-04 SD25). */
+const VITE_ORIGIN = "http://localhost:5173";
+
+/**
+ * The screen socket accepts exactly its own listener's origins and Vite's (B-04 PD2): both
+ * names of 127.0.0.1:PORT reach this listener, and no foreign page can claim either.
+ */
+export const screenOrigins = (port: number): readonly string[] => [
+  `http://127.0.0.1:${port}`,
+  `http://localhost:${port}`,
+  VITE_ORIGIN,
+];
 
 export interface BootPaths {
   /** The folder of NNNN_<slug>.sql files. */
@@ -81,6 +98,19 @@ export async function boot(
     uptimeSeconds: () => Math.floor((Date.now() - listenedAt) / 1000),
   });
   registerProfiles(app, createProfileStore(db, log));
+  // External control (B-04): the screen socket on this listener. Its `maxPayload` sits above
+  // the message limit, so an oversized message is dropped with a warn rather than closing the
+  // socket (AC33); `ws` closes beyond it.
+  const hub = createHub({ log, controlPort: config.CONTROL_PORT, now: () => Date.now() });
+  const screenSockets = socketServer(4 * MAX_SCREEN_MESSAGE);
+  routeUpgrades(app.server, [
+    {
+      path: SCREEN_SOCKET,
+      origins: () => screenOrigins(config.PORT),
+      wss: screenSockets,
+      onConnection: (socket) => hub.attachScreen(socket),
+    },
+  ]);
   try {
     if (paths.staticDir !== undefined) await registerStatic(app, resolve(paths.staticDir));
     await app.listen({ host: HOST, port: config.PORT });
@@ -99,6 +129,8 @@ export async function boot(
   );
   return {
     async close() {
+      hub.close();
+      screenSockets.close();
       await app.close();
       db.close();
     },

@@ -77,6 +77,11 @@ exactly `@fastify/websocket` → `ws`). Checked with `pnpm view` on 2026-11-14:
 The spec says a failed condition "is a stop for the owner, not a swap": PD1. **Owner, 2026-11-14:**
 `ws` and `@types/ws` approved; `@fastify/websocket` is not used.
 
+**Re-checked at T5, 2026-11-15** (`pnpm view`): `ws` 8.23.0, MIT, last modified 2026-11-12, no
+`dependencies` (`bufferutil`, `utf-8-validate` optional peers, not installed); `@types/ws` 8.18.2,
+MIT, last modified 2026-10-04, `dependencies` `@types/node` only. Both pass; installed exactly
+those versions in `server/` (`ws` a dependency, `@types/ws` a dev dependency).
+
 ## Decisions this plan makes
 
 Readings of the spec the planner had to choose. **Confirm** rows are for the audit to confirm or
