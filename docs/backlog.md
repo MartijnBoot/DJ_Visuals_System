@@ -280,7 +280,7 @@ guess. Depends on B-02 and B-06. Overlaps B-04's profile switching and live colo
 
 ### B-08 — A gate that load cannot turn red (D-02)
 
-- **Status:** specced → `docs/specs/phase-b-08-load-proof-gate.md`
+- **Status:** built → `docs/plans/phase-b-08-load-proof-gate.md`
 - **Added:** 2026-11-14
 - **Size:** M (two checks, a load reproduction, one gate change)
 

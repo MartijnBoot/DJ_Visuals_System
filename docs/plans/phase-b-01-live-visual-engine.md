@@ -75,7 +75,7 @@ rows and the owner answered each; the answers are the Decision column.
 | PD10 · Confirm | Persistence key and shape (SD6, AC5). | `localStorage` key `djv.sources`, value `{ cameraId?: string, audio?: { kind: "input", deviceId } \| { kind: "system" } }`, validated with a hand-written type guard (no zod in `web/` for a two-field object). A remembered system-audio source preselects the picker; Start still has to be pressed and the share dialog still opens. | One named key, the spec's words. |
 | PD11 · Owner (accepted 2026-11-11) | Picking a different device while running (SD6, AC9 covers only the dials). | The picker switches that one source immediately: the old track is stopped (recorded as the session's own stop, PD9), the new one requested; the other source and the dials are untouched. | A picker that needs a second Start is a trap at a gig; the spec's panel is live for the dials, so the pickers are read the same way. |
 | PD12 · Owner (decided 2026-11-11) | Start, then what (spec UI "Before Start" and "Running: no chrome"). | Before Start the pickers are **disabled** and show the remembered choice (AC5) or "default"; the dials and cap are live at all times. Start requests with the remembered ids or the defaults. On a successful Start the panel closes, the pickers enable, and `s` reopens it; a device is then changed through PD11. If camera and audio both fail, the panel stays open with the reasons; if only one fails the panel closes and the state shows in the overlay and panel as `lost`/`none`. | The spec's UI section says "the pickers disabled" before Start; the planner's earlier reading (enabled) contradicted it and the audit chose the spec. Labels are empty before permission anyway, so nothing is lost. |
-| PD13 · Confirm | AC10 in the gate (spec edge case "GPU cannot keep up"). | The browser test at 640×360 reads the overlay's p95 after 10 s with capture running and asserts it ≤ 50 ms. The sample is CPU-side (PD2) plus rAF scheduling, not GPU time. If SwiftShader on the CI runner cannot hold it, the builder stops and reports the numbers; the fallback the owner may choose is to assert the overlay shows three finite numbers and move the 50 ms to H3. | The spec's exit condition wants the machine to prove what it can; the fallback is written down so the decision is not made under a red gate. |
+| PD13 · Confirm | AC10 in the gate (spec edge case "GPU cannot keep up"). | The browser test at 640×360 reads the overlay's p95 after 10 s with capture running and asserts it ≤ 50 ms. The sample is CPU-side (PD2) plus rAF scheduling, not GPU time. If SwiftShader on the CI runner cannot hold it, the builder stops and reports the numbers; the fallback the owner may choose is to assert the overlay shows three finite numbers and move the 50 ms to H3. | The spec's exit condition wants the machine to prove what it can; the fallback is written down so the decision is not made under a red gate. Superseded by B-08 SD1 (`docs/specs/phase-b-08-load-proof-gate.md`). |
 | PD14 · Confirm | Fixtures for SD17. | `tests/browser/fixtures/media.ts` writes `click.wav` (4 s, 120 BPM, 30 ms bursts of a 60 Hz sine at −1 dBFS, silence between) and `camera.y4m` (10 frames at 10 fps, 320×180, left half one colour, right half another, the last 5 frames with the halves swapped) into the temporary directory from `playwright.config.ts:11`, synchronously at config load. | No binary in git; the click's low-band onsets are what AC6 needs and the half-swap is what AC8 needs. Probed formats. |
 | PD15 · Owner (accepted 2026-11-11) | Audio context suspended (AC14). | After Start, a `statechange` to `suspended` shows "audio paused by the browser — click anywhere to resume" in the panel and the overlay reads `audio: lost`; one `pointerdown` on the document calls `resume()`. The features decay as for loss. | The browser's autoplay rule needs a user gesture; one click anywhere is the least to ask. |
 | PD16 · Confirm | Wake lock and fullscreen in headless Chromium (AC16). | The code uses `navigator.wakeLock.request("screen")` on Start and on `visibilitychange` to visible, and `document.documentElement.requestFullscreen()` / `exitFullscreen()` on `f`. The browser test asserts the overlay reads `wake lock: held` or `wake lock: unavailable`, and separately, with `navigator.wakeLock` deleted, exactly `unavailable`; fullscreen is asserted through `document.fullscreenElement`. | Headless may refuse the lock; the test proves the path, H3 proves the lock on the real machine. |
@@ -98,9 +98,11 @@ showed; the builder stopped and the owner decided, and the code and the T9 tests
   never stepped up. A step up undone within 10 s doubles the next wait (20, 40, 80 s); one that
   holds 10 s resets it.
 - **PD7 / T9 (AC6).** The 120 ms decay stays; the browser test asserts ≤ 0.1 over the *last*
-  200 ms of each gap, not the middle, where the pulse's tail still reads about 0.25.
+  200 ms of each gap, not the middle, where the pulse's tail still reads about 0.25. Measured
+  on the audio clock since B-08 PD19; the thresholds are unchanged.
 - **PD13 (AC10).** The browser test reads the overlay after 20 s, once start-up has left the
   10 s window; the 50 ms threshold stays (measured p95 20.7 ms on SwiftShader at 640×360).
+  Superseded by B-08 SD1 (`docs/specs/phase-b-08-load-proof-gate.md`).
 
 **Changed at build (owner, 2026-11-12).** The gate on the T10 tip was red on AC6 in two of
 three runs (a gap read 449 ms, then 601 ms; the beat itself fired at every click):
@@ -110,7 +112,7 @@ three runs (a gap read 449 ms, then 601 ms; the beat itself fired at every click
   200 ms back from the next rise, stopping short of it. At 100 ms resolution the test's
   ±100 ms spacing tolerance equalled its own quantisation, and a gap read short enough for the
   fixed 280–480 ms window to reach the next click. The 120 ms decay, the ±100 ms spacing and
-  the ≤ 0.1 threshold are unchanged.
+  the ≤ 0.1 threshold are unchanged. Measured on the audio clock since B-08 PD19.
 
 ## Files
 

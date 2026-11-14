@@ -17,6 +17,8 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
 - `bash scripts/setup.sh` — clone to running stack. Idempotent.
 - `bash scripts/check.sh` — the gate: format, lint, types, build, unit, integration, browser,
   stopping at the first failure. CI runs this same script. Run it before calling any task done.
+- `pnpm check:load` — the gate under CPU and GPU load, for a suspected timing flake; not the
+  gate, not in CI ([docs/runbooks/README.md](docs/runbooks/README.md)).
 - `python scripts/check_plans.py --graph docs/plans/<plan>.md` — a plan's build order.
 - `pnpm start` — builds `web/dist`, then one process serves it and `/api` on `127.0.0.1:PORT`.
 - `pnpm dev` — the server under `node --watch` (API only) and Vite with hot reload on
