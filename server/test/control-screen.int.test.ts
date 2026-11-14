@@ -9,12 +9,12 @@ import WebSocket from "ws";
 import { pino } from "pino";
 import { boot } from "../src/boot.ts";
 import { loadConfig } from "../src/config.ts";
+import { closeAll, connect as connectClient, type Client } from "./control-client.ts";
 import { baseEnv, freePort, repoRoot, spawnServer, type SpawnedServer } from "./spawn-server.ts";
 
 let tmp: string;
 let server: SpawnedServer | undefined;
 let port: number;
-const open: WebSocket[] = [];
 
 beforeEach(async () => {
   tmp = mkdtempSync(join(tmpdir(), "djv-screen-"));
@@ -26,10 +26,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  for (const ws of open.splice(0)) {
-    ws.on("error", () => {}); // a refused socket reports its own closing as an error
-    ws.terminate();
-  }
+  closeAll();
   await server?.kill();
   server = undefined;
   rmSync(tmp, { recursive: true, force: true });
@@ -37,59 +34,15 @@ afterEach(async () => {
 
 const url = () => `ws://127.0.0.1:${port}/api/control/screen`;
 
-/** A client that keeps every message it receives, parsed with the shared schema. */
-interface Client {
-  ws: WebSocket;
-  messages: ToScreen[];
-  next(pred: (m: ToScreen) => boolean, timeoutMs?: number): Promise<ToScreen>;
-  send(message: unknown): void;
-}
-
-function connect(origin: string | undefined): Promise<Client> {
-  const ws = new WebSocket(url(), origin === undefined ? {} : { origin });
-  open.push(ws);
-  const messages: ToScreen[] = [];
-  const waiters = new Set<() => void>();
-  ws.on("message", (data) => {
-    messages.push(toScreenSchema.parse(JSON.parse(String(data))));
-    for (const w of waiters) w();
-  });
-  const client: Client = {
-    ws,
-    messages,
-    send: (message) => ws.send(typeof message === "string" ? message : JSON.stringify(message)),
-    next(pred, timeoutMs = 5000) {
-      const seen = messages.length;
-      return new Promise((resolve, reject) => {
-        const check = () => {
-          const found = messages.slice(seen).find(pred);
-          if (found) {
-            waiters.delete(check);
-            clearTimeout(timer);
-            resolve(found);
-          }
-        };
-        const timer = setTimeout(() => {
-          waiters.delete(check);
-          reject(new Error(`no matching message within ${timeoutMs} ms`));
-        }, timeoutMs);
-        waiters.add(check);
-      });
-    },
-  };
-  return new Promise((resolve, reject) => {
-    ws.once("open", () => resolve(client));
-    ws.once("unexpected-response", (_req, res) => reject(new Error(`HTTP ${res.statusCode}`)));
-    ws.once("error", reject);
-  });
-}
+const connect = (origin: string | undefined) =>
+  connectClient(url(), toScreenSchema, origin === undefined ? {} : { origin });
 
 const status = (m: ToScreen) => m.type === "status";
 
 /** The first status arrives on connect; wait for it. */
 async function connected(origin: string) {
   const client = await connect(origin);
-  if (!client.messages.some(status)) await client.next(status);
+  await client.find(status);
   return client;
 }
 
@@ -115,10 +68,14 @@ const state = (profiles: number): ScreenState => ({
 
 const warns = () => server!.lines().filter((l) => l.level === 40);
 
-/** `enable` is answered with a status: proof every message before it was handled. */
-async function roundTrip(client: Client) {
+/**
+ * `disable` is answered with a status: proof every message before it was handled. Never
+ * `enable`: this spawned server has no address seam, and the gate never binds a LAN address
+ * (B-04 SD29).
+ */
+async function roundTrip(client: Client<ToScreen>) {
   const answer = client.next(status);
-  client.send({ type: "enable" });
+  client.send({ type: "disable" });
   return answer;
 }
 
@@ -153,12 +110,9 @@ describe("the screen socket's Origin (AC16, SD25, PD2)", () => {
   });
 
   it("answers 404 to an upgrade on any other path", async () => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/health`, { origin: own() });
-    open.push(ws);
-    const code = await new Promise<number>((resolve) =>
-      ws.once("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0)),
-    );
-    expect(code).toBe(404);
+    await expect(
+      connectClient(`ws://127.0.0.1:${port}/api/health`, toScreenSchema, { origin: own() }),
+    ).rejects.toThrow("HTTP 404");
   });
 });
 
@@ -193,25 +147,16 @@ describe("messages on the screen socket (AC33, PD3)", () => {
     expect(warns().map((l) => l.type)).toEqual(["unparseable", "colour"]);
     for (const line of server!.lines()) expect(JSON.stringify(line)).not.toContain("#ff0000");
   });
-
-  it("answers enable, until the LAN listener exists, with off and unavailable", async () => {
-    const client = await connected(own());
-    expect(await roundTrip(client)).toEqual({
-      type: "status",
-      status: expect.objectContaining({ on: false, error: "unavailable" }),
-    });
-  });
 });
 
 describe("two screen pages (AC31, SD13, SD27)", () => {
   it("makes the last to connect the target; the first gets superseded and nothing further", async () => {
     const first = await connected(own());
     const second = await connected(own());
-    const superseded = (m: ToScreen) => m.type === "superseded";
-    if (!first.messages.some(superseded)) await first.next(superseded);
+    await first.find((m) => m.type === "superseded");
     const before = first.messages.length;
     await roundTrip(second);
-    first.send({ type: "enable" });
+    first.send({ type: "disable" });
     await roundTrip(second);
     expect(first.messages.length).toBe(before);
     const msgs = server!.lines().map((l) => l.msg);
@@ -234,13 +179,13 @@ describe("shutdown", () => {
       { migrationsDir: resolve(repoRoot, "server/migrations") },
       pino({ level: "silent" }),
     );
-    const ws = new WebSocket(`ws://127.0.0.1:${inProcess}/api/control/screen`, {
-      origin: `http://127.0.0.1:${inProcess}`,
-    });
-    open.push(ws);
-    await new Promise((resolve) => ws.once("message", resolve));
-    const closed = new Promise<void>((resolve) => ws.once("close", () => resolve()));
+    const client = await connectClient(
+      `ws://127.0.0.1:${inProcess}/api/control/screen`,
+      toScreenSchema,
+      { origin: `http://127.0.0.1:${inProcess}` },
+    );
+    await client.find(status);
     await booted.close();
-    await closed;
+    await client.closed;
   });
 });

@@ -78,6 +78,11 @@ describe("static serving (AC10)", () => {
     expect((await fetch(`http://127.0.0.1:${port}/nope`)).status).toBe(404);
   });
 
+  it("answers 404 for /control: the controller page is the LAN listener's only (B-04 SD2)", async () => {
+    const port = await serve(plantSite());
+    expect((await fetch(`http://127.0.0.1:${port}/control`)).status).toBe(404);
+  });
+
   it("still answers /api/health", async () => {
     const port = await serve(plantSite());
     const response = await fetch(`http://127.0.0.1:${port}/api/health`);

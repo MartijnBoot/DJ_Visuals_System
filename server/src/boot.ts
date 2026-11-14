@@ -6,7 +6,10 @@ import { join, resolve } from "node:path";
 import { MAX_SCREEN_MESSAGE } from "@djv/shared";
 import { createApp, registerStatic } from "./app.ts";
 import { ConfigError, type Config } from "./config.ts";
+import { defaultControlAddresses, type ControlAddress } from "./control/addresses.ts";
 import { createHub } from "./control/hub.ts";
+import { createLan } from "./control/lan.ts";
+import { createPairing } from "./control/pairing.ts";
 import { routeUpgrades, socketServer } from "./control/upgrade.ts";
 import { openDatabase, type Db } from "./db.ts";
 import { registerHealth } from "./health.ts";
@@ -37,6 +40,11 @@ export interface BootPaths {
   migrationsDir: string;
   /** The built web app to serve; absent means API only (`--api-only`, plan PD10). */
   staticDir?: string;
+  /**
+   * The addresses External control binds (B-04 SD29, PD10); absent means the machine's private
+   * IPv4 addresses. Tests pass `127.0.0.1`, so the gate never binds a real LAN address.
+   */
+  controlAddresses?: () => ControlAddress[];
 }
 
 export interface Booted {
@@ -101,7 +109,22 @@ export async function boot(
   // External control (B-04): the screen socket on this listener. Its `maxPayload` sits above
   // the message limit, so an oversized message is dropped with a warn rather than closing the
   // socket (AC33); `ws` closes beyond it.
-  const hub = createHub({ log, controlPort: config.CONTROL_PORT, now: () => Date.now() });
+  const now = () => Date.now();
+  const hub = createHub({
+    log,
+    controlPort: config.CONTROL_PORT,
+    now,
+    pairing: createPairing({
+      now,
+      random: (size) => crypto.getRandomValues(new Uint8Array(size)),
+    }),
+    lan: createLan({
+      log,
+      port: config.CONTROL_PORT,
+      ...(paths.staticDir === undefined ? {} : { staticDir: resolve(paths.staticDir) }),
+      addresses: paths.controlAddresses ?? defaultControlAddresses,
+    }),
+  });
   const screenSockets = socketServer(4 * MAX_SCREEN_MESSAGE);
   routeUpgrades(app.server, [
     {
@@ -129,7 +152,7 @@ export async function boot(
   );
   return {
     async close() {
-      hub.close();
+      await hub.close();
       screenSockets.close();
       await app.close();
       db.close();
