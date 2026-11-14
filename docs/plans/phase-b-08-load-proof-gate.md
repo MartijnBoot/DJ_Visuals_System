@@ -519,6 +519,49 @@ the AC6 failure is an assertion on a value the owner set (2026-11-11), not a tim
 
 ### After the fix (T7)
 
+Tree: the stack tip `319315a` (T1 to T6, T9 to T12), Windows dev machine.
+
+**(a) `bash scripts/check.sh`, quiet machine (15:40 UTC): red**, exit 1 at step 9 (browser):
+steps 1 to 8 green (54 workflow, 342 unit, 51 integration tests); browser 95 passed, 1 failed:
+`live.spec.ts:424` "slow frames step the render scale down … on twelve effects (AC15, B-02
+AC17)", `no step up within 12 s of headroom` (Expected true, Received false); the scale reached
+50% and did not return to 75% within the test's 12 s. Re-run alone on the same tip with
+`--repeat-each=5`: 5 passed. AC15 asks for a step up "after 10 s of headroom"; the test's 12 s
+leaves about 1 s once the one-second mean has settled. No B-08 task touches `engine/src/scale.ts`
+or this test. **The render-scale test: the owner's question (SD7, PD17).**
+
+Because (a) is red, the three runs below are **diagnostic, not AC1**: AC1 needs a tree whose
+gate is green.
+
+| Run | Started (UTC) | Exit | Unit | Integration | Browser |
+|---|---|---|---|---|---|
+| 1 | 15:48:29 | 1 | 342/342 | 51/51 | 95 passed, 1 failed (14.8 min) |
+| 2 | 16:07:20 | 0 | 342/342 | 51/51 | 96 passed (13.8 min); `all 9 step(s) passed` |
+| 3 | 16:25:04 | 1 | 342/342 | 51/51 | 94 passed, 2 failed (12.4 min) |
+
+After each run: no listener on 8123 or 8124, no `chrome-headless-shell.exe`.
+
+Under load, fixed and holding in all three runs: both compat files and the latency-window test
+(T3, T9), all 51 integration tests (T10), the latency structure check on both looks (T4; the
+overlay read p95 347 to 582 ms, which the old 50 ms bound would have failed every run), AC6 on
+the audio clock (T12; spacing within ±8 ms of 500, worst gap end 0.079 to 0.085), the
+render-scale tests (T11; no time-limit failure).
+
+Red under load, new (**other**, SD7):
+
+- Run 1: `live.spec.ts:378` audio lost (AC12), at `:402` `expectCanvasChanging`: "the canvas
+  did not change in 500 ms" (two screenshots 500 ms apart identical, after the loss).
+- Run 3: `live.spec.ts:378` camera lost (AC13), at `:406`: `overlay-camera` still read
+  `camera: lost` after the device returned, within the test's 2500 ms. B-01 AC13 sets no time
+  for the camera; AC12 sets "within 2 s" for audio, and the same line serves both.
+- Run 3: `preview.spec.ts:185` camera denied, preview stays generative (B-02 AC4), at `:196`:
+  the darkest preview sample over 1.5 s read luma 0 (Expected ≥ 2). A value, not a limit: a
+  black or not-yet-drawn preview sample under load.
+
+**T7 stopped here** for the owner: the render-scale verdict changed on a quiet machine, and
+three more checks went red under load, one of them on a spec time (AC12's 2 s) and one on a
+value (B-02 AC4).
+
 ## Audit (PASS required before implementation starts)
 
 - [x] Every AC maps to at least one task
