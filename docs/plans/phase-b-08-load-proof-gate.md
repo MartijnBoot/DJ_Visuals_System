@@ -56,6 +56,10 @@ Rejected:
 **Amendment 1 (2026-11-14).** T2's reproduction, and the later steps run under the same load
 (Evidence), turned checks outside D-02 red. PD17 to PD19 and T9 to T12 fix them; T7 now
 depends on all four. Audited separately (Audit section, amendment 1).
+
+**Amendment 2 (2026-11-14).** T7's first attempt went red (Evidence, After the fix). PD20,
+PD21, T13 and T14 answer it; T7 now also depends on T13 and T14 and starts again from (a).
+Audited separately (Audit section, amendment 2).
 - Keeping the 20 s sleep in the latency test. It existed so that start-up left the 10 s window
   before a millisecond bound was read; with no bound there is nothing to wait out (PD9).
 
@@ -85,6 +89,8 @@ overrule; **Owner** rows are user-visible choices the spec left open, and each o
 | PD17 · Owner (amendment 1, answered 2026-11-14) | The reproduction turned checks outside D-02 red (Evidence, T2 and its H2 evidence). How is each fixed (SD7)? | **Owner chose the recommendations of 2026-11-14:** (a) `engine/src/latency.test.ts:28` loses its per-test limit (T9); (b) the integration project loses vitest's per-test limit (T10); (c) the browser tests lose Playwright's per-test limit, every assertion inside them kept, the render-scale tests included (T11); (d) AC6 is measured on the audio clock (T12, PD19). If a render-scale assertion itself then fails under load, that is the owner's question again (T7). `.github/workflows/` stays unchanged: the job keeps GitHub's default limit. | Each of (a) to (c) asserts behaviour, not its own duration; every failure was a limit, never an assertion. (d) was an assertion, so it gets a property fix, not a limit. |
 | PD18 · Confirm (amendment 1) | Where do the integration and browser limits go? | `vitest.config.ts`: `testTimeout: 0` on the `integration` project only; the `unit` project keeps vitest's default and `{ timeout: 0 }` stays per describe there (PD7, T3, T9). `playwright.config.ts`: `timeout: 0` for the whole run. Every integration test spawns the real server and every browser test drives a real Chromium; none asserts its own total duration; the waits that are assertions (`expect(...)` with a `timeout`, the measured spacings) are inside the tests and untouched. | Per-test lists would be whack-a-mole: the H2 run showed which tests crossed 30 s *that* time (`:74` took 37.4 s and passed). The cost, accepted by the owner: a hang, including a locator waiting on an element that never appears, runs until the CI job's limit instead of failing at 30 s. PD7's rejection of a global limit stands for the unit project. |
 | PD19 · Confirm (amendment 1) | How is AC6 made load-proof without changing what it asserts? | `tests/browser/live.spec.ts:47`: an init script (test code, in the style of `record()` in `tests/browser/helpers.ts`) wraps `AudioWorkletNode` and adds a `message` listener on each node's port beside the product's `onmessage`, keeping `{ contextTime, beat }` of every window the worklet posts. The test reads 3 s of those after the first second and asserts, with `t = contextTime × 1000`: at least 5 rises (beat ≥ 0.5 after < 0.5); every gap within ±100 ms of 500 ms; beat ≤ 0.1 over the last 200 ms of each gap, measured back from the next rise and stopping short of it. The 120 ms decay, ±100 ms, 0.1 and 200 ms are unchanged (B-01 plan PD7, owner 2026-11-12). | The failure was the display's clock, not the audio: 0.118 is exp(−256/120), the pulse's tail 256 ms after a click, pulled into the window because displayed rises jittered (a gap read 405 ms). `contextTime` is when the audio was processed; load can delay a message, not change it. No product code changes (spec, Out of scope: no test-only instrumentation in the product). The meter's display path stays covered by `panel.spec.ts:33` ("the meters move"). |
+| PD20 · Owner (amendment 2, answered 2026-11-14) | T7 went red (Evidence, After the fix): the render-scale step up on a quiet machine, and under load AC12's "keeps rendering", AC13's reattach and B-02 AC4's preview. How is each fixed (SD7)? | **Owner chose the recommendations of 2026-11-14 (R1 to R4):** R1, the render-scale step up (`live.spec.ts:466`) is awaited with no limit of its own and still asserted, its time recorded with `note` (T13). R2, after a loss the loss test waits, with no limit, until two canvas reads differ, instead of requiring it within 500 ms (T13). R3, the reattach wait (`:406`) has no limit for the camera and keeps 2500 ms for audio (T13). R4, the preview luma 0 is investigated before any fix: the investigation is in the Evidence (not reproduced); the test now attaches its darkest samples so a recurrence says what it saw (T14). | R1 to R3 each wait for a behaviour the spec names without a time (AC15's step up is "after 10 s with headroom", a minimum, not a deadline; AC12/AC13 "keep rendering"; AC13's reattach has no time). AC12's reattach "within 2 s of its return" is a spec time and keeps its limit. R4 has no proven cause, so nothing is fixed blind. |
+| PD21 · Confirm (amendment 2) | Is `expectCanvasChanging` (`tests/browser/helpers.ts:218`) changed for R2? | No. Its "two reads 500 ms apart differ" is Phase 0 AC11's own wording (`docs/specs/phase-0-walking-skeleton.md:199-200`) and `screen.spec.ts:43` asserts exactly that. R2 adds a local wait in `live.spec.ts` for the loss test only; `:419` (a denied camera, not red) keeps the helper. | A spec criterion's wording is not this item's to relax; the loss test's claim is "keeps rendering", not a rate. |
 | PD16 · Confirm | Does the harness build the web app first? | No. It needs `web/dist/index.html`; without it `boot()` already fails with "run pnpm build" (`server/src/boot.ts:73-75`), and the harness lets that message through and exits before starting the gate. | AC1 runs on a tree whose gate is green, so the build exists. No second way to build. |
 
 ## Files
@@ -120,7 +126,8 @@ overrule; **Owner** rows are user-visible choices the spec left open, and each o
 | `docs/plans/phase-b-08-load-proof-gate.md` | Modify | The Evidence section (T2, T7) |
 | `engine/src/latency.test.ts` | Modify | No per-test limit on the bounded-window test (T9, amendment 1) |
 | `vitest.config.ts` | Modify | `testTimeout: 0` on the integration project (T10, PD18) |
-| `tests/browser/live.spec.ts` | Modify | AC6 on the audio clock (T12, PD19), after T4 |
+| `tests/browser/live.spec.ts` | Modify | AC6 on the audio clock (T12, PD19), after T4; R1 to R3 (T13, PD20), after T12 |
+| `tests/browser/preview.spec.ts` | Modify | The camera-denied test attaches its darkest samples (T14, PD20 R4) |
 
 Not changed: `.github/workflows/`, `tests/workflow/test_gate_steps.py`, anything in
 `engine/src/` or `audio/src/` except the two test files (`index.test.ts`, `latency.test.ts`),
@@ -286,7 +293,7 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
 - **Verification:** `bash scripts/check.sh`, then `pnpm check:load` three times, then the two
   renames with `pnpm typecheck` and `pnpm run test --project unit tests/meta`, then
   `bash scripts/check.sh` with 8123 held
-- **Depends on:** T3, T4, T5, T6, T9, T10, T11, T12
+- **Depends on:** T3, T4, T5, T6, T9, T10, T11, T12, T13, T14
 - **Autonomy note:** Builder changes no source file; the renames are temporary and reverted.
   The three runs are consecutive: a red run is not re-run to get three greens. Stop and report
   with the output if any run is red (SD7: a new check gets a plan amendment and an audit; the
@@ -376,6 +383,43 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   Chromium's fake capture device feeding it: T7's three load runs are the proof, and an
   audio-clock gap outside ±100 ms there is a stop for the owner, never a tolerance change.
 
+### T13 — Render scale, loss and reattach wait for behaviour, not a deadline (amendment 2)
+- **Implements:** AC1, SD7
+- **Expected output:** In `tests/browser/live.spec.ts`, per PD20 and PD21:
+  (R1) the render-scale tests (`:424`, both looks): after the slow frames stop, the test waits
+  for `scale 75%` with `{ timeout: 0 }`, measures the wait on the page's clock from the moment
+  the wrap is removed, attaches it with `note` ("AC15 step up after (ms)", a measurement), and
+  still asserts every reading is 100, 75 or 50%. The `recovered` flag and the "within 12 s"
+  message are gone. The step-down waits (4 s, 8 s) and the 3 s hold at 50% are unchanged (not
+  red).
+  (R2) the loss test (the `:374` loop, `:402`): instead of `expectCanvasChanging`, a local
+  function takes one canvas read and then reads again every 250 ms, with no limit, until one
+  differs; the number of reads is attached with `note`. `helpers.ts` is unchanged, and so is
+  `:419`.
+  (R3) the reattach wait (`:406`): `{ timeout: 2500 }` for audio (AC12's "within 2 s of its
+  return"), `{ timeout: 0 }` for the camera (AC13 sets no time), with a comment saying so.
+  The file header names B-08 PD20 once. Nothing else in the file changes.
+- **Verification:** `pnpm exec playwright test tests/browser/live.spec.ts -g "lost|slow frames"`;
+  then once by hand, reverted, output in the report: with the slow-frame wrap never removed, the
+  step-up wait does not resolve within 60 s (the run is stopped by hand), so the wait is not
+  vacuous.
+- **Depends on:** T12
+- **Autonomy note:** Builder settles the local function's name and the note labels. Stop if
+  any other assertion in the file would need to change, or if the audio reattach fails within
+  2500 ms on a quiet machine (that is AC12's own time: an owner question).
+
+### T14 — The preview's camera-denied test says what it saw (amendment 2)
+- **Implements:** AC1, SD7
+- **Expected output:** `tests/browser/preview.spec.ts:185-200`: before the luma assertion at
+  `:196`, the test attaches with `test.info().annotations` (the style of `note` in
+  `live.spec.ts`) the series length, the minimum, and the five darkest samples with their
+  time from the series' start. The assertion `≥ 2` and everything else are unchanged.
+- **Verification:** `pnpm exec playwright test tests/browser/preview.spec.ts -g "camera denied"`
+- **Depends on:** T2
+- **Autonomy note:** No assertion, threshold or wait changes. If T7 sees it red again, that is
+  a stop with the attached samples: a black preview frame under load would be a product defect
+  for the defect register (the engine has no WebGL context-loss handling), outside this item.
+
 ## Task graph
 
 | Group | Tasks | Files they touch |
@@ -389,9 +433,11 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
 | 3 | T9 | `engine/src/latency.test.ts` |
 | 3 | T10 | `vitest.config.ts` |
 | 3 | T11 | `playwright.config.ts` |
+| 3 | T14 | `tests/browser/preview.spec.ts` |
 | 4 | T12 | `tests/browser/live.spec.ts` |
-| 5 | T7 | this plan (Evidence) |
-| 6 | T8 | `docs/invariants.md`, `docs/specs/defect-register.md`, `docs/plans/phase-b-01-live-visual-engine.md`, `docs/specs/phase-b-01-live-visual-engine.md`, `docs/runbooks/README.md`, `CLAUDE.md`, `docs/backlog.md` |
+| 5 | T13 | `tests/browser/live.spec.ts` |
+| 6 | T7 | this plan (Evidence) |
+| 7 | T8 | `docs/invariants.md`, `docs/specs/defect-register.md`, `docs/plans/phase-b-01-live-visual-engine.md`, `docs/specs/phase-b-01-live-visual-engine.md`, `docs/runbooks/README.md`, `CLAUDE.md`, `docs/backlog.md` |
 
 No two tasks in one group write the same file. `python scripts/check_plans.py --graph <this
 file>` prints the groups the `Depends on` fields actually give. Group 3: T6 reads
@@ -421,6 +467,8 @@ file into a temporary directory that the harness removes.
 | With no per-test limit (PD18), a browser regression that leaves an element missing hangs the gate instead of failing it at 30 s; in CI it runs to GitHub's default job limit. | Accepted by the owner (PD17). Locally the hang is visible; the next owner decision may add a job `timeout-minutes`, which is a `.github/workflows/` change outside this plan. |
 | Measured on the audio clock (PD19), AC6 no longer exercises the meter's display path. | `panel.spec.ts:33` still proves the meters move after Start. |
 | A render-scale assertion (`live.spec.ts:384`, `:440`) may fail under load once the 30 s limit is gone. | T7 stops and asks (PD17). |
+| With no limit on the step-up, loss and camera-reattach waits (PD20), a product regression there hangs instead of failing. | The same accepted cost as PD18. T13's verification shows the step-up wait does not pass vacuously. |
+| The preview's luma 0 (B-02 AC4) was not reproduced and has no proven cause (PD20 R4). | T14 records what a recurrence saw; a recurrence in T7 is a stop, and a proven black frame is a defect-register entry, not a test change. |
 | `testTimeout: 0` does not lift vitest's 10 s `hookTimeout`; the integration files stop a server in `afterEach`. The H2 run passed 51/51, so there is no evidence of a problem yet. | A hook timeout in T7 is a new red check (SD7: amendment and audit), not a flake. |
 
 ## Human steps
@@ -445,7 +493,8 @@ file into a temporary directory that the harness removes.
   relative latency bound, the 50 ms anywhere but the screen machine, `pnpm check:load` in CI,
   killing or refusing on a held 8123, detecting another WebGL page.
 - Fixes for checks that have not gone red under the load. Those that did are amendment 1
-  (PD17, T9 to T12); one that goes red later, in T7, enters by a further audited amendment.
+  (PD17, T9 to T12) and amendment 2 (PD20, T13, T14); one that goes red later, in T7, enters by
+  a further audited amendment.
 - `.github/workflows/ci.yml` and `tests/workflow/test_gate_steps.py`: not changed.
   `vitest.config.ts`: not changed except the integration project's `testTimeout` (PD18, T10).
 - `docs/design/architecture.md`: nothing in it becomes untrue.
@@ -561,6 +610,20 @@ Red under load, new (**other**, SD7):
 **T7 stopped here** for the owner: the render-scale verdict changed on a quiet machine, and
 three more checks went red under load, one of them on a spec time (AC12's 2 s) and one on a
 value (B-02 AC4).
+
+**R4 investigation (2026-11-14, owner's R4: investigate before any fix).** A throwaway copy of
+`preview.spec.ts:185` (untracked, deleted afterwards) logged every luma sample and counted
+`blitFramebuffer` calls between samples, and ran 25 times under `runUnderLoad` on `319315a`:
+25 of 25 passed, minimum luma 85.5 to 86.9, exactly one blit per sample, no dark sample. The
+failing run 3 printed no browser log for this test. Not reproduced. Candidate causes, neither
+proven: a WebGL context loss under two software-GL Chromiums (the engine registers no
+`webglcontextlost` handler, so a lost context reads black), or the test reading a frame the
+engine had not drawn. No fix is made without a cause (PD20 R4); T14 makes a recurrence report
+its darkest samples. Separately, the H2 run's browser logs show
+`glBlitFramebuffer: Blit feedback loop` errors on the screen page under load; not linked to a
+failure, recorded here only.
+
+**Amendment 2** (PD20, PD21, T13, T14) answers the above; T7 is then run again from (a).
 
 ## Audit (PASS required before implementation starts)
 
