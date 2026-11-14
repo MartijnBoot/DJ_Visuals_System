@@ -2,9 +2,8 @@
 // driven by the synthetic loop and the generative input until Start, then by the real camera and
 // audio. Profiles are created through the real API and edited in the real editor.
 import { expect, test, type Page } from "@playwright/test";
-import { LEFT_RGB, RIGHT_RGB } from "./fixtures/media.ts";
 import { createProfile, deleteAll, type Definition, type Stored } from "./fixtures/profiles.ts";
-import { near, patch, pixels, record, recorded } from "./helpers.ts";
+import { cameraColours, near, patch, pixels, record, recorded } from "./helpers.ts";
 
 test.beforeEach(async ({ request }) => {
   await deleteAll(request);
@@ -167,14 +166,15 @@ test("after Start the three constraints are off and the picture follows the fake
   });
 
   const { width, height } = await size(page);
+  const [leftRgb, rightRgb] = await cameraColours(page); // as this browser decodes them (D-01)
   await expect
     .poll(
       async () => {
         const l = await patch(page, width / 4, height / 2, 8, "preview");
         const r = await patch(page, (3 * width) / 4, height / 2, 8, "preview");
         return (
-          (near(l, LEFT_RGB, 12) && near(r, RIGHT_RGB, 12)) ||
-          (near(l, RIGHT_RGB, 12) && near(r, LEFT_RGB, 12))
+          (near(l, leftRgb, 12) && near(r, rightRgb, 12)) ||
+          (near(l, rightRgb, 12) && near(r, leftRgb, 12))
         );
       },
       { timeout: 15_000 },
@@ -195,8 +195,9 @@ test("with the camera denied the preview stays generative (AC4)", async ({ page,
   const series = await lumaSeries(page, 1500);
   expect(Math.min(...series.map((s) => s.luma))).toBeGreaterThanOrEqual(2);
   const { width, height } = await size(page);
+  const [leftRgb, rightRgb] = await cameraColours(page);
   const l = await patch(page, width / 4, height / 2, 8, "preview");
-  expect(near(l, LEFT_RGB, 12) || near(l, RIGHT_RGB, 12)).toBe(false);
+  expect(near(l, leftRgb, 12) || near(l, rightRgb, 12)).toBe(false);
 });
 
 test("the output screen has no preview, and the builder has no screen canvas (AC4)", async ({

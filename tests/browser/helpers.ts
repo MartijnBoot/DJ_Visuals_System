@@ -3,6 +3,7 @@
 // its device went away. Canvas reads happen in a frame callback queued after the engine's, so
 // the WebGL drawing buffer still holds the frame just drawn. No test code ships in the page.
 import { expect, type Page } from "@playwright/test";
+import { CAMERA, LEFT_RGB } from "./fixtures/media.ts";
 
 export interface Recorded {
   calls: { fn: string; constraints: unknown }[];
@@ -137,6 +138,47 @@ export async function patch(
 ): Promise<number[]> {
   const data = await pixels(page, x - size / 2, y - size / 2, size, size, testid);
   return meanRgb(data);
+}
+
+/**
+ * The fake camera's two colours as this browser decodes them, in fixture order (the decode of
+ * LEFT_RGB first). Chromium turns the I420 fixture into RGB with BT.601 on Windows and BT.709 on
+ * Linux (D-01), so the encoded LEFT_RGB and RIGHT_RGB are what only one platform shows; "the
+ * camera image unchanged" means unchanged from the browser's own decode. Read on a page of its
+ * own, so the page under test records no extra media request.
+ */
+export async function cameraColours(page: Page): Promise<[number[], number[]]> {
+  const probe = await page.context().newPage();
+  try {
+    await probe.goto("/api/health");
+    const [a, b] = await probe.evaluate(
+      async ({ width, height, seam }) => {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const video = document.createElement("video");
+        video.muted = true;
+        video.srcObject = stream;
+        await video.play();
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const g = canvas.getContext("2d")!;
+        g.drawImage(video, 0, 0, width, height);
+        stream.getTracks().forEach((t) => t.stop());
+        const mean = (x: number) => {
+          const d = g.getImageData(x - 4, height / 2 - 4, 8, 8).data;
+          const sum = [0, 0, 0];
+          for (let i = 0; i < d.length; i += 4) for (let c = 0; c < 3; c++) sum[c]! += d[i + c]!;
+          return sum.map((v) => v / (d.length / 4));
+        };
+        return [mean(seam / 4), mean((seam + width) / 2)];
+      },
+      { width: CAMERA.width, height: CAMERA.height, seam: CAMERA.seam },
+    );
+    const distance = (p: number[]) => p.reduce((s, v, i) => s + Math.abs(v - LEFT_RGB[i]!), 0);
+    return distance(a!) <= distance(b!) ? [a!, b!] : [b!, a!];
+  } finally {
+    await probe.close();
+  }
 }
 
 export function meanRgb(rgba: number[]): number[] {

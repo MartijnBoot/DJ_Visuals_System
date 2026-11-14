@@ -3,9 +3,9 @@
 // the latency number, loss and reattachment, and render scaling. Measured values are attached
 // to the report next to the thresholds they are held to.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { LEFT_RGB, RIGHT_RGB } from "./fixtures/media.ts";
 import { createProfile, deleteAll, twelveEffects, type Definition } from "./fixtures/profiles.ts";
 import {
+  cameraColours,
   expectCanvasChanging,
   meanRgb,
   near,
@@ -188,17 +188,19 @@ test("recognisability 0 shows the camera; at 1 nothing finer than a block (AC8, 
   note("AC8 largest channel range of the left half over 1.2 s at recognisability 1", range);
   expect(range).toBeGreaterThan(40);
 
-  // Both dials at 0: the camera image unchanged within ±12 per channel (PD8).
+  // Both dials at 0: the camera image, as this browser decodes it, unchanged within ±12 per
+  // channel (PD8; D-01).
   await slide(page, "recognisability", "Home");
   await slide(page, "reactivity", "Home");
+  const [leftRgb, rightRgb] = await cameraColours(page);
   await expect
     .poll(
       async () => {
         const l = await patch(page, width / 4, height / 2);
         const r = await patch(page, (3 * width) / 4, height / 2);
         return (
-          (near(l, LEFT_RGB, 12) && near(r, RIGHT_RGB, 12)) ||
-          (near(l, RIGHT_RGB, 12) && near(r, LEFT_RGB, 12))
+          (near(l, leftRgb, 12) && near(r, rightRgb, 12)) ||
+          (near(l, rightRgb, 12) && near(r, leftRgb, 12))
         );
       },
       { timeout: 3000 },
