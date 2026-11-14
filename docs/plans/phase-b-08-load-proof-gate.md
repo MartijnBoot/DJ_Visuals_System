@@ -92,7 +92,7 @@ overrule; **Owner** rows are user-visible choices the spec left open, and each o
 | Path | Create/Modify | Purpose |
 |---|---|---|
 | `tests/browser/fixtures/launch.ts` | Create | The gate's port, the load's port, the viewport and the Chromium flags, in one place (PD3) |
-| `playwright.config.ts` | Modify | Import the above; behaviour unchanged |
+| `playwright.config.ts` | Modify | T1: import the above, behaviour unchanged. T11: `timeout: 0` (PD18) |
 | `scripts/port-check.ts` | Create | `canBind(port)`; exits 0/1 as a script (PD12) |
 | `scripts/port-check.test.ts` | Create | Unit test of `canBind` |
 | `scripts/under-load.ts` | Create | `runUnderLoad(options)`: the workers, the server, the Chromium, the gate child, the teardown (SD4) |
@@ -120,7 +120,6 @@ overrule; **Owner** rows are user-visible choices the spec left open, and each o
 | `docs/plans/phase-b-08-load-proof-gate.md` | Modify | The Evidence section (T2, T7) |
 | `engine/src/latency.test.ts` | Modify | No per-test limit on the bounded-window test (T9, amendment 1) |
 | `vitest.config.ts` | Modify | `testTimeout: 0` on the integration project (T10, PD18) |
-| `playwright.config.ts` | Modify | `timeout: 0` (T11, PD18) |
 | `tests/browser/live.spec.ts` | Modify | AC6 on the audio clock (T12, PD19), after T4 |
 
 Not changed: `.github/workflows/`, `tests/workflow/test_gate_steps.py`, anything in
@@ -347,7 +346,11 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   `fullyParallel: false`, `webServer` and the launch module are unchanged. No spec file changes
   in this task; every `expect(..., { timeout })` inside the tests, the render-scale tests' 4, 8
   and 12 s included, stays as it is (PD17).
-- **Verification:** `pnpm exec playwright test tests/browser/screen.spec.ts tests/browser/under-load.spec.ts`
+- **Verification:** `pnpm exec playwright test tests/browser/screen.spec.ts tests/browser/under-load.spec.ts`.
+  This shows the config still runs; it cannot show the limit is gone (`under-load.spec.ts`
+  already sets its own `timeout: 0`, and nothing here runs past 30 s on a quiet machine). The
+  proof for T9, T10 and T11 is T7's three load runs, where those tests ran past their limits
+  before (Evidence).
 - **Depends on:** T2
 - **Autonomy note:** Builder settles the comment. Do not touch `expect.timeout`, `actionTimeout`
   or `navigationTimeout`, and do not add `globalTimeout`: each is a new wall-clock limit the
@@ -358,7 +361,8 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
 - **Expected output:** `tests/browser/live.spec.ts:47-72` per PD19: an init script records
   `{ contextTime, beat }` from every `AudioWorkletNode` port message; the test asserts at least
   5 rises, every gap within ±100 ms of 500 ms and beat ≤ 0.1 over each gap's last 200 ms, all
-  on `contextTime × 1000`. The rises, the gaps and the worst gap-end value are still attached
+  on `contextTime × 1000`. The 1 s warm-up and the 3 s span are both measured in `contextTime`
+  from the first recorded window, never on the page's clock. The rises, the gaps and the worst gap-end value are still attached
   with `note`. The title still names AC6; the comment at `:55-58` says the clock is the audio's
   since B-08 PD19 and why. `sampleMeter` is removed if nothing else uses it.
 - **Verification:** `pnpm exec playwright test tests/browser/live.spec.ts -g "AC6"`, then the
@@ -368,7 +372,9 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
 - **Autonomy note:** Builder settles the init script's shape. No product file changes. Stop if
   the port's messages cannot be observed from the page without changing `audio/` or `web/`,
   or if the audio-clock gaps break ±100 ms on a quiet machine (that is a product question,
-  not a tolerance).
+  not a tolerance). That load cannot move `contextTime` is proven for the worklet, not for
+  Chromium's fake capture device feeding it: T7's three load runs are the proof, and an
+  audio-clock gap outside ±100 ms there is a stop for the owner, never a tolerance change.
 
 ## Task graph
 
@@ -415,6 +421,7 @@ file into a temporary directory that the harness removes.
 | With no per-test limit (PD18), a browser regression that leaves an element missing hangs the gate instead of failing it at 30 s; in CI it runs to GitHub's default job limit. | Accepted by the owner (PD17). Locally the hang is visible; the next owner decision may add a job `timeout-minutes`, which is a `.github/workflows/` change outside this plan. |
 | Measured on the audio clock (PD19), AC6 no longer exercises the meter's display path. | `panel.spec.ts:33` still proves the meters move after Start. |
 | A render-scale assertion (`live.spec.ts:384`, `:440`) may fail under load once the 30 s limit is gone. | T7 stops and asks (PD17). |
+| `testTimeout: 0` does not lift vitest's 10 s `hookTimeout`; the integration files stop a server in `afterEach`. The H2 run passed 51/51, so there is no evidence of a problem yet. | A hook timeout in T7 is a new red check (SD7: amendment and audit), not a flake. |
 
 ## Human steps
 
@@ -437,9 +444,10 @@ file into a temporary directory that the harness removes.
   the gate cannot check, any product latency change, test-only engine instrumentation, a
   relative latency bound, the 50 ms anywhere but the screen machine, `pnpm check:load` in CI,
   killing or refusing on a held 8123, detecting another WebGL page.
-- Fixes for checks that have not gone red under the load. They enter by amendment after T2.
-- `vitest.config.ts`, `.github/workflows/ci.yml` and `tests/workflow/test_gate_steps.py`: not
-  changed.
+- Fixes for checks that have not gone red under the load. Those that did are amendment 1
+  (PD17, T9 to T12); one that goes red later, in T7, enters by a further audited amendment.
+- `.github/workflows/ci.yml` and `tests/workflow/test_gate_steps.py`: not changed.
+  `vitest.config.ts`: not changed except the integration project's `testTimeout` (PD18, T10).
 - `docs/design/architecture.md`: nothing in it becomes untrue.
 - Building the web app from the harness (PD16).
 
@@ -527,3 +535,118 @@ the AC6 failure is an assertion on a value the owner set (2026-11-11), not a tim
 - [x] No two tasks in one parallel group write the same file
 
 Audited by: Martijn Boot  Date: 2026-11-14
+
+## Audit — plan-auditor (agent), 2026-11-14 — amendment 1
+
+Scope: `git diff 70e3942 52f6706` (PD17 to PD19, T9 to T12, the Files rows, the Task graph rows,
+the T7 and T8 edits, the three Risk rows), and what in the original plan it makes untrue.
+
+Mechanical check: `python scripts/check_plans.py docs/plans/phase-b-08-load-proof-gate.md`
+printed `12 task(s), ok`. `--graph`: group 1 T1; group 2 T2; group 3 T3, T4, T5, T6, T9, T10,
+T11; group 4 T12; group 5 T7; group 6 T8. This matches the plan's own table.
+
+### Traceability
+| AC | Tasks implementing it |
+|---|---|
+| AC1 (D-02, green under load) | T1, T2, T7, T9, T10, T11, T12 |
+| AC9 (no retry, same steps) | T6, T10, T11 |
+| SD7 (scope is what load turns red) | T2, T9, T10, T11, T12 |
+| AC2 to AC8, AC10 | unchanged by the amendment (T1, T3 to T6, T8) |
+
+| Task | ACs served |
+|---|---|
+| T9 | AC1, SD7 |
+| T10 | AC1, AC9, SD7 |
+| T11 | AC1, AC9, SD7 |
+| T12 | AC1, SD7 |
+
+Unmapped criteria: none
+Orphan tasks: none (T9 to T12 each answer a red check in the Evidence section, which SD7 admits)
+
+### Findings
+| # | Severity | Task | Finding | Required change |
+|---|---|---|---|---|
+| 1 | **Required** | T10, "Out of scope of the plan" | The bullet "`vitest.config.ts`, `.github/workflows/ci.yml` and `tests/workflow/test_gate_steps.py`: not changed" still stands, and so does "Fixes for checks that have not gone red under the load. They enter by amendment after T2." T10 changes `vitest.config.ts`. A builder reading top-down meets a contradiction and, under T10's own autonomy note, may stop. The Files "Not changed" line was fixed; this one was not. | Strike `vitest.config.ts` from that bullet (or add "except the integration project, PD18"), and drop or reword the "enter by amendment after T2" bullet now that amendment 1 has entered. |
+| 2 | Recommended | Files | `playwright.config.ts` now has two rows (T1 and T11). Not a conflict (group 1 and group 3). | Merge into one row naming both tasks. |
+| 3 | Recommended | T12 | The expected output does not say how "after the first second" is taken on the audio clock. `waitForTimeout(1000)` is wall time; the warm-up and the 3 s span should be measured in `contextTime` from the first recorded window, else a slow start changes how much history the adaptive threshold had. | Add one sentence saying so. |
+| 4 | Recommended | T12 | PD19's "load can delay a message, not change it" holds for the worklet's `contextTime`. It is not proven for Chromium's fake capture device feeding the graph: if load starves it, the click track could shift in context time. The autonomy note stops only for a quiet-machine failure. | State that T7's three load runs are the proof for T12, and that an audio-clock gap outside ±100 ms under load is also a stop (a product question), not a tolerance change. |
+| 5 | Recommended | T9, T11 | T11's verification runs `screen.spec.ts` and `under-load.spec.ts`; `under-load.spec.ts:14` already has `test.describe.configure({ timeout: 0 })`, so it does not show the config-level `timeout: 0` took effect. T9's verification passes without the change too. | Say that T7 is the proof of T9 to T11 and that these verifications show only that nothing regressed, or run one live-spec test that exceeds 30 s under load (the H2 evidence names `:138`). |
+| 6 | Recommended | T10, Risks | `testTimeout: 0` leaves `hookTimeout` (10 s default) alone, and each integration file kills a spawned server in `afterEach`. The H2 run with `--testTimeout=0` passed 51/51, so there is no evidence of a problem, and raising it would be a new limit. | Add a Risk line so a hook timeout in T7 is read as a new red check (SD7), not a flake. |
+
+### Reading of the specific questions
+- **SD7 and Out of scope.** T9, T10 and T11 remove a limit from tests that assert a size, a
+  response or a rendered result, never their own duration; every such failure in the Evidence is
+  `Test timed out` with no assertion failed. No retry (T10 and T11 name it, and the PD13
+  workflow test guards it). No raised threshold, no product file, no test-only instrumentation
+  in `audio/` or `web/`. The render-scale tests keep their 4, 8 and 12 s `expect` timeouts,
+  which are the assertion; PD17 and T7's autonomy note send a changed verdict back to the owner
+  as SD7 requires. T11 rightly forbids `expect.timeout`, `actionTimeout`, `navigationTimeout`
+  and `globalTimeout`.
+- **PD18 against SD3 and PD7.** Consistent. SD3 lifts the limit from four tests because they
+  assert nothing about duration; SD7 extends the same reasoning, on evidence, to the integration
+  project and the browser run. PD7's rejection of a global unit limit stands (the unit project is
+  untouched; T9 is one test). The accepted cost (a hang runs to the CI job's limit) is the
+  spec's own compiler edge case, is a Risk row, and the owner accepted it.
+- **PD19 and T12 keep what B-01 AC6 asserts.** B-01 AC6 says the beat pulse fires on the
+  low-band onsets of a click track and not between them. The test keeps at least 5 rises, the
+  ±100 ms spacing, 0.1 over the last 200 ms of each gap measured back from the next rise, and
+  the 120 ms decay (B-01 plan PD7 and the 2026-11-12 note), on the signal that carries the
+  property. It is feasible with no product change: `audio/src/processor.ts` posts
+  `{ frame, contextTime }` with `frame.beat`; `audio/src/source.ts` sets `node.port.onmessage`,
+  which starts the port, so a test-side `addEventListener("message")` on a subclass of
+  `AudioWorkletNode` (filtered on `djv-features`) sees every message; `record()` in
+  `tests/browser/helpers.ts` already wraps `AudioContext` the same way; `sampleMeter` is used
+  only at `live.spec.ts:52`. Windows are about 8 ms (3 quanta), finer than the per-frame meter.
+  What is lost, the meter's display path under AC6, is a Risk row and is covered by
+  `panel.spec.ts` ("meters move"); the owner chose it (PD17 d). Findings 3 and 4 tighten this;
+  neither blocks.
+- **Group conflicts.** None. T9, T10 and T11 write distinct files; T12 shares `live.spec.ts`
+  with T4 and is in a later group (T12 depends on T4); T5 writes `engine/src/index.test.ts`, T9
+  `engine/src/latency.test.ts`. T1's `playwright.config.ts` edit is in group 1.
+- **Concreteness.** T9 to T12 each name the file, the line, the change and a verification;
+  T12's mutation check (0.1 to 0.0001, then revert) shows the new reading is not vacuous.
+  Autonomy notes name their stops. Sizes are a few lines to about 60 lines of one or two files.
+- **Dependencies, secrets, infra.** No new dependency. No secrets, production or infra;
+  `.github/workflows/` untouched.
+- **Owner rows, for the human.** PD17 records the owner's "implement recommendation" of
+  2026-11-14; I cannot verify the recommendation text beyond what PD17 and the Evidence record.
+  The accepted cost (a hang runs to the CI limit) and the render-scale question at T7 are the
+  owner's. PD18 and PD19 are Confirm rows the owner may overrule.
+
+### Checklist
+- [x] Every AC maps to at least one task
+- [x] Every task maps to at least one AC (no orphans)
+- [x] Each task's expected output is concrete enough to check, and is what we need
+- [x] Existing patterns reused; nothing reinvented
+- [x] No new dependency without an approval note
+- [x] Data changes additive and reversible
+- [x] Errors, empty states and permissions are tasks, not afterthoughts
+- [x] Each task reviewable in one sitting
+- [x] Verification named per task
+- [x] Nothing touches prod, secrets or infra it should not
+- [x] Every task has a Depends on and an Autonomy note
+- [x] No two tasks in one parallel group write the same file
+- [x] The plan is consistent with itself after the amendment (finding 1 fixed, re-checked below)
+
+### Task graph as audited
+| Task | Depends on | Parallel group |
+|---|---|---|
+| T1 | none | 1 |
+| T2 | T1 | 2 |
+| T3 | T2 | 3 |
+| T4 | T2 | 3 |
+| T5 | T2 | 3 |
+| T6 | T2 | 3 |
+| T9 | T2 | 3 |
+| T10 | T2 | 3 |
+| T11 | T2 | 3 |
+| T12 | T4 | 4 |
+| T7 | T3, T4, T5, T6, T9, T10, T11, T12 | 5 |
+| T8 | T7 | 6 |
+
+Re-check, 2026-11-14: findings 1 to 6 are all applied in the working copy (Out-of-scope bullets
+reworded, Files rows merged, T12 contextTime warm-up and stop note, T11 verification wording,
+hookTimeout Risk row). `check_plans.py` again `12 task(s), ok`; groups unchanged.
+
+Verdict: **PASS**
+Audited by: plan-auditor (agent), 2026-11-14 (re-checked 2026-11-14)
