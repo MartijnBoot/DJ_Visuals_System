@@ -93,7 +93,15 @@ export async function runUnderLoad({
     }
 
     const media = writeFakeMedia(dir);
-    browser = await chromium.launch({ headless: true, args: chromiumArgs(media) });
+    // Playwright's own signal handlers close the browser and then exit the process, before the
+    // `finally` below removes the temporary folder; the harness owns the teardown (PD6).
+    browser = await chromium.launch({
+      headless: true,
+      args: chromiumArgs(media),
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      handleSIGHUP: false,
+    });
     unlessInterrupted();
     const page = await browser.newPage({ viewport: { ...VIEWPORT } });
     let crashed = false;

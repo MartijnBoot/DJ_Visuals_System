@@ -3,7 +3,11 @@
 // `pnpm check:load` passes `bash scripts/check.sh`. Never 8123 or 8124: the real harness may be
 // holding them while the gate runs this file. No timing is asserted, so the tests carry no
 // time limit of their own (the CI job's limit ends a hang).
-import { availableParallelism } from "node:os";
+import { spawn } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createServer, type Server } from "node:net";
 import { expect, test } from "@playwright/test";
 import { canBind } from "../../scripts/port-check.ts";
@@ -129,6 +133,53 @@ test("a gate that throws still stops the loads and frees the port", async () => 
     }),
   ).rejects.toThrow("the stand-in gate broke");
   await expectAllStopped(seen, port);
+});
+
+/** The harness's temporary folders that exist now. */
+const loadDirs = () => readdirSync(tmpdir()).filter((name) => name.startsWith("djv-load-"));
+
+// In plain Node, as `pnpm check:load` runs it: Playwright's test runner turns off the library's
+// own SIGINT handler for browsers launched inside a test, so an in-process test cannot see a
+// harness that leaves that handler on (it exits the process before the teardown finishes;
+// review finding R1).
+const SIGINT_CHILD = `
+const { runUnderLoad } = await import(process.argv[1]);
+const code = await runUnderLoad({
+  port: Number(process.argv[2]),
+  log: () => {},
+  gate: async (load) => {
+    process.emit("SIGINT", "SIGINT");
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return load.signal.aborted ? 7 : 8;
+  },
+});
+console.log("harness returned " + code);
+`;
+
+test("Ctrl-C during the gate stops everything and removes the temporary folder (PD6)", async () => {
+  const port = await freePort();
+  const before = loadDirs();
+  const harness = pathToFileURL(resolve(import.meta.dirname, "../../scripts/under-load.ts")).href;
+  const child = spawn(
+    process.execPath,
+    ["--input-type=module", "-e", SIGINT_CHILD, harness, String(port)],
+    {
+      stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+  let out = "";
+  child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
+  const exit = await new Promise<number | null>((done) => child.once("exit", done));
+
+  expect(out, "the harness ran its teardown and returned, told the gate to stop").toContain(
+    "harness returned 7",
+  );
+  expect(exit).toBe(0);
+  expect(await canBind(port), `port ${port} is free again`).toBe(true);
+  expect(
+    loadDirs().filter((name) => !before.includes(name)),
+    "no temporary folder left",
+  ).toEqual([]);
 });
 
 test("a held port fails before the gate is called, naming the port", async () => {
