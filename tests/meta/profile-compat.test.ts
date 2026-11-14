@@ -1,18 +1,17 @@
 // AC19 (B-02 spec SD17; plan PD8, T8): the type check fails when `engine/`'s `Profile` and
-// `shared/`'s drift apart. `web/src/profile-compat.ts` is type-checked with the compiler API,
-// once against the real `engine/src/profile.ts` and once against a copy served with a field
-// renamed or a required field added. Only the first may pass.
+// `shared/`'s drift apart. `web/src/profile-compat.ts` is type-checked with the compiler API
+// against a copy of `engine/src/profile.ts` served with a field renamed or a required field
+// added; neither may pass. The unmutated case is the `types` step's (`pnpm typecheck`
+// compiles `web/`, which covers the compat file: `compat-coverage.test.ts`, B-08 SD3).
+// No per-test time limit: these tests assert diagnostics, not how fast the compiler is, and
+// load made them exceed vitest's 5 s (B-08 PD7, D-02).
 import { describe, expect, it } from "vitest";
 import { compatDiagnostics } from "./compat-check.ts";
 
 const target = { compatFile: "web/src/profile-compat.ts", mutated: "/engine/src/profile.ts" };
-const diagnostics = (mutate?: (source: string) => string) => compatDiagnostics(target, mutate);
+const diagnostics = (mutate: (source: string) => string) => compatDiagnostics(target, mutate);
 
-describe("Profile compatibility (AC19)", () => {
-  it("type-checks against the real shapes", () => {
-    expect(diagnostics()).toEqual([]);
-  });
-
+describe("Profile compatibility (AC19)", { timeout: 0 }, () => {
   it("fails when the engine renames amount", () => {
     const renamed = (s: string) => s.replace(/^(\s*)amount: number;/gm, "$1strength: number;");
     expect(renamed("  amount: number;")).toContain("strength:");

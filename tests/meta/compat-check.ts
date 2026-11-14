@@ -1,12 +1,30 @@
 // The compiler-API helper behind the compat tests (AC19; B-01 T6, B-02 T8): a compat file in
 // `web/` is type-checked with `web/tsconfig.json`, optionally with one source file served
-// rewritten, so a test can prove the type check fails when a shape drifts.
+// rewritten, so a test can prove the type check fails when a shape drifts. `webConfig` is the
+// one reader of `web/tsconfig.json` for these tests (B-08 PD8).
 import { resolve } from "node:path";
 import ts from "typescript";
 import { expect } from "vitest";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
 const webDir = resolve(repoRoot, "web");
+const webConfigPath = resolve(webDir, "tsconfig.json");
+
+/**
+ * `web/tsconfig.json` parsed: its options and the files its `include` resolves to on disk.
+ * Compiles nothing. `override` replaces top-level keys of the raw config, so a test can plant
+ * a config that leaves a folder out (B-08 AC7).
+ */
+export function webConfig(override: Record<string, unknown> = {}): ts.ParsedCommandLine {
+  const raw = ts.readConfigFile(webConfigPath, ts.sys.readFile).config as Record<string, unknown>;
+  return ts.parseJsonConfigFileContent(
+    { ...raw, ...override },
+    ts.sys,
+    webDir,
+    undefined,
+    webConfigPath,
+  );
+}
 
 export interface CompatTarget {
   /** The compat file, relative to the repository root, e.g. `web/src/features-compat.ts`. */
@@ -29,9 +47,7 @@ export function compatDiagnostics(
   const isMutated = (fileName: string) =>
     fileName.replace(/\\/g, "/").toLowerCase().endsWith(suffix);
 
-  const configPath = resolve(webDir, "tsconfig.json");
-  const config = ts.readConfigFile(configPath, ts.sys.readFile);
-  const { options } = ts.parseJsonConfigFileContent(config.config, ts.sys, webDir);
+  const { options } = webConfig();
   const host = ts.createCompilerHost(options);
   let served = false;
   if (mutate) {
