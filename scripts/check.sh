@@ -54,6 +54,25 @@ project_step() {
   step "$@"
 }
 
+# B-08 SD5: say why the browser step is about to fail when its port is held, then run it
+# anyway. Never refuses and never stops a process. A probe that cannot run counts as "cannot
+# tell" and prints nothing. The port is GATE_PORT in tests/browser/fixtures/launch.ts.
+warn_if_gate_port_held() {
+  local status=0
+  node scripts/port-check.ts 8123 >/dev/null 2>&1 || status=$?
+  if [ "$status" -eq 1 ]; then
+    {
+      printf '\nscripts/check.sh: WARNING: 127.0.0.1:8123 is already in use, so the browser step\n'
+      printf '  will fail to start its server. Likely cause: an orphaned node process left by a\n'
+      printf '  stopped `pnpm start` or a crashed Playwright run. Find it with\n'
+      printf "  netstat -ano | grep ':8123 '  (Windows, Git Bash; the last column is the PID)\n"
+      printf '  lsof -i :8123                 (Linux, macOS)\n'
+      printf '  Running the browser step anyway.\n'
+    } >&2
+  fi
+  return 0
+}
+
 # --- the workflow's own checks (always) -----------------------------------------------------
 # The plans are /build's work queue; the guard is what stops an agent editing history. Both are
 # tested here so that a broken checker or an unwired guard turns the gate red, not silent.
@@ -72,6 +91,7 @@ project_step "types" pnpm typecheck
 project_step "build" pnpm build
 project_step "unit" pnpm run test --project unit
 project_step "integration" pnpm run test --project integration
+warn_if_gate_port_held
 project_step "browser" pnpm test:browser
 
 # --- done -----------------------------------------------------------------------------------
