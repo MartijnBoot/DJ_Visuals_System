@@ -402,11 +402,14 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
 - **Verification:** `pnpm exec playwright test tests/browser/live.spec.ts -g "lost|slow frames"`;
   then once by hand, reverted, output in the report: with the slow-frame wrap never removed, the
   step-up wait does not resolve within 60 s (the run is stopped by hand), so the wait is not
-  vacuous.
+  vacuous. This check is for R1 only: R2 cannot pass without a differing read, and R3's audio
+  limit is unchanged. The 10 s rule itself stays unit-tested on a fake clock
+  (`engine/src/scale.test.ts:101`, the doubling wait at `:126-150`), which is why the
+  real-clock test can drop the deadline.
 - **Depends on:** T12
 - **Autonomy note:** Builder settles the local function's name and the note labels. Stop if
   any other assertion in the file would need to change, or if the audio reattach fails within
-  2500 ms on a quiet machine (that is AC12's own time: an owner question).
+  2500 ms on a quiet machine, or in any T7 run (that is AC12's own time: an owner question).
 
 ### T14 — The preview's camera-denied test says what it saw (amendment 2)
 - **Implements:** AC1, SD7
@@ -466,7 +469,7 @@ file into a temporary directory that the harness removes.
 | The spec and the backlog edit are uncommitted, and local `main` is two merges behind `origin/main`. | H1. |
 | With no per-test limit (PD18), a browser regression that leaves an element missing hangs the gate instead of failing it at 30 s; in CI it runs to GitHub's default job limit. | Accepted by the owner (PD17). Locally the hang is visible; the next owner decision may add a job `timeout-minutes`, which is a `.github/workflows/` change outside this plan. |
 | Measured on the audio clock (PD19), AC6 no longer exercises the meter's display path. | `panel.spec.ts:33` still proves the meters move after Start. |
-| A render-scale assertion (`live.spec.ts:384`, `:440`) may fail under load once the 30 s limit is gone. | T7 stops and asks (PD17). |
+| A render-scale assertion that still has a time (the step down within 4 s and 8 s, the 3 s hold at 50%, the cap test) may fail under load. | T7 stops and asks (PD17, PD20). |
 | With no limit on the step-up, loss and camera-reattach waits (PD20), a product regression there hangs instead of failing. | The same accepted cost as PD18. T13's verification shows the step-up wait does not pass vacuously. |
 | The preview's luma 0 (B-02 AC4) was not reproduced and has no proven cause (PD20 R4). | T14 records what a recurrence saw; a recurrence in T7 is a stop, and a proven black frame is a defect-register entry, not a test change. |
 | `testTimeout: 0` does not lift vitest's 10 s `hookTimeout`; the integration files stop a server in `afterEach`. The H2 run passed 51/51, so there is no evidence of a problem yet. | A hook timeout in T7 is a new red check (SD7: amendment and audit), not a flake. |
@@ -615,7 +618,9 @@ value (B-02 AC4).
 `preview.spec.ts:185` (untracked, deleted afterwards) logged every luma sample and counted
 `blitFramebuffer` calls between samples, and ran 25 times under `runUnderLoad` on `319315a`:
 25 of 25 passed, minimum luma 85.5 to 86.9, exactly one blit per sample, no dark sample. The
-failing run 3 printed no browser log for this test. Not reproduced. Candidate causes, neither
+failing run 3 printed no browser log for this test. Not reproduced, with two limits: it was
+the single test under load, not the full 12-minute browser sequence, and the counting copy
+may have changed its timing. Candidate causes, neither
 proven: a WebGL context loss under two software-GL Chromiums (the engine registers no
 `webglcontextlost` handler, so a lost context reads black), or the test reading a frame the
 engine had not drawn. No fix is made without a cause (PD20 R4); T14 makes a recurrence report
@@ -756,3 +761,76 @@ hookTimeout Risk row). `check_plans.py` again `12 task(s), ok`; groups unchanged
 
 Verdict: **PASS**
 Audited by: plan-auditor (agent), 2026-11-14 (re-checked 2026-11-14)
+
+## Audit — plan-auditor (agent), 2026-11-14 — amendment 2
+
+Scope: `git diff a96ea2d 331835d` on this plan (PD20, PD21, T13, T14, the Files rows, the Task
+graph rows, T7's Depends on, the R4 investigation, the Amendment 2 paragraph, the Out-of-scope
+bullet, two Risk rows).
+
+Mechanical check: `python scripts/check_plans.py docs/plans/phase-b-08-load-proof-gate.md`
+printed `14 task(s), ok`. `--graph`: group 1 T1; group 2 T2; group 3 T3, T4, T5, T6, T9, T10,
+T11, T14; group 4 T12; group 5 T13; group 6 T7; group 7 T8. This matches the plan's own table.
+T12 and T13 both write `tests/browser/live.spec.ts`, but T13 depends on T12 directly, so they
+sit in groups 4 and 5 and never run together. T14 is alone on `preview.spec.ts`.
+
+### Traceability
+| AC | Tasks implementing it |
+|---|---|
+| AC1 (D-02, green under load) | T1, T2, T7, T9 to T14 |
+| SD7 (scope is what load turns red) | T2, T9 to T14 |
+| AC2 to AC10 | unchanged by the amendment |
+
+| Task | ACs served |
+|---|---|
+| T13 | AC1, SD7 |
+| T14 | AC1, SD7 (diagnostic only; see finding 4) |
+
+Unmapped criteria: none
+Orphan tasks: none (T13 answers three red checks and T14 one, all in the Evidence section)
+
+### Findings
+| # | Severity | Task | Finding | Required change |
+|---|---|---|---|---|
+| 1 | Recommended | T13 R1, PD20 | Removing the 12 s deadline is consistent with AC15 and does not drop a part the gate must keep, but the plan does not say why. B-01 AC15's "after 10 s with headroom" is proven on a fake clock by `engine/src/scale.test.ts:101` (9 s: no step; 2 s later: step up; 10 s again for the next), and `:126-150` show the wait doubles to 20 s after a step up that fails. So 10 s is a minimum, not a stable deadline, and the real-clock test can only assert that the step up happens. What is lost: the browser test no longer catches a step up that comes late but does come. That is the owner's chosen trade (PD20, answered), and the `note` of the elapsed time keeps it visible. SD7's "never a raised limit on a check whose duration is the assertion" is met by removing the limit, not raising it, and the property (step up happens) stays asserted. | Add one sentence to PD20 or T13 citing `scale.test.ts:101` and `:126-150` as where the 10 s rule is proven. |
+| 2 | Recommended | T13 R1 verification | The non-vacuity check is sound for "the wait does not pass by itself": with the wrap never removed the frames stay at about 15 fps, so no step up is possible, and a wait that does not resolve in 60 s shows the wait depends on the behaviour. It is weaker than it reads: 60 s is below the 80 s cap of the doubling wait, and it shows nothing about R2 and R3, which have no equivalent. R2 cannot pass without a read that differs, and R3's audio limit is unchanged, so neither is vacuous by construction. | State that the check is for R1 only and that R2 and R3 are non-vacuous by construction. No test needed. |
+| 3 | Recommended | T13 R3 | The reading is correct. AC12 says "within 2 s of its return" for audio and keeps 2500 ms (the 500 ms is existing slack, not new). AC13 sets no time for the camera, so `timeout: 0` for `kind === "camera"` does not relax a spec time. The autonomy note stops only for an audio failure "on a quiet machine"; an audio reattach beyond 2500 ms under load, in T7, is a failure on a spec time. | Say in the note that a red audio reattach in any T7 run is also a stop for the owner, never a limit change. |
+| 4 | Recommended | T14, R4 | Not fixing is justified: 25 of 25 passes with no dark sample and no cause found, SD7 forbids a retry or a lowered threshold, and a product change (a `webglcontextlost` handler) is out of scope. T14 changes no assertion, so it satisfies SD7 and the hard stops. Two limits of the evidence: the 25 runs were one test under load, not that test after a 12-minute sequence of browser tests, and the throwaway copy counted blits, which can perturb timing. T14 also fixes nothing, so T7 can go red again on the same check; T14's autonomy note and the Risk row already make that a stop and a defect-register entry, which is the right outcome. T14's claim to serve AC1 is by courtesy only. | Add "the reproduction was a single test under load, not the full sequence" to the R4 paragraph, so nobody reads 25 of 25 as exclusion of the cause. |
+| 5 | Recommended | PD21, T13 R2 | Consistent. Phase 0 AC11 (`phase-0-walking-skeleton.md:199-200`) keeps its 500 ms wording in `helpers.ts:218`, asserted by `screen.spec.ts:43` and used at `live.spec.ts:419`. B-01 AC12 and AC13 say "keep rendering" with no time, so a wait until two reads differ asserts that and no rate. The other times in the loss test (lost within 1000 ms, meters zero within 1000 ms) are spec times, were not red and are untouched. A frozen canvas now hangs, the cost already accepted in PD18 and listed in the new Risk row. | None. |
+| 6 | Recommended | Amendment 2 paragraph | The paragraph sits between the "Rejected" list and its last bullet ("Keeping the 20 s sleep"), which now reads as part of the amendment text. Amendment 1 already did this; amendment 2 repeats it. | Move the two Amendment paragraphs below the Rejected list. |
+| 7 | Recommended | Risks | The row "A render-scale assertion (`live.spec.ts:384`, `:440`) may fail under load" no longer fits: T13 removes the step-up deadline, and the line numbers moved. | Reword it to the remaining assertions (step down in 4 s and 8 s, the 3 s hold) or drop the line numbers. |
+
+No Required findings. T13 and T14 are concrete and checkable (named file, test, label, wait
+value and the assertions that stay), each is small (one file, well under 400 lines), neither adds a
+dependency or touches product code, secrets, infrastructure or a guarded area, both name Depends
+on and an Autonomy note, and no retry or raised threshold appears. The render-scale verdict was
+the owner's under spec Out of scope and PD20 records the owner's answer. Owner rows for the human:
+PD20 (R1 to R4) is already answered; PD21 is a Confirm.
+
+### Checklist
+- [x] Every AC maps to at least one task
+- [x] Every task maps to at least one AC (no orphans)
+- [x] Each task's expected output is concrete enough to check, and is what we need
+- [x] Existing patterns reused; nothing reinvented
+- [x] No new dependency without an approval note
+- [x] Data changes additive and reversible
+- [x] Errors, empty states and permissions are tasks, not afterthoughts
+- [x] Each task reviewable in one sitting
+- [x] Verification named per task
+- [x] Nothing touches prod, secrets or infra it should not
+- [x] Every task has a Depends on and an Autonomy note
+- [x] No two tasks in one parallel group write the same file
+
+### Task graph as audited
+| Task | Depends on | Parallel group |
+|---|---|---|
+| T1 | none | 1 |
+| T2 | T1 | 2 |
+| T3, T4, T5, T6, T9, T10, T11, T14 | T2 | 3 |
+| T12 | T4 | 4 |
+| T13 | T12 | 5 |
+| T7 | T3, T4, T5, T6, T9, T10, T11, T12, T13, T14 | 6 |
+| T8 | T7 | 7 |
+
+Verdict: **PASS**
+Audited by: plan-auditor (agent), 2026-11-14
