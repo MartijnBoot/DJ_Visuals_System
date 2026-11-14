@@ -403,6 +403,35 @@ Their verdict under load is unknown, not green.
 **T2 stopped here** (autonomy note: a check outside D-02 went red). H2: the plan needs an
 amendment for `engine/src/latency.test.ts:28`, audited, before T3 to T6 start.
 
+#### The later steps under the same load (H2 evidence, 2026-11-14)
+
+Because every run stopped at the unit step, the gate's later steps were run on their own under
+`runUnderLoad` (same load, port 8124, commit `a7a3206`, no repository file changed), with a
+throwaway driver in place of `bash scripts/check.sh`. Two runs:
+
+- **Integration, default limits** (14:54 UTC): 32 of 51 failed, every one
+  `Error: Test timed out in 5000ms.`, in all five files (`health`, `static`, `migrate`, `boot`,
+  `profiles`). Each test spawns the real server; none asserts a duration. **Other.**
+- **Integration with `--testTimeout=0`, then the browser step** (started 14:58 UTC): integration
+  51 of 51 passed. Browser: 90 passed, 6 failed (15.8 min), exit 1:
+  - `live.spec.ts:47` beat spacing (AC6): `expect(worstEnd).toBeLessThanOrEqual(0.1)` received
+    `0.118`; rise spacing `[405,489,524,490,490,549]`. An assertion on a value. **Other.**
+  - `live.spec.ts:138` recognisability (AC8), `:338` camera lost (AC13): Playwright's 30 s test
+    limit (48.3 s, 34.6 s); no assertion failed. **Other.**
+  - `live.spec.ts:384` render scale on both looks, `:440` cap at 75% (AC15): the 30 s test limit
+    (51.4 s, 54.8 s, 46.7 s). **The render-scale test: changed verdict under load.**
+  - `live.spec.ts:274` latency (D-02) passed on both looks: p95 21.9 ms built-in, 23.8 ms
+    twelve effects (scale 50%).
+
+  No listener on 8123 or 8124 afterwards.
+
+`{ timeout: 0 }` on a `describe` and `--testTimeout=0` were both shown to mean "no limit" in
+vitest 5.1.0 by a throwaway test that slept 6.5 s (passed; the same sleep under the default
+limit failed at 5007 ms). Not committed.
+
+**Stopped again for the owner:** the render-scale verdict changed (SD7, T2 autonomy note), and
+the AC6 failure is an assertion on a value the owner set (2026-11-11), not a time limit.
+
 ### After the fix (T7)
 
 ## Audit (PASS required before implementation starts)
