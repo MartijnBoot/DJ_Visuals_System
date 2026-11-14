@@ -2,7 +2,8 @@
 // AC15, AC17; plan PD8, PD21, PD22, T9): the click track's beats, the dials in pixels, the
 // latency line's structure (B-08 AC3), loss and reattachment, and render scaling. Measured
 // values are attached to the report next to the thresholds they are held to. The 50 ms latency
-// budget is checked only on the owner's screen machine (B-08 SD2), never here.
+// budget is checked only on the owner's screen machine (B-08 SD2), never here. Waits for a
+// behaviour the spec gives no time have no limit of their own (B-08 PD20).
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { createProfile, deleteAll, twelveEffects, type Definition } from "./fixtures/profiles.ts";
 import {
@@ -371,6 +372,21 @@ async function expectNoTextOnOutput(page: Page) {
   expect(text).toBe("");
 }
 
+/**
+ * B-08 PD20 R2: the picture keeps changing after a loss (AC12, AC13 "keep rendering"). One read
+ * of the canvas's middle, then another every 250 ms, with no limit, until one differs; returns
+ * how many reads that took. Phase 0 AC11's "500 ms apart" stays in `expectCanvasChanging`.
+ */
+async function canvasKeepsChanging(page: Page): Promise<number> {
+  const { width, height } = page.viewportSize()!;
+  const clip = { x: width / 2, y: height / 2, width: 4, height: 4 };
+  const first = await page.screenshot({ clip });
+  for (let reads = 2; ; reads++) {
+    await page.waitForTimeout(250);
+    if (!(await page.screenshot({ clip })).equals(first)) return reads;
+  }
+}
+
 for (const [kind, track, label] of [
   ["audio", "audio", "AC12"],
   ["camera", "video", "AC13"],
@@ -399,11 +415,14 @@ for (const [kind, track, label] of [
       note("AC12 last non-zero meter after the unplug (ms, ≤ 1000)", Math.round(ms));
       expect(ms).toBeLessThanOrEqual(1000);
     }
-    await expectCanvasChanging(page);
+    note(`${label} canvas reads until one differed`, await canvasKeepsChanging(page));
     await expectNoTextOnOutput(page);
 
     await setFailing(page, track, false); // plugged back in
-    await expect(page.getByTestId(`overlay-${kind}`)).toHaveText(`${kind}: ok`, { timeout: 2500 });
+    // B-08 PD20 R3: AC12 gives audio 2 s from the device's return; AC13 gives the camera no time.
+    await expect(page.getByTestId(`overlay-${kind}`)).toHaveText(`${kind}: ok`, {
+      timeout: kind === "audio" ? 2500 : 0,
+    });
     expect(logs.some((l) => /capture/.test(l) && /lost/.test(l))).toBe(true);
     expect(logs.some((l) => /capture/.test(l) && /restored/.test(l))).toBe(true);
   });
@@ -459,21 +478,26 @@ for (const look of LOOKS) {
     await page.waitForTimeout(3000);
     await expect(page.getByTestId("overlay-scale")).toHaveText("scale 50%");
 
-    await page.evaluate(
-      () => ((window as unknown as { __slowFrames: boolean }).__slowFrames = false),
-    );
-    const recovered = await expect(page.getByTestId("overlay-scale"))
-      .toHaveText("scale 75%", { timeout: 12_000 })
-      .then(() => true)
-      .catch(() => false);
+    const unwrappedAt = await page.evaluate(() => {
+      (window as unknown as { __slowFrames: boolean }).__slowFrames = false;
+      return performance.now();
+    });
+    // B-08 PD20 R1: the step up must happen; when is a measurement. The 10 s rule itself is
+    // unit-tested on a fake clock (engine/src/scale.test.ts); on a busy machine headroom can
+    // take longer to hold, so this wait has no limit of its own.
+    await expect(page.getByTestId("overlay-scale")).toHaveText("scale 75%", { timeout: 0 });
+    const steppedUpAfter = await page.evaluate((t) => performance.now() - t, unwrappedAt);
     clearInterval(watch);
+    note(
+      "AC15 step up after (ms, a measurement; the rule is 10 s of headroom)",
+      Math.round(steppedUpAfter),
+    );
     note("AC15 scale readings every 200 ms", seen);
     note(
       "AC15 frame ms after the wrap was removed",
       await page.getByTestId("overlay-frame-ms").textContent(),
     );
     expect(seen.every((s) => /^scale (100|75|50)%$/.test(s))).toBe(true);
-    expect(recovered, "no step up within 12 s of headroom").toBe(true);
   });
 }
 
