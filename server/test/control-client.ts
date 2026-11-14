@@ -8,8 +8,10 @@ export interface Client<T> {
   ws: WebSocket;
   messages: T[];
   /** The first message matching `pred` already received or still to come. */
+  find<S extends T>(pred: (m: T) => m is S, timeoutMs?: number): Promise<S>;
   find(pred: (m: T) => boolean, timeoutMs?: number): Promise<T>;
   /** The first matching message received after this call. */
+  next<S extends T>(pred: (m: T) => m is S, timeoutMs?: number): Promise<S>;
   next(pred: (m: T) => boolean, timeoutMs?: number): Promise<T>;
   send(message: unknown): void;
   closed: Promise<{ code: number; reason: string }>;
@@ -72,8 +74,8 @@ export function connect<T>(
     ws,
     messages,
     closed,
-    find: (pred, timeoutMs = 5000) => wait(0, pred, timeoutMs),
-    next: (pred, timeoutMs = 5000) => wait(messages.length, pred, timeoutMs),
+    find: (pred: (m: T) => boolean, timeoutMs = 5000) => wait(0, pred, timeoutMs),
+    next: (pred: (m: T) => boolean, timeoutMs = 5000) => wait(messages.length, pred, timeoutMs),
     send: (message) => ws.send(typeof message === "string" ? message : JSON.stringify(message)),
   };
   return new Promise((resolve, reject) => {

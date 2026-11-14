@@ -7,7 +7,8 @@ import { MAX_SCREEN_MESSAGE } from "@djv/shared";
 import { createApp, registerStatic } from "./app.ts";
 import { ConfigError, type Config } from "./config.ts";
 import { defaultControlAddresses, type ControlAddress } from "./control/addresses.ts";
-import { createHub } from "./control/hub.ts";
+import { attachDevice } from "./control/device.ts";
+import { createHub, type Hub } from "./control/hub.ts";
 import { createLan } from "./control/lan.ts";
 import { createPairing } from "./control/pairing.ts";
 import { routeUpgrades, socketServer } from "./control/upgrade.ts";
@@ -22,6 +23,8 @@ export const HOST = "127.0.0.1";
 export const DB_FILE = "djvisuals.sqlite";
 /** The screen socket's path on the main listener (B-04 API contract). */
 export const SCREEN_SOCKET = "/api/control/screen";
+/** The device socket's path on the External control listener (B-04 API contract). */
+export const DEVICE_SOCKET = "/api/control/device";
 /** Vite's dev server, whose proxy forwards the screen page's Origin (B-04 SD25). */
 const VITE_ORIGIN = "http://localhost:5173";
 
@@ -106,11 +109,13 @@ export async function boot(
     uptimeSeconds: () => Math.floor((Date.now() - listenedAt) / 1000),
   });
   registerProfiles(app, createProfileStore(db, log));
-  // External control (B-04): the screen socket on this listener. Its `maxPayload` sits above
-  // the message limit, so an oversized message is dropped with a warn rather than closing the
-  // socket (AC33); `ws` closes beyond it.
+  // External control (B-04): the screen socket on this listener, the device socket on each LAN
+  // instance. The screen socket's `maxPayload` sits above its message limit, so an oversized
+  // message is dropped with a warn rather than closing the socket (AC33); `ws` closes beyond it.
+  // The device socket's is 64 KB (PD1): its own limit is 4 KB.
   const now = () => Date.now();
-  const hub = createHub({
+  const deviceSockets = socketServer(64 * 1024);
+  const hub: Hub = createHub({
     log,
     controlPort: config.CONTROL_PORT,
     now,
@@ -123,6 +128,16 @@ export async function boot(
       port: config.CONTROL_PORT,
       ...(paths.staticDir === undefined ? {} : { staticDir: resolve(paths.staticDir) }),
       addresses: paths.controlAddresses ?? defaultControlAddresses,
+      prepare: (lanApp, { address }) =>
+        routeUpgrades(lanApp.server, [
+          {
+            path: DEVICE_SOCKET,
+            // Its own listener's origin only (SD25): the page it served on this address.
+            origins: () => [`http://${address}:${config.CONTROL_PORT}`],
+            wss: deviceSockets,
+            onConnection: (socket, request) => attachDevice(socket, request, { hub, log, now }),
+          },
+        ]),
     }),
   });
   const screenSockets = socketServer(4 * MAX_SCREEN_MESSAGE);
@@ -154,6 +169,7 @@ export async function boot(
     async close() {
       await hub.close();
       screenSockets.close();
+      deviceSockets.close();
       await app.close();
       db.close();
     },
