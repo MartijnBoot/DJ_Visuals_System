@@ -29,6 +29,25 @@ const definitionOf = ({ name, palette, dials, effects }: StoredProfile): Profile
 
 const describe = describeFailure;
 
+// Narrow windows: the list beside a stacked preview and editor, the page scrolls. From 1000px:
+// three columns that each scroll on their own, so the preview stays beside the dials.
+const LAYOUT_CSS = `
+.bld { overflow: auto; }
+.bld-grid { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 24px; }
+.bld-list { grid-column: 1; grid-row: 1 / span 2; }
+.bld-preview { grid-column: 2; grid-row: 1; }
+.bld-editor { grid-column: 2; grid-row: 2; }
+@media (min-width: 1000px) {
+  .bld { overflow: hidden; display: flex; flex-direction: column; }
+  .bld-grid { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) minmax(320px, 40%);
+    grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; }
+  .bld-list { grid-row: 1; }
+  .bld-editor { grid-column: 2; grid-row: 1; }
+  .bld-preview { grid-column: 3; grid-row: 1; }
+  .bld-col { overflow-y: auto; min-height: 0; }
+}
+`;
+
 export function Builder() {
   const [load, setLoad] = useState<Load>("loading");
   const [stored, setStored] = useState<StoredProfile[]>([]);
@@ -172,9 +191,9 @@ export function Builder() {
   return (
     <main
       data-testid="builder"
+      className="bld"
       style={{
         height: "100vh",
-        overflow: "auto",
         boxSizing: "border-box",
         padding: 16,
         background: "#111",
@@ -182,6 +201,7 @@ export function Builder() {
         font: "14px/1.5 system-ui, sans-serif",
       }}
     >
+      <style>{LAYOUT_CSS}</style>
       <h1 style={{ margin: "0 0 8px", fontSize: 20 }}>Profile builder</h1>
       <p style={{ margin: "0 0 12px" }}>
         <a
@@ -205,8 +225,8 @@ export function Builder() {
           {notice}
         </p>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 340px) 1fr", gap: 24 }}>
-        <div>
+      <div className="bld-grid">
+        <div className="bld-list bld-col">
           <ProfileList
             entries={entries}
             selectedId={selectedId}
@@ -228,22 +248,26 @@ export function Builder() {
           />
         </div>
         {selected && (
-          <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
-            <Preview
-              draft={reported?.key === selectedKey ? reported.draft : definitionOf(selected)}
-            />
-            <Editor
-              // A new revision is a new draft: the saved profile is what the editor starts from.
-              key={selectedKey}
-              saved={selected}
-              readOnly={selected.id === BUILTIN_ID}
-              offline={readOnly}
-              onSaved={add}
-              onDirtyChange={setDirty}
-              onDraftChange={onDraftChange}
-              onSaveCopy={saveCopy}
-            />
-          </div>
+          <>
+            <div className="bld-editor bld-col">
+              <Editor
+                // A new revision is a new draft: the saved profile is what the editor starts from.
+                key={selectedKey}
+                saved={selected}
+                readOnly={selected.id === BUILTIN_ID}
+                offline={readOnly}
+                onSaved={add}
+                onDirtyChange={setDirty}
+                onDraftChange={onDraftChange}
+                onSaveCopy={saveCopy}
+              />
+            </div>
+            <div className="bld-preview bld-col">
+              <Preview
+                draft={reported?.key === selectedKey ? reported.draft : definitionOf(selected)}
+              />
+            </div>
+          </>
         )}
       </div>
     </main>
