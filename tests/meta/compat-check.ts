@@ -34,7 +34,8 @@ export interface CompatTarget {
 }
 
 /**
- * Type-checks the compat file; `mutate` rewrites the text of `target.mutated`. Returns the
+ * Type-checks the compat file; `mutate` rewrites the text of `target.mutated` and must change
+ * it, else the call fails before compiling (B-08 AC6). Returns the
  * compat file's own diagnostics only: a mutated shape also breaks its own package, and those
  * errors must not stand in for the compat check (B-01 review finding 2).
  */
@@ -46,6 +47,19 @@ export function compatDiagnostics(
   const suffix = target.mutated.toLowerCase();
   const isMutated = (fileName: string) =>
     fileName.replace(/\\/g, "/").toLowerCase().endsWith(suffix);
+
+  if (mutate) {
+    // A rewrite that matches nothing serves the real file, and a real file that has drifted
+    // already fails the compat check, so the test would pass on the drift instead of on its
+    // own mutation. Refuse it before compiling (B-08 AC6, review finding C1).
+    const real = ts.sys.readFile(resolve(repoRoot, target.mutated.replace(/^\//, "")));
+    expect(real, `${target.mutated} could not be read`).toBeDefined();
+    expect(
+      mutate(real!),
+      `the mutation of ${target.mutated} changed nothing: the real shape no longer has what ` +
+        `the test rewrites, so it has drifted (B-08 AC6)`,
+    ).not.toBe(real);
+  }
 
   const { options } = webConfig();
   const host = ts.createCompilerHost(options);
