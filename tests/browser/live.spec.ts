@@ -2,8 +2,9 @@
 // AC15, AC17; plan PD8, PD13, PD21, PD22, T9): the click track's beats, the dials in pixels,
 // the latency number, loss and reattachment, and render scaling. Measured values are attached
 // to the report next to the thresholds they are held to.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { LEFT_RGB, RIGHT_RGB } from "./fixtures/media.ts";
+import { createProfile, deleteAll, twelveEffects, type Definition } from "./fixtures/profiles.ts";
 import {
   expectCanvasChanging,
   meanRgb,
@@ -235,27 +236,65 @@ test("at recognisability 1 and reactivity 0 the picture still follows the camera
   note("C1 left-half red range at recognisability 1, reactivity 0", { low, high });
 });
 
-test("the overlay's in-app latency p95 is at most 50 ms once start-up has left the window (AC10, PD13)", async ({
-  page,
-}) => {
-  await record(page);
-  await page.goto("/");
-  await start(page, { reopen: false });
-  await page.keyboard.press("o");
-  // The window is 10 s. Start-up (module loading, the first frames, the refresh estimate) is
-  // inside it for the first 10 s; the owner decided (2026-11-11) to read it once that has
-  // left, so the number is the set's, not the page load's.
-  await page.waitForTimeout(20_000);
-  const line = (await page.getByTestId("overlay-latency").textContent())!;
-  const match = /latency ms ([\d.]+) \/ p95 ([\d.]+) \/ worst ([\d.]+)/.exec(line);
-  note("AC10 overlay after 20 s", line);
-  note("AC10 scale and fps", [
-    await page.getByTestId("overlay-scale").textContent(),
-    await page.getByTestId("overlay-fps").textContent(),
-  ]);
-  expect(match, line).not.toBeNull();
-  expect(Number(match![2])).toBeLessThanOrEqual(50);
+/**
+ * The looks the latency and render-scale checks run on (B-02 AC17, PD17): the built-in, and the
+ * worst case a profile can be, all twelve effects each bound to the audio, created through the
+ * API and picked in the real panel.
+ */
+interface Look {
+  name: string;
+  profile?: Definition;
+}
+const LOOKS: Look[] = [{ name: "Built-in" }, { name: "twelve effects", profile: twelveEffects() }];
+
+/** Starts the set on `look`: Start, the profile picked in the panel, the panel closed. */
+async function startOn(page: Page, request: APIRequestContext, look: Look) {
+  if (!look.profile) {
+    await start(page, { reopen: false });
+    return;
+  }
+  const stored = await createProfile(request, look.profile);
+  await start(page); // the panel is reopened
+  const picker = page.getByTestId("profile-picker");
+  await expect(picker).toBeEnabled();
+  await picker.selectOption(stored.id);
+  await expect(picker).toHaveValue(stored.id);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("s"); // the panel's `s` is ignored while a select has the focus
+  await expect(page.getByTestId("panel")).toHaveCount(0);
+}
+
+test.beforeEach(async ({ request }) => {
+  await deleteAll(request);
 });
+
+for (const look of LOOKS) {
+  test(`the overlay's in-app latency p95 is at most 50 ms once start-up has left the window, on ${look.name} (AC10, PD13, B-02 AC17)`, async ({
+    page,
+    request,
+  }) => {
+    await record(page);
+    await page.goto("/");
+    await startOn(page, request, look);
+    await page.keyboard.press("o");
+    await expect(page.getByTestId("overlay-profile")).toHaveText(
+      `profile: ${look.profile?.name ?? "Built-in"}`,
+    );
+    // The window is 10 s. Start-up (module loading, the first frames, the refresh estimate) is
+    // inside it for the first 10 s; the owner decided (2026-11-11) to read it once that has
+    // left, so the number is the set's, not the page load's.
+    await page.waitForTimeout(20_000);
+    const line = (await page.getByTestId("overlay-latency").textContent())!;
+    const match = /latency ms ([\d.]+) \/ p95 ([\d.]+) \/ worst ([\d.]+)/.exec(line);
+    note(`AC10 overlay after 20 s on ${look.name} (p95 ≤ 50 ms)`, line);
+    note(`AC10 scale and fps on ${look.name}`, [
+      await page.getByTestId("overlay-scale").textContent(),
+      await page.getByTestId("overlay-fps").textContent(),
+    ]);
+    expect(match, line).not.toBeNull();
+    expect(Number(match![2])).toBeLessThanOrEqual(50);
+  });
+}
 
 /**
  * In the page, over 2 s from now: the last time any meter read 0.01 or more, polled every
@@ -339,52 +378,62 @@ test("a denied camera is none, and the generative look renders (AC13)", async ({
   await expectNoTextOnOutput(page);
 });
 
-test("slow frames step the render scale down to 50% and headroom steps it back up (AC15)", async ({
-  page,
-}) => {
-  await page.addInitScript(() => {
-    const w = window as unknown as { __slowFrames: boolean };
-    w.__slowFrames = false;
-    const raf = window.requestAnimationFrame.bind(window);
-    // While slow, every frame callback waits 60 ms first: about 15 frames a second.
-    window.requestAnimationFrame = (cb) =>
-      w.__slowFrames ? (setTimeout(() => raf(cb), 60) as unknown as number) : raf(cb);
-  });
-  await record(page);
-  await page.goto("/");
-  await start(page, { reopen: false });
-  await page.keyboard.press("o");
-  await page.waitForTimeout(2000); // the first 60 frames at the display's rate: the estimate (PD6)
-  const scale = () => page.getByTestId("overlay-scale").textContent();
-  const seen: string[] = [];
-  const watch = setInterval(() => void scale().then((s) => seen.push(s ?? "")), 200);
+for (const look of LOOKS) {
+  test(`slow frames step the render scale down to 50% and headroom steps it back up, on ${look.name} (AC15, B-02 AC17)`, async ({
+    page,
+    request,
+  }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __slowFrames: boolean };
+      w.__slowFrames = false;
+      const raf = window.requestAnimationFrame.bind(window);
+      // While slow, every frame callback waits 60 ms first: about 15 frames a second.
+      window.requestAnimationFrame = (cb) =>
+        w.__slowFrames ? (setTimeout(() => raf(cb), 60) as unknown as number) : raf(cb);
+    });
+    // PD17's fallback, chosen by the owner 2026-11-12: software WebGL cannot hold the
+    // twelve-effect profile at rest at 640x360 (about 31 ms a frame at 100%, 18 to 20 ms even at
+    // 50%, so a step up can never hold). Only this look's scale check runs on a quarter of the
+    // pixels; the 50 ms latency check keeps the full size, and the real GPU is checked by hand (H3).
+    if (look.profile) await page.setViewportSize({ width: 320, height: 180 });
+    await record(page);
+    await page.goto("/");
+    await startOn(page, request, look);
+    await page.keyboard.press("o");
+    await page.waitForTimeout(2000); // the first 60 frames at the display's rate: the estimate (PD6)
+    const scale = () => page.getByTestId("overlay-scale").textContent();
+    const seen: string[] = [];
+    const watch = setInterval(() => void scale().then((s) => seen.push(s ?? "")), 200);
 
-  await page.evaluate(() => ((window as unknown as { __slowFrames: boolean }).__slowFrames = true));
-  await expect(page.getByTestId("overlay-scale"))
-    .toHaveText("scale 75%", { timeout: 4000 })
-    .catch(
-      () => undefined, // it may already be at 75% from the software renderer, or past it
+    await page.evaluate(
+      () => ((window as unknown as { __slowFrames: boolean }).__slowFrames = true),
     );
-  await expect(page.getByTestId("overlay-scale")).toHaveText("scale 50%", { timeout: 8000 });
-  await page.waitForTimeout(3000);
-  await expect(page.getByTestId("overlay-scale")).toHaveText("scale 50%");
+    await expect(page.getByTestId("overlay-scale"))
+      .toHaveText("scale 75%", { timeout: 4000 })
+      .catch(
+        () => undefined, // it may already be at 75% from the software renderer, or past it
+      );
+    await expect(page.getByTestId("overlay-scale")).toHaveText("scale 50%", { timeout: 8000 });
+    await page.waitForTimeout(3000);
+    await expect(page.getByTestId("overlay-scale")).toHaveText("scale 50%");
 
-  await page.evaluate(
-    () => ((window as unknown as { __slowFrames: boolean }).__slowFrames = false),
-  );
-  const recovered = await expect(page.getByTestId("overlay-scale"))
-    .toHaveText("scale 75%", { timeout: 12_000 })
-    .then(() => true)
-    .catch(() => false);
-  clearInterval(watch);
-  note("AC15 scale readings every 200 ms", seen);
-  note(
-    "AC15 frame ms after the wrap was removed",
-    await page.getByTestId("overlay-frame-ms").textContent(),
-  );
-  expect(seen.every((s) => /^scale (100|75|50)%$/.test(s))).toBe(true);
-  expect(recovered, "no step up within 12 s of headroom").toBe(true);
-});
+    await page.evaluate(
+      () => ((window as unknown as { __slowFrames: boolean }).__slowFrames = false),
+    );
+    const recovered = await expect(page.getByTestId("overlay-scale"))
+      .toHaveText("scale 75%", { timeout: 12_000 })
+      .then(() => true)
+      .catch(() => false);
+    clearInterval(watch);
+    note("AC15 scale readings every 200 ms", seen);
+    note(
+      "AC15 frame ms after the wrap was removed",
+      await page.getByTestId("overlay-frame-ms").textContent(),
+    );
+    expect(seen.every((s) => /^scale (100|75|50)%$/.test(s))).toBe(true);
+    expect(recovered, "no step up within 12 s of headroom").toBe(true);
+  });
+}
 
 test("with the cap at 75% the scale never reads 100% (AC15)", async ({ page }) => {
   await record(page);
@@ -400,16 +449,38 @@ test("with the cap at 75% the scale never reads 100% (AC15)", async ({ page }) =
   expect(seen.filter((s) => s === "scale 100%")).toEqual([]);
 });
 
-test("nothing but the page, its assets and health is ever requested (AC17)", async ({ page }) => {
+test("nothing but the page, its assets, health and the two profile reads is ever requested, the profile reads only after a user action (AC17, B-02 AC18)", async ({
+  page,
+  request,
+}) => {
+  // The session runs on the twelve-effect profile (B-02 AC18, PD17).
+  const stored = await createProfile(request, twelveEffects());
   const requests: string[] = [];
-  page.on("request", (r) => requests.push(`${r.method()} ${new URL(r.url()).pathname}`));
+  const bodies: string[] = [];
+  page.on("request", (r) => {
+    requests.push(`${r.method()} ${new URL(r.url()).pathname}`);
+    if (r.postData()) bodies.push(`${r.method()} ${new URL(r.url()).pathname}`);
+  });
   page.on("websocket", (ws) => requests.push(`WS ${ws.url()}`));
   await record(page);
   await page.goto("/");
+  await page.waitForTimeout(1500);
+  expect(requests.filter((r) => r.includes("/api/profiles"))).toEqual([]); // no user action yet
   await start(page);
   await page.keyboard.press("o");
+  await expect(page.getByTestId("profile-picker")).toBeEnabled();
+  await page.getByTestId("profile-picker").selectOption(stored.id);
+  await expect(page.getByTestId("overlay-profile")).toHaveText("profile: Twelve effects");
   await page.waitForTimeout(6000); // past one health poll after the first
   note("AC17 requests", [...new Set(requests)]);
-  const allowed = /^GET (\/|\/assets\/[^/]+|\/api\/health)$/;
+  const allowed = /^GET (\/|\/assets\/[^/]+|\/api\/health|\/api\/profiles|\/api\/profiles\/[^/]+)$/;
   expect(requests.filter((r) => !allowed.test(r))).toEqual([]);
+  expect(bodies, "a request carried a body").toEqual([]);
+  expect(
+    requests.filter((r) => r.startsWith("WS")),
+    "a WebSocket was opened",
+  ).toEqual([]);
+  expect(requests).toContain("GET /api/profiles");
+  expect(requests).toContain(`GET /api/profiles/${stored.id}`);
+  await deleteAll(request);
 });

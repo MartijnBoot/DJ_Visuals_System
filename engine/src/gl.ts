@@ -1,5 +1,6 @@
-// Small WebGL2 helpers for the look's single pass: compile and link, textures, render targets,
-// and the vertex shader for a fullscreen triangle drawn from `gl_VertexID` with no buffers.
+// Small WebGL2 helpers for the look's single pass: compile and link (blocking for the first
+// program, non-blocking for a profile switch), textures, render targets, and the vertex shader
+// for a fullscreen triangle drawn from `gl_VertexID` with no buffers.
 
 /** Three vertices that cover the viewport; draw with `drawArrays(TRIANGLES, 0, 3)`. */
 export const FULLSCREEN_VERTEX = `#version 300 es
@@ -38,6 +39,78 @@ export function createProgram(
     throw new Error(`WebGL2: program did not link: ${gl.getProgramInfoLog(program)}`);
   }
   return program;
+}
+
+/** A program whose link was started and not yet read (B-02 plan PD4). */
+export interface Linking {
+  program: WebGLProgram;
+  vertex: WebGLShader;
+  fragment: WebGLShader;
+}
+
+export type LinkState =
+  | { state: "pending" }
+  | { state: "ready"; program: WebGLProgram }
+  | { state: "failed"; message: string };
+
+/** `KHR_parallel_shader_compile`, when the context has it. */
+export interface ParallelCompile {
+  COMPLETION_STATUS_KHR: number;
+}
+
+/**
+ * Starts compiling and linking without reading any status, so the driver can work while the
+ * current program keeps drawing. Read the result with `programReady`.
+ */
+export function beginProgram(
+  gl: WebGL2RenderingContext,
+  vertex: string,
+  fragment: string,
+): Linking {
+  const shader = (type: number, source: string) => {
+    const s = gl.createShader(type);
+    if (!s) throw new Error("WebGL2: createShader failed");
+    gl.shaderSource(s, source);
+    gl.compileShader(s);
+    return s;
+  };
+  const program = gl.createProgram();
+  const linking = {
+    program,
+    vertex: shader(gl.VERTEX_SHADER, vertex),
+    fragment: shader(gl.FRAGMENT_SHADER, fragment),
+  };
+  gl.attachShader(program, linking.vertex);
+  gl.attachShader(program, linking.fragment);
+  gl.linkProgram(program);
+  return linking;
+}
+
+/**
+ * With the extension, `pending` until the link has finished, without blocking; without it, the
+ * status read waits for the link (one long frame at a structural switch). A failed program is
+ * deleted.
+ */
+export function programReady(
+  gl: WebGL2RenderingContext,
+  linking: Linking,
+  parallel: ParallelCompile | null,
+): LinkState {
+  const { program, vertex, fragment } = linking;
+  if (parallel && !gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR)) {
+    return { state: "pending" };
+  }
+  const linked = Boolean(gl.getProgramParameter(program, gl.LINK_STATUS));
+  const message = linked
+    ? ""
+    : `WebGL2: program did not link: ${gl.getProgramInfoLog(program) ?? ""} ${gl.getShaderInfoLog(fragment) ?? ""}`;
+  gl.deleteShader(vertex);
+  gl.deleteShader(fragment);
+  if (!linked) {
+    gl.deleteProgram(program);
+    return { state: "failed", message };
+  }
+  return { state: "ready", program };
 }
 
 /** An RGBA8 texture with linear filtering and clamped edges, optionally sized. */

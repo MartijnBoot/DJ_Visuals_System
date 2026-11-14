@@ -1,13 +1,16 @@
-// The settings panel (spec SD6, SD18, UI "Panel (s)"; plan PD12): Start, the two pickers, the
+// The settings panel (spec SD6, SD18, UI "Panel (s)"; plan PD12; B-02 SD6, SD13): Start, the
+// two device pickers, the profile picker with its reason line and a link to the builder, the
 // two dials, the quality cap, the feature meters, the source states and one reason line. It is
 // scaffolding over the canvas that B-04's control surface replaces. Keyboard-operable: native
 // controls in tab order, each labelled.
 import type { AudioFeatures } from "@djv/audio";
 import type { Dials, RenderScale } from "@djv/engine";
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { DeviceOption } from "./capture/devices.ts";
 import type { AudioChoice } from "./capture/remembered.ts";
 import type { SessionState } from "./capture/session.ts";
+import type { ActiveState } from "./profiles/active.ts";
+import { Row, SourcePickers } from "./SourcePickers.tsx";
 
 const METERS = ["level", "low", "mid", "high", "beat"] as const;
 
@@ -27,37 +30,8 @@ export interface PanelProps {
   cap: RenderScale;
   onCap(cap: RenderScale): void;
   read(now: number): AudioFeatures;
-}
-
-const audioValue = (c: AudioChoice | undefined) =>
-  !c ? "" : c.kind === "system" ? "system" : `input:${c.deviceId}`;
-
-/** Options for a picker, keeping a remembered id the browser has not listed yet (PD12). */
-function options(
-  list: DeviceOption[],
-  value: string,
-  toValue: (id: string) => string,
-  name: string,
-) {
-  const all = list.map((d) => ({ value: toValue(d.deviceId), label: d.label }));
-  if (value && !all.some((o) => o.value === value))
-    all.unshift({ value, label: `remembered ${name}` });
-  if (!value) all.unshift({ value: "", label: "default" });
-  return all.map((o) => (
-    <option key={o.value} value={o.value}>
-      {o.label}
-    </option>
-  ));
-}
-
-function Row({ label, children }: { label: string; children: (id: string) => ReactNode }) {
-  const id = useId();
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "9em 1fr", gap: 8, alignItems: "center" }}>
-      <label htmlFor={id}>{label}</label>
-      {children(id)}
-    </div>
-  );
+  profiles: ActiveState;
+  onProfile(id: string): void;
 }
 
 export function Panel(props: PanelProps) {
@@ -73,12 +47,6 @@ export function Panel(props: PanelProps) {
     });
     return () => cancelAnimationFrame(id);
   }, [read]);
-
-  const camera = props.cameraId ?? "";
-  // A stopped share leaves the picker on a placeholder, so choosing "System audio" again is a
-  // change the browser reports (review C3); otherwise the select already shows it and stays mute.
-  const systemStopped = props.audioChoice?.kind === "system" && capture.audio === "lost";
-  const audio = systemStopped ? "stopped" : audioValue(props.audioChoice);
 
   return (
     <section
@@ -102,50 +70,38 @@ export function Panel(props: PanelProps) {
           Start
         </button>
       )}
-      <Row label="camera">
+      <SourcePickers
+        started={started}
+        capture={capture}
+        cameraId={props.cameraId}
+        audioChoice={props.audioChoice}
+        cameras={props.cameras}
+        audioInputs={props.audioInputs}
+        systemAudio={props.systemAudio}
+        onCamera={props.onCamera}
+        onAudio={props.onAudio}
+      />
+      <Row label="profile">
         {(id) => (
           <select
             id={id}
-            data-testid="camera-picker"
-            disabled={!started}
-            value={camera}
-            onChange={(e) => props.onCamera(e.target.value)}
+            data-testid="profile-picker"
+            disabled={!props.profiles.loaded}
+            value={props.profiles.selectedId}
+            onChange={(e) => props.onProfile(e.target.value)}
           >
-            {options(props.cameras, camera, (d) => d, "camera")}
-          </select>
-        )}
-      </Row>
-      <Row label="audio source">
-        {(id) => (
-          <select
-            id={id}
-            data-testid="audio-picker"
-            disabled={!started}
-            value={audio}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === "system") props.onAudio({ kind: "system" });
-              else if (v.startsWith("input:"))
-                props.onAudio({ kind: "input", deviceId: v.slice(6) });
-            }}
-          >
-            {systemStopped ? (
-              <option value="stopped" disabled>
-                system audio stopped
+            {props.profiles.entries.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
               </option>
-            ) : (
-              options(props.audioInputs, audio, (d) => `input:${d}`, "input")
-            )}
-            {systemStopped &&
-              props.audioInputs.map((d) => (
-                <option key={d.deviceId} value={`input:${d.deviceId}`}>
-                  {d.label}
-                </option>
-              ))}
-            {props.systemAudio && <option value="system">System audio</option>}
+            ))}
           </select>
         )}
       </Row>
+      {props.profiles.reason && <div data-testid="profile-reason">{props.profiles.reason}</div>}
+      <a href="/builder" data-testid="open-builder" style={{ color: "#fff" }}>
+        Open builder
+      </a>
       {(["recognisability", "reactivity"] as const).map((dial) => (
         <Row key={dial} label={dial === "reactivity" ? "audio reactivity" : dial}>
           {(id) => (

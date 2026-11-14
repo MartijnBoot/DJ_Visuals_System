@@ -2,7 +2,9 @@
 // engine cannot get a WebGL2 context, one line of text takes the canvas's place. Keys, with no
 // modifier: `o` toggles the overlay (Phase 0), `s` the settings panel (B-01 SD6), `f` fullscreen
 // (SD13). The panel is open on load with Start; capture begins only from that click (AC1, AC2,
-// PD12), and from then on the page holds a screen wake lock (AC16).
+// PD12), and from then on the page holds a screen wake lock (AC16). Profiles (B-02): nothing is
+// fetched on load; Start and each opening of the panel fetch the list, and picking a profile
+// re-fetches it and cuts to it, applying its starting dials (`profiles/active.ts`).
 import { createFeatureSource, ZERO_FEATURES } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
 import {
@@ -16,22 +18,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "./capture/devices.ts";
 import { loadRemembered, type AudioChoice } from "./capture/remembered.ts";
 import { createSession, type Session, type SessionState } from "./capture/session.ts";
+import { createVideo } from "./capture/video.ts";
 import { audioToEngine } from "./features-compat.ts";
 import { Overlay } from "./Overlay.tsx";
 import { Panel } from "./Panel.tsx";
+import { sharedToEngine } from "./profile-compat.ts";
+import { createActiveProfile } from "./profiles/active.ts";
+import { getProfile, listProfiles } from "./profiles/api.ts";
+import { loadProfileId, saveProfileId } from "./profiles/remembered.ts";
 import { createWakeLock } from "./wake-lock.ts";
 
 const IDLE: SessionState = { camera: "idle", audio: "idle", video: null, contextState: "none" };
-
-/** The camera's frames reach the engine through a muted, never-shown video element. */
-function createVideo(stream: MediaStream): HTMLVideoElement {
-  const video = document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
-  video.srcObject = stream;
-  void video.play().catch((e: unknown) => console.warn("camera video did not play", e));
-  return video;
-}
 
 export function Screen() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -50,6 +47,25 @@ export function Screen() {
   });
   const [remembered] = useState(() => loadRemembered());
   const [wakeLock] = useState(() => createWakeLock(navigator, document));
+  // The controller reaches the engine through the ref, which is set once the canvas mounts.
+  const [active] = useState(() =>
+    createActiveProfile({
+      api: { list: () => listProfiles(), get: (id) => getProfile(id) },
+      storage: { load: () => loadProfileId(), save: (id) => saveProfileId(id) },
+      setProfile: (profile) =>
+        engineRef.current?.setProfile(sharedToEngine(profile)) ?? Promise.resolve(),
+      setDials: (next) => setDials(next),
+      log: (id) => console.info("profile", { id }),
+    }),
+  );
+  const [profiles, setProfiles] = useState(() => active.state());
+  useEffect(() => active.subscribe(() => setProfiles(active.state())), [active]);
+  // Mirrors `panel` so a key handler can tell an opening from a closing without an updater side effect.
+  const panelRef = useRef(true);
+  const showPanel = useCallback((next: boolean) => {
+    panelRef.current = next;
+    setPanel(next);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -114,12 +130,13 @@ export function Screen() {
     setStarted(true);
     const capturing = session.start(remembered); // within the click: the context and requests need it
     void wakeLock.hold();
+    void active.open(); // Start is a user action: the first profile request (B-02 PD1)
     await capturing;
     refreshDevices(); // labels and ids are readable once permission is granted
     const { camera, audio } = session.state();
     const down = (s: string) => s === "none" || s === "lost";
-    if (!(down(camera) && down(audio))) setPanel(false); // both failed: keep the reasons up
-  }, [remembered, refreshDevices, wakeLock]);
+    if (!(down(camera) && down(audio))) showPanel(false); // both failed: keep the reasons up
+  }, [active, remembered, refreshDevices, showPanel, wakeLock]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -127,12 +144,16 @@ export function Screen() {
       // A focused picker does type-ahead on these letters: leave form controls to themselves.
       if (e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === "o") setOverlay((shown) => !shown);
-      if (e.key === "s") setPanel((shown) => !shown);
+      if (e.key === "s") {
+        const opening = !panelRef.current;
+        showPanel(opening);
+        if (opening) void active.open(); // every opening re-fetches the list (B-02 AC11)
+      }
       if (e.key === "f") toggleFullscreen();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [active, showPanel]);
 
   const stats = useCallback(() => engineRef.current?.stats() ?? null, []);
   const latency = useCallback(() => engineRef.current?.latency() ?? null, []);
@@ -162,6 +183,7 @@ export function Screen() {
           wakeLock={lockState}
           audio={capture.audio}
           camera={capture.camera}
+          profileName={profiles.activeName}
         />
       )}
       {panel && !error && (
@@ -181,6 +203,8 @@ export function Screen() {
           cap={cap}
           onCap={setCap}
           read={read}
+          profiles={profiles}
+          onProfile={(id) => void active.pick(id)}
         />
       )}
     </>

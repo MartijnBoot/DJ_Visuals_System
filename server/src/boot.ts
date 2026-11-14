@@ -9,6 +9,8 @@ import { openDatabase, type Db } from "./db.ts";
 import { registerHealth } from "./health.ts";
 import { createLogger, type Logger } from "./log.ts";
 import { migrate } from "./migrate.ts";
+import { registerProfiles } from "./profiles/routes.ts";
+import { createProfileStore } from "./profiles/store.ts";
 
 export const HOST = "127.0.0.1";
 export const DB_FILE = "djvisuals.sqlite";
@@ -78,6 +80,7 @@ export async function boot(
     schemaVersion,
     uptimeSeconds: () => Math.floor((Date.now() - listenedAt) / 1000),
   });
+  registerProfiles(app, createProfileStore(db, log));
   try {
     if (paths.staticDir !== undefined) await registerStatic(app, resolve(paths.staticDir));
     await app.listen({ host: HOST, port: config.PORT });

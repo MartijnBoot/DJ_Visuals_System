@@ -18,11 +18,13 @@ export interface OverlayProps {
   wakeLock: () => WakeLockState;
   audio: SourceState;
   camera: SourceState;
+  /** The name of the profile on screen (B-02 SD6). */
+  profileName: string;
 }
 
 const ms = (v: number) => v.toFixed(1);
 
-export function Overlay({ stats, latency, wakeLock, audio, camera }: OverlayProps) {
+export function Overlay({ stats, latency, wakeLock, audio, camera, profileName }: OverlayProps) {
   const [server, setServer] = useState<ServerStatus | null>(null);
   const [frame, setFrame] = useState(stats);
   const [lag, setLag] = useState(latency);
@@ -91,6 +93,8 @@ export function Overlay({ stats, latency, wakeLock, audio, camera }: OverlayProp
       <span data-testid="overlay-camera">camera: {camera}</span>
       {"\n"}
       <span data-testid="overlay-wake-lock">wake lock: {lock}</span>
+      {"\n"}
+      <span data-testid="overlay-profile">profile: {profileName}</span>
     </pre>
   );
 }

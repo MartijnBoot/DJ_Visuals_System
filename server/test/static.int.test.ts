@@ -64,6 +64,15 @@ describe("static serving (AC10)", () => {
     expect(await response.text()).toContain("static-fixture-page");
   });
 
+  it("serves the app at /builder (B-02 PD14), and nothing else under it", async () => {
+    const port = await serve(plantSite());
+    const response = await fetch(`http://127.0.0.1:${port}/builder`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/text\/html/);
+    expect(await response.text()).toContain("static-fixture-page");
+    expect((await fetch(`http://127.0.0.1:${port}/builder/other`)).status).toBe(404);
+  });
+
   it("answers 404 for an unknown path outside /api", async () => {
     const port = await serve(plantSite());
     expect((await fetch(`http://127.0.0.1:${port}/nope`)).status).toBe(404);

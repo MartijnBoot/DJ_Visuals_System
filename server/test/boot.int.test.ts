@@ -78,6 +78,30 @@ describe("boot (AC3, AC19)", () => {
       );
     },
   );
+
+  it(
+    "refuses /api/profiles on every non-internal IPv4 address like health (B-02 AD6)",
+    { timeout: 30_000 },
+    async () => {
+      const { port } = await bootOk();
+      const external = Object.values(networkInterfaces())
+        .flat()
+        .filter((i) => i !== undefined && i.family === "IPv4" && !i.internal)
+        .map((i) => i!.address);
+      const reachable = await Promise.all(
+        external.map((a) =>
+          fetch(`http://${a}:${port}/api/profiles`, { signal: AbortSignal.timeout(10_000) }).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      );
+      expect(Object.fromEntries(external.map((a, i) => [a, reachable[i]]))).toEqual(
+        Object.fromEntries(external.map((a) => [a, false])),
+      );
+      expect((await fetch(`http://127.0.0.1:${port}/api/profiles`)).status).toBe(200);
+    },
+  );
 });
 
 describe("fail-fast config (AC4)", () => {

@@ -1,49 +1,12 @@
 // AC19 (spec SD11; plan T6): the type check fails when `audio/`'s and `engine/`'s
 // `AudioFeatures` drift apart. `web/src/features-compat.ts` is type-checked with the compiler
 // API, once against the real `audio/src/features.ts` and once against a copy served with a
-// field renamed. Only the first may pass.
-import { resolve } from "node:path";
-import ts from "typescript";
+// field renamed. Only the first may pass. The helper is `compat-check.ts` (B-02 T8).
 import { describe, expect, it } from "vitest";
+import { compatDiagnostics } from "./compat-check.ts";
 
-const repoRoot = resolve(import.meta.dirname, "../..");
-const webDir = resolve(repoRoot, "web");
-const compatFile = resolve(webDir, "src/features-compat.ts");
-
-const isAudioFeatures = (fileName: string) =>
-  fileName.replace(/\\/g, "/").toLowerCase().endsWith("/audio/src/features.ts");
-
-/** Type-checks the compat file with `web/tsconfig.json`; `mutate` rewrites audio's shape. */
-function diagnostics(mutate?: (source: string) => string): string[] {
-  const configPath = resolve(webDir, "tsconfig.json");
-  const config = ts.readConfigFile(configPath, ts.sys.readFile);
-  const { options } = ts.parseJsonConfigFileContent(config.config, ts.sys, webDir);
-  const host = ts.createCompilerHost(options);
-  let served = false;
-  if (mutate) {
-    const readFile = host.readFile.bind(host);
-    const getSourceFile = host.getSourceFile.bind(host);
-    host.readFile = (fileName) => {
-      const text = readFile(fileName);
-      return text !== undefined && isAudioFeatures(fileName) ? mutate(text) : text;
-    };
-    host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
-      if (!isAudioFeatures(fileName)) {
-        return getSourceFile(fileName, languageVersion, onError, shouldCreate);
-      }
-      served = true;
-      return ts.createSourceFile(fileName, host.readFile(fileName)!, languageVersion, true);
-    };
-  }
-  const program = ts.createProgram({ rootNames: [compatFile], options, host });
-  if (mutate) expect(served, "the mutated audio/src/features.ts was never read").toBe(true);
-  // Only the compat file's own diagnostics count: a mutated audio/src/features.ts also breaks
-  // audio/ itself, and those errors must not stand in for the compat check (review finding 2).
-  return ts
-    .getPreEmitDiagnostics(program)
-    .filter((d) => d.file !== undefined && resolve(d.file.fileName) === compatFile)
-    .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
-}
+const target = { compatFile: "web/src/features-compat.ts", mutated: "/audio/src/features.ts" };
+const diagnostics = (mutate?: (source: string) => string) => compatDiagnostics(target, mutate);
 
 describe("AudioFeatures compatibility (AC19)", () => {
   it("type-checks against the real shapes", () => {

@@ -1,7 +1,7 @@
-// The look (spec SD5, SD10; plan PD5, PD8, PD22): one shader pass that draws the camera, or a
-// slow noise field when there is none, through the two dials and the audio features. The
-// mapping from inputs to uniforms is a pure function so it is tested without a GPU. Every
-// strength is named here; B-02 lifts them as the starting values of a configurable look.
+// B-01's look as a pure mapping (spec SD5, SD10; plan PD5, PD8, PD22): its constants, and
+// `lookUniforms`, the reference the built-in profile is proven equal to (B-02 AC15, PD7). The
+// constants are the effects' values at strength 1 (`profile.ts` imports them); the shader text
+// is `shader.ts`, one snippet per effect.
 import { driftColour, type Rgb } from "./colour.ts";
 import type { AudioFeatures, Dials } from "./features.ts";
 
@@ -69,83 +69,3 @@ export function lookUniforms(
     brightness: BRIGHTNESS_MAX * clamp01(features.level) * k,
   };
 }
-
-/**
- * Every term is a function of the block (`cell`) only, never of the pixel inside it, so at
- * recognisability 1 no detail is finer than a block at any reactivity (PD22). With a camera,
- * block 1, 256 levels, no feedback and no audio terms, the pass is the identity (PD8).
- */
-export const LOOK_FRAGMENT = `#version 300 es
-precision highp float;
-uniform sampler2D uSource;
-uniform sampler2D uPrevious;
-uniform vec2 uResolution;
-uniform vec2 uCover;
-uniform float uHasSource;
-uniform float uTime;
-uniform vec3 uTint;
-uniform float uTintWeight;
-uniform float uBlock;
-uniform float uLevels;
-uniform float uFeedback;
-uniform float uZoom;
-uniform float uDisplace;
-uniform float uFlash;
-uniform float uGrain;
-uniform float uEdges;
-uniform float uBrightness;
-out vec4 outColour;
-
-float hash(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
-}
-
-float valueNoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-             mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-
-// The camera, cover-fitted, or the generative input (SD10): slow two-octave noise.
-vec3 source(vec2 uv) {
-  if (uHasSource > 0.5) return texture(uSource, (uv - 0.5) * uCover + 0.5).rgb;
-  vec2 p = uv * vec2(uResolution.x / uResolution.y, 1.0) * 3.0;
-  float t = uTime * 0.06;
-  float n = 0.65 * valueNoise(p + vec2(t, -0.7 * t)) + 0.35 * valueNoise(2.3 * p - vec2(1.3 * t, t));
-  return vec3(0.3 + 0.7 * n);
-}
-
-void main() {
-  vec2 cell = floor(gl_FragCoord.xy / uBlock);
-  vec2 centre = (cell + 0.5) * uBlock / uResolution;
-  float seed = floor(uTime * 12.0);
-  vec2 jitter = vec2(hash(cell + seed), hash(cell + seed + 17.0)) - 0.5;
-  vec2 uv = (centre - 0.5) / uZoom + 0.5 + jitter * uDisplace;
-
-  vec3 colour = source(uv);
-  if (uEdges > 0.001) {
-    vec2 step = uBlock / uResolution;
-    colour += (abs(source(uv + vec2(step.x, 0.0)) - colour) +
-               abs(source(uv + vec2(0.0, step.y)) - colour)) * uEdges;
-  }
-  colour *= mix(vec3(1.0), 1.5 * uTint, uTintWeight);
-  // Posterise the input first, then smear: the smear is then a convergent average toward the
-  // posterised camera. Quantising after the mix lets a level absorb any change under 1/(2 steps)
-  // per frame, which the 0.85 feedback never exceeds, so the picture froze (review C1).
-  float steps = uLevels - 1.0;
-  colour = floor(clamp(colour, 0.0, 1.0) * steps + 0.5) / steps;
-  // The previous frame holds the audio terms below; undo brightness and flash (grain is
-  // zero-mean) so they decay through the smear instead of ratcheting up through it.
-  vec3 previous = texture(uPrevious, centre).rgb;
-  previous = clamp((previous - uFlash) / (1.0 - uFlash) / (1.0 + uBrightness), 0.0, 1.0);
-  colour = mix(colour, previous, uFeedback);
-
-  colour *= 1.0 + uBrightness;
-  colour += (hash(cell + seed + 31.0) - 0.5) * uGrain;
-  colour = mix(colour, vec3(1.0), uFlash);
-  outColour = vec4(clamp(colour, 0.0, 1.0), 1.0);
-}`;

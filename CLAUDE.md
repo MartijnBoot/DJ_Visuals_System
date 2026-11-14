@@ -48,9 +48,13 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
   `process.env`. Root scripts that need a value import `config.ts` (`scripts/dev.ts` does).
 - `engine/` — the framework-free WebGL2 renderer; `audio/` — the framework-free AudioWorklet
   analysis; neither has a dependency of any kind and neither imports the other
-  (`tests/meta/engine-boundary.test.ts`). `web/` — the React + Vite screen page; imports
-  `engine/`, `audio/` and `shared/`, never `server/`. `server/` — Fastify, SQLite, migrations, static
-  serving. `shared/` — zod schemas both sides validate against. `tests/meta/` — tests about
+  (`tests/meta/engine-boundary.test.ts`); `engine/` declares its own `Profile` and never
+  imports `shared/`. `web/` — the React + Vite app, two routes in one page: the screen at `/` and
+  the profile builder at `/builder` (`web/src/main.tsx`, no router); imports `engine/`, `audio/`
+  and `shared/`, never `server/`. `server/` — Fastify, SQLite, migrations, static serving, the
+  profile endpoints. `shared/` — zod schemas both sides validate against, including the profile.
+  Profile data lives in the `profiles` table (`server/src/profiles/store.ts` is the only SQL for
+  it); the built-in profile is code (`engine/src/profile.ts`). `tests/meta/` — tests about
   the codebase's own boundaries. `tests/browser/` — Playwright against `pnpm start`.
 - Types at the boundary: every external input is validated before use.
 - A new dependency needs justification (what, why not the standard library, licence,

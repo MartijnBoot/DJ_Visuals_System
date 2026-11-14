@@ -24,8 +24,9 @@ breaks; "review only" is honest but is a debt, and the next task near it should 
 | 0 | Migrations are append-only: a migration that has a successor is never edited | `.claude/guard-paths.json` → `append_only` (`server/migrations`); `tests/workflow/test_guard_paths.py` |
 | 0 | `engine/` and `audio/` are framework-free: neither `package.json` declares a dependency of any kind, and neither compiled output imports a package (`audio/` since B-01) | `tests/meta/engine-boundary.test.ts` |
 | 0 | The server listens on `127.0.0.1` only; the machine's LAN address is refused | `server/test/boot.int.test.ts` |
-| B-01 | No media reaches the server: `server/` has no endpoint for audio or video, and a running set makes no request beyond `GET /`, `/assets/*` and `/api/health` | review (`server/` diff); `tests/browser/live.spec.ts` (AC17) |
+| B-01 | No media reaches the server: `server/` has no endpoint for audio or video, and a running set requests only `GET /`, `/assets/*`, `/api/health`, `/api/profiles` and `/api/profiles/:id` — the last two only on a user action (B-02 SD6) | review (`server/` diff); `tests/browser/live.spec.ts` (AC17, B-02 AC18) |
 | B-01 | `audio/` and `engine/` each declare `AudioFeatures`; `web/` passes one to the other, so the type check fails when they drift | `web/src/features-compat.ts`; `tests/meta/features-compat.test.ts` |
+| B-02 | `engine/` and `shared/` each declare `Profile` (`engine/` never imports `shared/`); `web/` passes one to the other, so the type check fails when they drift | `web/src/profile-compat.ts`; `tests/meta/profile-compat.test.ts` |
 
 ## Guarded areas
 

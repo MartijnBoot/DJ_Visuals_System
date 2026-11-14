@@ -33,14 +33,14 @@ async function bootWith(migrationsDir?: string): Promise<number> {
 }
 
 describe("GET /api/health (AC9)", () => {
-  it("answers 200 with a body that validates against the shared schema, version 1", async () => {
+  it("answers 200 with a body that validates against the shared schema, version 2", async () => {
     const port = await bootWith();
     const response = await fetch(`http://127.0.0.1:${port}/api/health`);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toMatch(/application\/json/);
     const body = healthResponseSchema.parse(await response.json());
     expect(body.status).toBe("ok");
-    expect(body.schemaVersion).toBe(1);
+    expect(body.schemaVersion).toBe(2);
     expect(body.uptimeSeconds).toBeGreaterThanOrEqual(0);
     expect(body.uptimeSeconds).toBeLessThan(30);
   });
