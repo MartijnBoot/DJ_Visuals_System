@@ -4,7 +4,8 @@
   bound, and the warning says why and how to find the process. It never refuses or kills.
 - The port it checks is the gate's port in `tests/browser/fixtures/launch.ts`.
 - No retry is configured anywhere: vitest `retry`, Playwright `retries`, or a retry flag in a
-  root script or the gate. A retry is the cheapest way to make a flake look fixed.
+  root script or the gate, nor a per-test or per-describe retry in any test file. A retry is
+  the cheapest way to make a flake look fixed.
 
 Stdlib `unittest`, like the other workflow tests:
     python -m unittest tests/workflow/test_gate_shape.py
@@ -32,9 +33,14 @@ FN_BODY = re.compile(r"^" + WARN_FN + r"\(\)\s*\{\n(.*?)^\}", re.MULTILINE | re.
 GATE_PORT_TS = re.compile(r"export const GATE_PORT = (\d+);")
 PORT_NUMBER = re.compile(r"\b(8\d{3})\b")
 
-VITEST_RETRY = re.compile(r"\bretry\s*:\s*([^,\n}]+)")
-PLAYWRIGHT_RETRIES = re.compile(r"\bretries\s*:\s*([^,\n}]+)")
+VITEST_RETRY = re.compile(r"\bretry[\"']?\s*:\s*([^,\n}]+)")
+PLAYWRIGHT_RETRIES = re.compile(r"\bretries[\"']?\s*:\s*([^,\n}]+)")
 RETRY_FLAG = re.compile(r"--retr(?:y|ies)(?:[= ](\S+))?")
+# A per-test or per-describe option: vitest's `{ retry: n }`, Playwright's
+# `describe.configure({ retries: n })` (review finding R2).
+TEST_FILE_RETRY = re.compile(r"\b(retry|retries)[\"']?\s*:\s*([^,\n}]+)")
+TEST_DIRS = ("audio", "engine", "scripts", "server", "shared", "tests", "web")
+TEST_FILE = re.compile(r"\.(test|spec)\.tsx?$")
 
 
 def call_position(text: str) -> tuple[list[int], int, int]:
@@ -63,6 +69,21 @@ def retry_settings(vitest: str, playwright: str, scripts: dict[str, str], gate: 
         found += [f"script {name}: --retry {v or '(no value)'}" for v in RETRY_FLAG.findall(command) if v != "0"]
     found += [f"check.sh: --retry {v or '(no value)'}" for v in RETRY_FLAG.findall(gate) if v != "0"]
     return found
+
+
+def test_files() -> list[Path]:
+    """Every vitest and Playwright test file in the workspaces, outside `node_modules`."""
+    return sorted(
+        path
+        for folder in TEST_DIRS
+        for path in (REPO_ROOT / folder).rglob("*.ts*")
+        if TEST_FILE.search(path.name) and "node_modules" not in path.parts and "dist" not in path.parts
+    )
+
+
+def test_file_retries(text: str) -> list[str]:
+    """Every retry option in a test file whose value is not 0, as `<key>: <value>`."""
+    return [f"{key}: {value.strip()}" for key, value in TEST_FILE_RETRY.findall(text) if value.strip() != "0"]
 
 
 class PortWarningTest(unittest.TestCase):
@@ -137,6 +158,30 @@ class NoRetryTest(unittest.TestCase):
 
     def test_zero_is_not_a_retry(self) -> None:
         self.assertEqual(retry_settings("retry: 0,", "retries: 0,", {}, ""), [])
+
+    def test_parser_sees_a_quoted_key(self) -> None:
+        found = retry_settings('{ "retry": 1 }', "{ 'retries': 2 }", {}, "")
+        self.assertEqual(found, ["vitest retry: 1", "playwright retries: 2"])
+
+    def test_no_test_file_sets_its_own_retry(self) -> None:
+        found = {
+            str(path.relative_to(REPO_ROOT)): hits
+            for path in test_files()
+            if (hits := test_file_retries(path.read_text(encoding="utf-8")))
+        }
+        self.assertEqual(found, {})
+
+    def test_test_file_parser_sees_each_planted_retry(self) -> None:
+        planted = (
+            'it("flaky", { retry: 2 }, () => {});\n'
+            "test.describe.configure({ mode: 'serial', retries: 1 });\n"
+            'describe("x", { "retry": 3, timeout: 0 }, () => {});\n'
+            'it("ok", { retry: 0 }, () => {});\n'
+            "// a retry at 2 s brings it back\n"
+        )
+        self.assertEqual(test_file_retries(planted), ["retry: 2", "retries: 1", "retry: 3"])
+        self.assertTrue(any(p.name == "under-load.spec.ts" for p in test_files()))
+        self.assertTrue(any(p.name.endswith(".int.test.ts") for p in test_files()))
 
 
 if __name__ == "__main__":
