@@ -2,7 +2,9 @@
 // `shared/`'s drift apart. `web/src/profile-compat.ts` is type-checked with the compiler API
 // against a copy of `engine/src/profile.ts` served with a field renamed or a required field
 // added; neither may pass. The unmutated case is the `types` step's (`pnpm typecheck`
-// compiles `web/`, which covers the compat file: `compat-coverage.test.ts`, B-08 SD3).
+// compiles `web/`, which covers the compat file: `compat-coverage.test.ts`, B-08 SD3), and
+// the helper also requires it clean before either mutation counts, so any drift fails these
+// tests too (B-08 AC6; owner 2026-11-14).
 // No per-test time limit: these tests assert diagnostics, not how fast the compiler is, and
 // load made them exceed vitest's 5 s (B-08 PD7, D-02).
 import { describe, expect, it } from "vitest";

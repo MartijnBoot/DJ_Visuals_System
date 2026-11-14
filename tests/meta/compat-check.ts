@@ -33,43 +33,66 @@ export interface CompatTarget {
   mutated: string;
 }
 
+/** For the helper's own test: `drift` rewrites the real file as an edit to it would. */
+export interface CompatOptions {
+  drift?: (source: string) => string;
+}
+
+const baselines = new Map<string, string[]>();
+
 /**
- * Type-checks the compat file; `mutate` rewrites the text of `target.mutated` and must change
- * it, else the call fails before compiling (B-08 AC6). Returns the
- * compat file's own diagnostics only: a mutated shape also breaks its own package, and those
+ * Type-checks the compat file with `mutate` rewriting the text of `target.mutated`, and returns
+ * the compat file's own diagnostics: a mutated shape also breaks its own package, and those
  * errors must not stand in for the compat check (B-01 review finding 2).
+ *
+ * A mutation proves something only against an undrifted shape (B-08 AC6; owner 2026-11-14:
+ * every drift is caught), so first: `mutate` must change the real text (checked before
+ * compiling), and the unmutated compat file must have no diagnostic. That baseline compiles
+ * once per compat file per run and is shared by its mutation tests.
  */
 export function compatDiagnostics(
   target: CompatTarget,
-  mutate?: (source: string) => string,
+  mutate: (source: string) => string,
+  { drift }: CompatOptions = {},
 ): string[] {
+  const real = ts.sys.readFile(resolve(repoRoot, target.mutated.replace(/^\//, "")));
+  expect(real, `${target.mutated} could not be read`).toBeDefined();
+  const current = drift ? drift(real!) : real!;
+  expect(
+    mutate(current),
+    `the mutation of ${target.mutated} changed nothing: the real shape no longer has what ` +
+      `the test rewrites, so it has drifted (B-08 AC6)`,
+  ).not.toBe(current);
+
+  let baseline = drift ? undefined : baselines.get(target.compatFile);
+  if (baseline === undefined) {
+    baseline = diagnosticsOf(target, drift);
+    if (!drift) baselines.set(target.compatFile, baseline);
+  }
+  expect(
+    baseline,
+    `${target.compatFile} has drifted from ${target.mutated} before any mutation (B-08 AC6)`,
+  ).toEqual([]);
+
+  return diagnosticsOf(target, (source) => mutate(drift ? drift(source) : source));
+}
+
+/** The compat file's own diagnostics, with `rewrite` (if any) applied to `target.mutated`. */
+function diagnosticsOf(target: CompatTarget, rewrite?: (source: string) => string): string[] {
   const compatFile = resolve(repoRoot, target.compatFile);
   const suffix = target.mutated.toLowerCase();
   const isMutated = (fileName: string) =>
     fileName.replace(/\\/g, "/").toLowerCase().endsWith(suffix);
 
-  if (mutate) {
-    // A rewrite that matches nothing serves the real file, and a real file that has drifted
-    // already fails the compat check, so the test would pass on the drift instead of on its
-    // own mutation. Refuse it before compiling (B-08 AC6, review finding C1).
-    const real = ts.sys.readFile(resolve(repoRoot, target.mutated.replace(/^\//, "")));
-    expect(real, `${target.mutated} could not be read`).toBeDefined();
-    expect(
-      mutate(real!),
-      `the mutation of ${target.mutated} changed nothing: the real shape no longer has what ` +
-        `the test rewrites, so it has drifted (B-08 AC6)`,
-    ).not.toBe(real);
-  }
-
   const { options } = webConfig();
   const host = ts.createCompilerHost(options);
   let served = false;
-  if (mutate) {
+  if (rewrite) {
     const readFile = host.readFile.bind(host);
     const getSourceFile = host.getSourceFile.bind(host);
     host.readFile = (fileName) => {
       const text = readFile(fileName);
-      return text !== undefined && isMutated(fileName) ? mutate(text) : text;
+      return text !== undefined && isMutated(fileName) ? rewrite(text) : text;
     };
     host.getSourceFile = (fileName, languageVersion, onError, shouldCreate) => {
       if (!isMutated(fileName)) {
@@ -80,7 +103,7 @@ export function compatDiagnostics(
     };
   }
   const program = ts.createProgram({ rootNames: [compatFile], options, host });
-  if (mutate) expect(served, `the mutated ${target.mutated} was never read`).toBe(true);
+  if (rewrite) expect(served, `the rewritten ${target.mutated} was never read`).toBe(true);
   return ts
     .getPreEmitDiagnostics(program)
     .filter((d) => d.file !== undefined && resolve(d.file.fileName) === compatFile)

@@ -3,7 +3,9 @@
 // API against a copy of `audio/src/features.ts` served with a field renamed or a required
 // field added; neither may pass. The helper is `compat-check.ts` (B-02 T8). The unmutated case
 // is the `types` step's (`pnpm typecheck` compiles `web/`, which covers the compat file:
-// `compat-coverage.test.ts`, B-08 SD3). No per-test time limit: these tests assert
+// `compat-coverage.test.ts`, B-08 SD3); the helper also requires it clean before either
+// mutation counts, so any drift fails these tests too (B-08 AC6; owner 2026-11-14). No
+// per-test time limit: these tests assert
 // diagnostics, not how fast the compiler is, and load made them exceed vitest's 5 s (B-08 PD7,
 // D-02).
 import { describe, expect, it } from "vitest";
