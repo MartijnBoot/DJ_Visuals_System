@@ -1,7 +1,8 @@
 // The live chain in a real browser on the fake devices (B-01 AC6, AC7, AC8, AC10, AC12, AC13,
-// AC15, AC17; plan PD8, PD13, PD21, PD22, T9): the click track's beats, the dials in pixels,
-// the latency number, loss and reattachment, and render scaling. Measured values are attached
-// to the report next to the thresholds they are held to.
+// AC15, AC17; plan PD8, PD21, PD22, T9): the click track's beats, the dials in pixels, the
+// latency line's structure (B-08 AC3), loss and reattachment, and render scaling. Measured
+// values are attached to the report next to the thresholds they are held to. The 50 ms latency
+// budget is checked only on the owner's screen machine (B-08 SD2), never here.
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { createProfile, deleteAll, twelveEffects, type Definition } from "./fixtures/profiles.ts";
 import {
@@ -271,7 +272,7 @@ test.beforeEach(async ({ request }) => {
 });
 
 for (const look of LOOKS) {
-  test(`the overlay's in-app latency p95 is at most 50 ms once start-up has left the window, on ${look.name} (AC10, PD13, B-02 AC17)`, async ({
+  test(`the overlay records latency samples on ${look.name}, last and p95 never above worst (B-08 AC3, B-02 AC17)`, async ({
     page,
     request,
   }) => {
@@ -282,19 +283,27 @@ for (const look of LOOKS) {
     await expect(page.getByTestId("overlay-profile")).toHaveText(
       `profile: ${look.profile?.name ?? "Built-in"}`,
     );
-    // The window is 10 s. Start-up (module loading, the first frames, the refresh estimate) is
-    // inside it for the first 10 s; the owner decided (2026-11-11) to read it once that has
-    // left, so the number is the set's, not the page load's.
-    await page.waitForTimeout(20_000);
-    const line = (await page.getByTestId("overlay-latency").textContent())!;
-    const match = /latency ms ([\d.]+) \/ p95 ([\d.]+) \/ worst ([\d.]+)/.exec(line);
-    note(`AC10 overlay after 20 s on ${look.name} (p95 ≤ 50 ms)`, line);
-    note(`AC10 scale and fps on ${look.name}`, [
+    // B-08 SD1: structure, not milliseconds; load makes frames rarer but cannot break these.
+    // Wait (no limit of its own) until samples exist, then read the line once: the three
+    // numbers must come from one reading.
+    const latency = page.getByTestId("overlay-latency");
+    const NUMBER = String.raw`(-?\d+(?:\.\d+)?)`;
+    const shape = new RegExp(`^latency ms ${NUMBER} / p95 ${NUMBER} / worst ${NUMBER}$`);
+    await expect(latency).toHaveText(shape, { timeout: 0 });
+    const line = (await latency.textContent())!;
+    note(`B-08 AC3 overlay on ${look.name} (a measurement, no bound)`, line);
+    note(`B-08 AC3 scale and fps on ${look.name}`, [
       await page.getByTestId("overlay-scale").textContent(),
       await page.getByTestId("overlay-fps").textContent(),
     ]);
+    const match = shape.exec(line);
     expect(match, line).not.toBeNull();
-    expect(Number(match![2])).toBeLessThanOrEqual(50);
+    const [last, p95, worst] = match!.slice(1, 4).map(Number) as [number, number, number];
+    for (const n of [last, p95, worst]) expect(Number.isFinite(n), line).toBe(true);
+    expect(last, line).toBeGreaterThanOrEqual(0);
+    expect(last, line).toBeLessThanOrEqual(worst);
+    expect(p95, line).toBeGreaterThanOrEqual(0);
+    expect(p95, line).toBeLessThanOrEqual(worst);
   });
 }
 
