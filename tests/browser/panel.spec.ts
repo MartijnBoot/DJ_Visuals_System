@@ -2,8 +2,7 @@
 // AC14; plan PD11, PD12, T7). The recorder from `helpers.ts` logs every media request and
 // AudioContext, and can make the system-audio share fail.
 import { expect, test } from "@playwright/test";
-import { LEFT_RGB, RIGHT_RGB } from "./fixtures/media.ts";
-import { meter, near, patch, record, recorded, slide, start } from "./helpers.ts";
+import { cameraColours, meter, near, patch, record, recorded, slide, start } from "./helpers.ts";
 
 const OFF = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
 
@@ -162,7 +161,9 @@ test("moving a dial changes the next frame and asks for nothing (AC9)", async ({
   // The middle of the left half: one fixture colour or the other (the halves swap).
   const x = width / 4;
   const y = height / 2;
-  const fixture = (p: number[]) => near(p, LEFT_RGB, 12) || near(p, RIGHT_RGB, 12);
+  // As this browser decodes the fixture (D-01), read before the dial moves are counted from.
+  const [leftRgb, rightRgb] = await cameraColours(page);
+  const fixture = (p: number[]) => near(p, leftRgb, 12) || near(p, rightRgb, 12);
 
   await slide(page, "reactivity", "Home");
   await slide(page, "recognisability", "Home");

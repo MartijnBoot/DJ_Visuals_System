@@ -62,7 +62,11 @@ export function clickWav(): Buffer {
   return Buffer.concat([header, data]);
 }
 
-/** BT.601 studio range, which Chromium assumes for I420 camera frames. */
+/**
+ * Encoded as BT.601 studio range. Chromium decodes it back with BT.601 on Windows but BT.709 on
+ * Linux (D-01): there LEFT_RGB shows as about [237, 49, 38] and RIGHT_RGB as [15, 185, 223].
+ * Tests compare with the browser's own decode (`cameraColours` in helpers.ts), not these values.
+ */
 function toYuv([r, g, b]: readonly [number, number, number]): [number, number, number] {
   const y = 16 + (65.481 * r + 128.553 * g + 24.966 * b) / 255;
   const u = 128 + (-37.797 * r - 74.203 * g + 112.0 * b) / 255;
