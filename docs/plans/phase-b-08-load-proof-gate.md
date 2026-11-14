@@ -372,6 +372,37 @@ Written by T2 and T7 (PD15). Empty until then.
 
 ### Before the fix (T2)
 
+Windows dev machine, `availableParallelism()` 16, so 8 busy-loop workers and the second
+Chromium on 8124 (the harness's line in every run: `under load: 8 busy-loop worker thread(s) and
+a second Chromium rendering a started set from 127.0.0.1:8124`). Tree: commit `39aa4e8` (T1), on
+which `bash scripts/check.sh` passed first (`all 9 step(s) passed`, 96 browser tests). Nothing
+changed between runs. After each run: no listener on 8123 or 8124
+(`netstat -ano | grep -E ':(8123|8124) ' | grep LISTEN` empty); after run 3, no
+`chrome-headless-shell.exe` or `chrome.exe` process.
+
+| Run | Started (UTC) | Commit | Exit | Failing step | Failing tests (all `Error: Test timed out in 5000ms.`) |
+|---|---|---|---|---|---|
+| 1 | 2026-11-14 14:41:55 | `39aa4e8` | 1 | 7 (unit) | `engine/src/latency.test.ts:28` (6930 ms); `tests/meta/features-compat.test.ts:12` (18624 ms), `:16` (8705 ms), `:24` (5831 ms); `tests/meta/profile-compat.test.ts:12` (21534 ms), `:16` (10396 ms), `:24` (7484 ms) — 7 failed, 332 passed |
+| 2 | 2026-11-14 14:45:39 | `39aa4e8` | 1 | 7 (unit) | `engine/src/latency.test.ts:28` (5761 ms); `features-compat.test.ts:12` (13118 ms), `:16` (6273 ms); `profile-compat.test.ts:12` (18018 ms), `:16` (6607 ms) — 5 failed, 334 passed |
+| 3 | 2026-11-14 14:48:43 | `39aa4e8` | 1 | 7 (unit) | `engine/src/latency.test.ts:28` (5658 ms); `features-compat.test.ts:12` (13070 ms), `:16` (8316 ms); `profile-compat.test.ts:12` (19230 ms), `:16` (8504 ms), `:24` (9234 ms) — 6 failed, 333 passed |
+
+Every check that went red in any run:
+
+- `tests/meta/profile-compat.test.ts` — `:12` (unmutated) and `:16` in 3/3 runs, `:24` in runs
+  1 and 3: **D-02**.
+- `tests/meta/features-compat.test.ts` — `:12` (unmutated) and `:16` in 3/3 runs, `:24` in run
+  1: **D-02**.
+- `engine/src/latency.test.ts:28`, "stays bounded to the window however long nobody reads it"
+  (records 100 000 samples, asserts `size() ≤ 1251`), 3/3 runs: **other**. It asserts a size,
+  not a duration; it ran past vitest's default 5 s limit.
+
+Not reached: every run stopped at step 7, so the integration and browser steps (with
+`tests/browser/live.spec.ts:274` and the render-scale test `:395-430`) never ran under load.
+Their verdict under load is unknown, not green.
+
+**T2 stopped here** (autonomy note: a check outside D-02 went red). H2: the plan needs an
+amendment for `engine/src/latency.test.ts:28`, audited, before T3 to T6 start.
+
 ### After the fix (T7)
 
 ## Audit (PASS required before implementation starts)
