@@ -631,6 +631,56 @@ failure, recorded here only.
 
 **Amendment 2** (PD20, PD21, T13, T14) answers the above; T7 is then run again from (a).
 
+### After the fix (T7, second attempt, 2026-11-14)
+
+Tree: `228171b`, which is T1 to T6 and T9 to T14, the review fixes (`602687c`) and the D-03
+fix (`fix/d-03-integration-worker-crash`: `engines.node` `>=24.16.0 <25`). Windows dev machine,
+Node v24.22.1 (the machine's 24.15.0 was the D-03 crash; upgraded before these runs), 8 busy-loop
+workers per load run.
+
+**(a) `bash scripts/check.sh`, quiet machine: green**, exit 0, `all 9 step(s) passed`: 62
+workflow, 346 unit, 51 integration, 97 browser tests (3.0 min); the render-scale step up after
+11411 and 11440 ms (a measurement, T13).
+
+**(b) `pnpm check:load` three times in a row, no re-run: all green.**
+
+| Run | Started (UTC) | Exit | Unit | Integration | Browser | Overlay, Built-in / twelve effects (ms, last / p95) | Step up (ms) |
+|---|---|---|---|---|---|---|---|
+| 1 | 20:50:44 | 0 | 346/346 | 51/51 | 97 passed (16.2 min) | 402.0 / 402.0; 331.8 / 331.8 | 11236, 11195 |
+| 2 | 21:10:50 | 0 | 346/346 | 51/51 | 97 passed (12.6 min) | 254.1 / 254.1; 621.2 / 665.1 | 11223, 11397 |
+| 3 | 21:27:50 | 0 | 346/346 | 51/51 | 97 passed (12.7 min) | 387.7 / 501.0; 471.9 / 502.2 | 11186, 11091 |
+
+Each ended with `scripts/check.sh: all 9 step(s) passed` and no `load died` line. After each:
+no listener on 8123 or 8124 (`netstat -ano`), no `chrome-headless-shell.exe` (`tasklist`). The
+old 50 ms bound would have failed every run; no check measured its own duration.
+
+**(c) Drift.** `amount` renamed to `strength` in `Effect` (`engine/src/profile.ts:31`):
+`pnpm typecheck` exit 2, and `web/` alone reports `src/profile-compat.ts(8,67)` and `(9,67)`
+TS2322; both `profile-compat` mutation tests fail, "web/src/profile-compat.ts has drifted from
+/engine/src/profile.ts before any mutation (B-08 AC6)". Reverted. `level` renamed to `loudness`
+in `AudioFeatures` (`audio/src/features.ts:6`): `pnpm typecheck` exit 1, `web/` reports
+`src/features-compat.ts(8,66)` and `(9,66)` TS2741; both `features-compat` mutation tests fail
+(the drifted baseline, and "the mutation … changed nothing"). Reverted; `git status` clean.
+
+**(d) The held port.** An API-only server on 8123 (`node server/src/main.ts --api-only`, the
+four variables given explicitly, `DATA_DIR` in a scratch folder, `.env.local` not read), then
+`bash scripts/check.sh`: steps 1 to 8 green, then before `==> [9] browser`:
+
+```
+scripts/check.sh: WARNING: 127.0.0.1:8123 is already in use, so the browser step
+  will fail to start its server. Likely cause: an orphaned node process left by a
+  stopped `pnpm start` or a crashed Playwright run. Find it with
+  netstat -ano | grep ':8123 '  (Windows, Git Bash; the last column is the PID)
+  lsof -i :8123                 (Linux, macOS)
+  Running the browser step anyway.
+```
+
+and the browser step failed as it does today: `Error: http://127.0.0.1:8123/api/health is
+already used …`, `scripts/check.sh: FAILED at step 9 (browser)`, exit 1. The server was stopped;
+no listener on 8123 or 8124 and `scripts/port-check.ts 8123` exits 0.
+
+AC1 (after), AC2, AC6 and AC8 hold on this tree.
+
 ## Audit (PASS required before implementation starts)
 
 - [x] Every AC maps to at least one task
