@@ -3,14 +3,17 @@
 // The server always starts fresh on its own port with a temporary DATA_DIR; all four variables
 // are passed here, so nothing comes from .env.local (the process environment wins over it).
 // B-01 (SD17): Chromium's fake camera and microphones, fed by fixtures generated into the same
-// temporary directory, and a smaller viewport to keep software WebGL stable.
+// temporary directory, and a smaller viewport to keep software WebGL stable. The port, the
+// viewport and the flags live in `tests/browser/fixtures/launch.ts`, shared with the load
+// harness (B-08 PD3).
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { chromiumArgs, GATE_PORT, VIEWPORT } from "./tests/browser/fixtures/launch.ts";
 import { writeFakeMedia } from "./tests/browser/fixtures/media.ts";
 
-const PORT = 8123;
+const PORT = GATE_PORT;
 const dataDir = mkdtempSync(join(tmpdir(), "djv-browser-"));
 const media = writeFakeMedia(dataDir);
 
@@ -28,20 +31,8 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        viewport: { width: 640, height: 360 },
-        launchOptions: {
-          args: [
-            // No GPU on CI runners: ANGLE on SwiftShader gives WebGL2 in software.
-            "--use-gl=angle",
-            "--use-angle=swiftshader",
-            "--enable-unsafe-swiftshader",
-            // Fake devices, permission prompts auto-accepted, the fixtures as their input.
-            "--use-fake-device-for-media-stream",
-            "--use-fake-ui-for-media-stream",
-            `--use-file-for-fake-audio-capture=${media.wav}`,
-            `--use-file-for-fake-video-capture=${media.y4m}`,
-          ],
-        },
+        viewport: { ...VIEWPORT },
+        launchOptions: { args: chromiumArgs(media) },
       },
     },
   ],
