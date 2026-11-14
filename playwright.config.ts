@@ -19,6 +19,11 @@ const media = writeFakeMedia(dataDir);
 
 export default defineConfig({
   testDir: "tests/browser",
+  // No per-test time limit (B-08 PD18): no test asserts its own duration, and under load the
+  // longest ones ran past 30 s with no assertion failed. The waits that are assertions keep
+  // their own `timeout`. The cost: a hang, such as a locator waiting for an element that never
+  // appears, runs to the CI job's limit instead of failing at 30 s.
+  timeout: 0,
   fullyParallel: false,
   workers: 1,
   reporter: [["list"]],
