@@ -49,7 +49,13 @@ Rejected:
 - Importing `playwright.config.ts` from the harness to read its flags. It creates a temporary
   directory and fixes port 8123 at import; a shared module has neither side effect (PD3).
 - A global `testTimeout` in `vitest.config.ts`. It would lift the limit from every unit test;
-  SD3 lifts it from the four mutation tests only (PD7).
+  SD3 lifts it from the four mutation tests only (PD7). Amendment 1 keeps this for the unit
+  project and lifts the limit from the integration project only, where the reproduction showed
+  every test is exposed (PD18).
+
+**Amendment 1 (2026-11-14).** T2's reproduction, and the later steps run under the same load
+(Evidence), turned checks outside D-02 red. PD17 to PD19 and T9 to T12 fix them; T7 now
+depends on all four. Audited separately (Audit section, amendment 1).
 - Keeping the 20 s sleep in the latency test. It existed so that start-up left the 10 s window
   before a millisecond bound was read; with no bound there is nothing to wait out (PD9).
 
@@ -76,6 +82,9 @@ overrule; **Owner** rows are user-visible choices the spec left open, and each o
 | PD13 · Confirm | AC9's "no retry configured anywhere": proven once, or kept? | Kept, by a workflow test that reads `vitest.config.ts`, `playwright.config.ts`, the root `package.json` scripts and `scripts/check.sh` as text and fails on a `retry` or `retries` setting or flag other than 0. | A retry is the cheapest way to make a flake look fixed; the spec forbids it for good, not for this change only. Text, because importing `playwright.config.ts` creates a directory. |
 | PD14 · Confirm | Where does the runbook line go, and does `CLAUDE.md` get one? | A short section "The gate under load" in `docs/runbooks/README.md` (what `pnpm check:load` does, when to run it, that it is not the gate). One line under Commands in `CLAUDE.md`. | The spec asks for "a line" in `docs/runbooks/`. `CLAUDE.md`'s command list is what every session reads; the spec does not name it, so the audit may strike it. |
 | PD15 · Confirm | Where does the reproduction evidence go (SD10 "into the plan's evidence")? | The `## Evidence` section at the end of this file, written by T2 and T7: per run, the date, the commit, the exit code, the failing step and the failing lines; full outputs in the task's report. | The spec's words. |
+| PD17 · Owner (amendment 1, answered 2026-11-14) | The reproduction turned checks outside D-02 red (Evidence, T2 and its H2 evidence). How is each fixed (SD7)? | **Owner chose the recommendations of 2026-11-14:** (a) `engine/src/latency.test.ts:28` loses its per-test limit (T9); (b) the integration project loses vitest's per-test limit (T10); (c) the browser tests lose Playwright's per-test limit, every assertion inside them kept, the render-scale tests included (T11); (d) AC6 is measured on the audio clock (T12, PD19). If a render-scale assertion itself then fails under load, that is the owner's question again (T7). `.github/workflows/` stays unchanged: the job keeps GitHub's default limit. | Each of (a) to (c) asserts behaviour, not its own duration; every failure was a limit, never an assertion. (d) was an assertion, so it gets a property fix, not a limit. |
+| PD18 · Confirm (amendment 1) | Where do the integration and browser limits go? | `vitest.config.ts`: `testTimeout: 0` on the `integration` project only; the `unit` project keeps vitest's default and `{ timeout: 0 }` stays per describe there (PD7, T3, T9). `playwright.config.ts`: `timeout: 0` for the whole run. Every integration test spawns the real server and every browser test drives a real Chromium; none asserts its own total duration; the waits that are assertions (`expect(...)` with a `timeout`, the measured spacings) are inside the tests and untouched. | Per-test lists would be whack-a-mole: the H2 run showed which tests crossed 30 s *that* time (`:74` took 37.4 s and passed). The cost, accepted by the owner: a hang, including a locator waiting on an element that never appears, runs until the CI job's limit instead of failing at 30 s. PD7's rejection of a global limit stands for the unit project. |
+| PD19 · Confirm (amendment 1) | How is AC6 made load-proof without changing what it asserts? | `tests/browser/live.spec.ts:47`: an init script (test code, in the style of `record()` in `tests/browser/helpers.ts`) wraps `AudioWorkletNode` and adds a `message` listener on each node's port beside the product's `onmessage`, keeping `{ contextTime, beat }` of every window the worklet posts. The test reads 3 s of those after the first second and asserts, with `t = contextTime × 1000`: at least 5 rises (beat ≥ 0.5 after < 0.5); every gap within ±100 ms of 500 ms; beat ≤ 0.1 over the last 200 ms of each gap, measured back from the next rise and stopping short of it. The 120 ms decay, ±100 ms, 0.1 and 200 ms are unchanged (B-01 plan PD7, owner 2026-11-12). | The failure was the display's clock, not the audio: 0.118 is exp(−256/120), the pulse's tail 256 ms after a click, pulled into the window because displayed rises jittered (a gap read 405 ms). `contextTime` is when the audio was processed; load can delay a message, not change it. No product code changes (spec, Out of scope: no test-only instrumentation in the product). The meter's display path stays covered by `panel.spec.ts:33` ("the meters move"). |
 | PD16 · Confirm | Does the harness build the web app first? | No. It needs `web/dist/index.html`; without it `boot()` already fails with "run pnpm build" (`server/src/boot.ts:73-75`), and the harness lets that message through and exits before starting the gate. | AC1 runs on a tree whose gate is green, so the build exists. No second way to build. |
 
 ## Files
@@ -109,9 +118,14 @@ overrule; **Owner** rows are user-visible choices the spec left open, and each o
 | `CLAUDE.md` | Modify | One command line (PD14) |
 | `docs/backlog.md` | Modify | B-08 built |
 | `docs/plans/phase-b-08-load-proof-gate.md` | Modify | The Evidence section (T2, T7) |
+| `engine/src/latency.test.ts` | Modify | No per-test limit on the bounded-window test (T9, amendment 1) |
+| `vitest.config.ts` | Modify | `testTimeout: 0` on the integration project (T10, PD18) |
+| `playwright.config.ts` | Modify | `timeout: 0` (T11, PD18) |
+| `tests/browser/live.spec.ts` | Modify | AC6 on the audio clock (T12, PD19), after T4 |
 
-Not changed: `vitest.config.ts`, `.github/workflows/`, `tests/workflow/test_gate_steps.py`,
-anything in `engine/src/` or `audio/src/` except the one test file, `docs/design/`.
+Not changed: `.github/workflows/`, `tests/workflow/test_gate_steps.py`, anything in
+`engine/src/` or `audio/src/` except the two test files (`index.test.ts`, `latency.test.ts`),
+`docs/design/`. `vitest.config.ts` changes only in the integration project (PD18).
 
 ## Tasks
 
@@ -273,11 +287,11 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
 - **Verification:** `bash scripts/check.sh`, then `pnpm check:load` three times, then the two
   renames with `pnpm typecheck` and `pnpm run test --project unit tests/meta`, then
   `bash scripts/check.sh` with 8123 held
-- **Depends on:** T3, T4, T5, T6
+- **Depends on:** T3, T4, T5, T6, T9, T10, T11, T12
 - **Autonomy note:** Builder changes no source file; the renames are temporary and reverted.
   The three runs are consecutive: a red run is not re-run to get three greens. Stop and report
   with the output if any run is red (SD7: a new check gets a plan amendment and an audit; the
-  render-scale test is the owner's question), or if a process is left behind. For (d), start
+  render-scale test is the owner's question, PD17), or if a process is left behind. For (d), start
   the server with an explicit `DATA_DIR` in a scratch folder and do not read or edit
   `.env.local`.
 
@@ -288,6 +302,8 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   and that file's mutation tests; the "Invariant" cells are unchanged. D-02 in
   `docs/specs/defect-register.md:15` reads fixed, citing this spec and T7's evidence.
   `docs/plans/phase-b-01-live-visual-engine.md:78` and `:102` carry "superseded by B-08 SD1";
+  its AC6 notes (`:100-101`, `:108-113`) carry "measured on the audio clock since B-08 PD19",
+  the thresholds unchanged;
   `docs/specs/phase-b-01-live-visual-engine.md:278` carries a pointer to this spec; no
   acceptance criterion of B-01 or B-02 changes. `docs/runbooks/README.md` and `CLAUDE.md` per
   PD14. `docs/backlog.md`: B-08 built. No source file changes.
@@ -300,6 +316,60 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
   nothing beyond them. Stop if any sentence would state a decision not in the spec or this
   plan, or if `docs/design/` would need a change.
 
+### T9 — The latency-window test stops racing the clock (amendment 1)
+- **Implements:** AC1, SD7
+- **Expected output:** `engine/src/latency.test.ts:28` ("stays bounded to the window however
+  long nobody reads it") runs with `{ timeout: 0 }`, on that test only; its loop and its
+  `size() ≤ 1251` assertion are unchanged. A one-line comment says why: it asserts a size, and
+  load made it exceed vitest's 5 s in 3 of 3 runs (Evidence, T2).
+- **Verification:** `pnpm run test --project unit engine/src/latency.test.ts`
+- **Depends on:** T2
+- **Autonomy note:** Builder settles the comment's words. No other test in the file changes; no
+  change to `engine/src/latency.ts`.
+
+### T10 — The integration tests have no per-test time limit (amendment 1)
+- **Implements:** AC1, AC9, SD7
+- **Expected output:** `vitest.config.ts`: the `integration` project has `testTimeout: 0` with a
+  comment naming B-08 PD18; the `unit` project and the shared `ignored` list are unchanged; no
+  `retry` anywhere. Every assertion and every wait inside `server/test/` is unchanged (the 15 s
+  `waitForLine` default and the 30 s limits in `boot.int.test.ts` held under load in the H2
+  run).
+- **Verification:** `pnpm run test --project integration`, then
+  `pnpm run test --project unit tests/meta`
+- **Depends on:** T2
+- **Autonomy note:** Builder settles the comment. Stop if anything under `server/test/` would
+  need to change.
+
+### T11 — The browser tests have no per-test time limit (amendment 1)
+- **Implements:** AC1, AC9, SD7
+- **Expected output:** `playwright.config.ts` sets `timeout: 0` with a comment naming B-08 PD18
+  and the cost (a hang runs to the CI job's limit). `retries` stays unset, `workers: 1`,
+  `fullyParallel: false`, `webServer` and the launch module are unchanged. No spec file changes
+  in this task; every `expect(..., { timeout })` inside the tests, the render-scale tests' 4, 8
+  and 12 s included, stays as it is (PD17).
+- **Verification:** `pnpm exec playwright test tests/browser/screen.spec.ts tests/browser/under-load.spec.ts`
+- **Depends on:** T2
+- **Autonomy note:** Builder settles the comment. Do not touch `expect.timeout`, `actionTimeout`
+  or `navigationTimeout`, and do not add `globalTimeout`: each is a new wall-clock limit the
+  owner did not choose.
+
+### T12 — AC6 is measured on the audio clock (amendment 1)
+- **Implements:** AC1, SD7
+- **Expected output:** `tests/browser/live.spec.ts:47-72` per PD19: an init script records
+  `{ contextTime, beat }` from every `AudioWorkletNode` port message; the test asserts at least
+  5 rises, every gap within ±100 ms of 500 ms and beat ≤ 0.1 over each gap's last 200 ms, all
+  on `contextTime × 1000`. The rises, the gaps and the worst gap-end value are still attached
+  with `note`. The title still names AC6; the comment at `:55-58` says the clock is the audio's
+  since B-08 PD19 and why. `sampleMeter` is removed if nothing else uses it.
+- **Verification:** `pnpm exec playwright test tests/browser/live.spec.ts -g "AC6"`, then the
+  same check made to fail once by hand (the 0.1 changed to 0.0001 locally, failing output in
+  the task report, reverted) so the new reading is shown not to be vacuous
+- **Depends on:** T4
+- **Autonomy note:** Builder settles the init script's shape. No product file changes. Stop if
+  the port's messages cannot be observed from the page without changing `audio/` or `web/`,
+  or if the audio-clock gaps break ±100 ms on a quiet machine (that is a product question,
+  not a tolerance).
+
 ## Task graph
 
 | Group | Tasks | Files they touch |
@@ -310,8 +380,12 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
 | 3 | T4 | `tests/browser/live.spec.ts` |
 | 3 | T5 | `web/src/frame-feed.ts`, `frame-feed.test.ts`, `web/src/Screen.tsx`, `engine/src/index.test.ts` |
 | 3 | T6 | `scripts/check.sh`, `tests/workflow/test_gate_shape.py` |
-| 4 | T7 | this plan (Evidence) |
-| 5 | T8 | `docs/invariants.md`, `docs/specs/defect-register.md`, `docs/plans/phase-b-01-live-visual-engine.md`, `docs/specs/phase-b-01-live-visual-engine.md`, `docs/runbooks/README.md`, `CLAUDE.md`, `docs/backlog.md` |
+| 3 | T9 | `engine/src/latency.test.ts` |
+| 3 | T10 | `vitest.config.ts` |
+| 3 | T11 | `playwright.config.ts` |
+| 4 | T12 | `tests/browser/live.spec.ts` |
+| 5 | T7 | this plan (Evidence) |
+| 6 | T8 | `docs/invariants.md`, `docs/specs/defect-register.md`, `docs/plans/phase-b-01-live-visual-engine.md`, `docs/specs/phase-b-01-live-visual-engine.md`, `docs/runbooks/README.md`, `CLAUDE.md`, `docs/backlog.md` |
 
 No two tasks in one group write the same file. `python scripts/check_plans.py --graph <this
 file>` prints the groups the `Depends on` fields actually give. Group 3: T6 reads
@@ -338,6 +412,9 @@ file into a temporary directory that the harness removes.
 | The gate no longer sees a change that only makes each frame slower. | Accepted by the spec (SD2). Not reopened; noted so the audit sees that H3 is now the only check of the 50 ms. |
 | T1's spec test starts a second Chromium and busy-loops inside the gate's browser step, for a few seconds. | It asserts no timing. If it makes a neighbouring test flaky, that shows in T2 and is handled as SD7. |
 | The spec and the backlog edit are uncommitted, and local `main` is two merges behind `origin/main`. | H1. |
+| With no per-test limit (PD18), a browser regression that leaves an element missing hangs the gate instead of failing it at 30 s; in CI it runs to GitHub's default job limit. | Accepted by the owner (PD17). Locally the hang is visible; the next owner decision may add a job `timeout-minutes`, which is a `.github/workflows/` change outside this plan. |
+| Measured on the audio clock (PD19), AC6 no longer exercises the meter's display path. | `panel.spec.ts:33` still proves the meters move after Start. |
+| A render-scale assertion (`live.spec.ts:384`, `:440`) may fail under load once the 30 s limit is gone. | T7 stops and asks (PD17). |
 
 ## Human steps
 
