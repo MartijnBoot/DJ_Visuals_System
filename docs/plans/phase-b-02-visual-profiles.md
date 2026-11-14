@@ -639,11 +639,19 @@ id; removing it selects the built-in.
   re-pick, delete; two tabs and the conflict choice; export, delete, import, import again,
   import a broken file; stop the server mid-set and pick. This is also where the look of the
   three new effects and of PD2's presets is judged by eye, which no test does.
+  - [x] Notes: 2026-11-14 — passed on the owner's attestation ("functionality as expected").
+    No per-item observations recorded. Build under test not stated: the working tree then held
+    an uncommitted layout change to `web/src/builder/Builder.tsx` on top of 116c827.
 - **H3 — after T15, on the screen machine: Verification 8 and 9.** A twelve-effect profile
   with the owner's load: overlay p95 ≤ 50 ms over a minute, and the render scale steps down
   and back under added load (AC17 on the real GPU; the CI check in T15 is SwiftShader only).
   `curl http://<LAN address>:8000/api/profiles` is refused; a `curl -X POST` without a JSON
   content type answers 415.
+  - [x] Notes: 2026-11-14 — twelve-effect profile under the owner's load: overlay latency p95
+    23 ms over a minute (≤ 50). Render scale 100% unloaded; stepping down and back up under added
+    load passed on the owner's attestation, figures not recorded. GET to `192.168.0.117:8000`
+    refused ("Unable to connect to the remote server"); `POST /api/profiles` with
+    `Content-Type: text/plain` answered 415.
 - **H4 — push and CI.** Push the branches and open the pull requests in order; confirm the
   `check` job is green (Verification 10). Pushing is the owner's (CLAUDE.md hard stops).
 
