@@ -20,6 +20,7 @@ import { loadRemembered, type AudioChoice } from "./capture/remembered.ts";
 import { createSession, type Session, type SessionState } from "./capture/session.ts";
 import { createVideo } from "./capture/video.ts";
 import { audioToEngine } from "./features-compat.ts";
+import { startFrameFeed } from "./frame-feed.ts";
 import { Overlay } from "./Overlay.tsx";
 import { Panel } from "./Panel.tsx";
 import { sharedToEngine } from "./profile-compat.ts";
@@ -94,15 +95,10 @@ export function Screen() {
       setCapture(state);
       if (state.video !== video) engine.setSource((video = state.video));
     });
-    // Registered before the engine's loop: frame callbacks run in registration order, so each
-    // frame's features are read just before the engine draws with them.
-    let feed = requestAnimationFrame(function tick() {
-      feed = requestAnimationFrame(tick);
-      engine.setFeatures(audioToEngine(session.read(performance.now())));
-    });
-    engine.start();
+    // Each frame reads the features just before the engine draws with them (frame-feed.ts).
+    const stopFeed = startFrameFeed(engine, () => audioToEngine(session.read(performance.now())));
     return () => {
-      cancelAnimationFrame(feed);
+      stopFeed();
       unsubscribe();
       session.stop();
       engine.stop();

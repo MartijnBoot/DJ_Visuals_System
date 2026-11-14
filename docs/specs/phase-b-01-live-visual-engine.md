@@ -277,7 +277,9 @@ The screen page `/`:
   may fail, which shows as `camera: lost`. Not designed for.
 - **GPU cannot keep up:** SD8, AC15. In CI the software renderer is slow, so the gate's
   latency check measures the CPU-side analysis-to-submit time and runs at the reduced viewport
-  (SD17); GPU execution time and scan-out belong to the film check.
+  (SD17); GPU execution time and scan-out belong to the film check. Since B-08 the gate
+  asserts the latency line's structure, not its milliseconds
+  (`docs/specs/phase-b-08-load-proof-gate.md`, SD1).
 - **Quiet or silent input:** the adaptive beat threshold must not fire on noise; silence gives
   zero features and the idle look.
 - **Loud, clipped input:** features are clamped to 0 to 1; a clipped signal does not make the

@@ -146,6 +146,18 @@ describe("latency record in the frame loop (PD21)", () => {
   });
 });
 
+describe("features in the frame loop (B-08 AC5, PD11)", () => {
+  it("draws each frame with the features set before it", () => {
+    const { engine } = started();
+    engine.setFeatures({ ...ZERO_FEATURES, beat: 1, capturedAt: 1 });
+    frameAt(0);
+    expect(uniform(frames().at(-1)!, "uFlash")).toBeGreaterThan(0);
+    engine.setFeatures(ZERO_FEATURES);
+    frameAt(16);
+    expect(uniform(frames().at(-1)!, "uFlash")).toBe(0);
+  });
+});
+
 describe("render scale in the frame loop (SD8)", () => {
   it("stats report the render scale, 100% at start and the cap when lower", () => {
     const { engine } = started();

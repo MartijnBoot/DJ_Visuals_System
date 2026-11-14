@@ -17,6 +17,8 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
 - `bash scripts/setup.sh` — clone to running stack. Idempotent.
 - `bash scripts/check.sh` — the gate: format, lint, types, build, unit, integration, browser,
   stopping at the first failure. CI runs this same script. Run it before calling any task done.
+- `pnpm check:load` — the gate under CPU and GPU load, for a suspected timing flake; not the
+  gate, not in CI ([docs/runbooks/README.md](docs/runbooks/README.md)).
 - `python scripts/check_plans.py --graph docs/plans/<plan>.md` — a plan's build order.
 - `pnpm start` — builds `web/dist`, then one process serves it and `/api` on `127.0.0.1:PORT`.
 - `pnpm dev` — the server under `node --watch` (API only) and Vite with hot reload on
@@ -61,7 +63,8 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
   maintenance) — ask first.
 - Node 24 runs the TypeScript directly (type stripping): erasable syntax only (no `enum`,
   `namespace` or parameter properties) and relative imports carry `.ts`. `.npmrc`
-  `engine-strict` makes pnpm refuse another Node major.
+  `engine-strict` makes pnpm refuse a Node outside `engines.node` (`>=24.16.0 <25`: 24.15.0
+  crashes TCP-using processes on Windows, D-03).
 - Dev is on `5173` (Vite); start is on `PORT`. Without `--api-only` the server refuses to boot
   when `web/dist/index.html` is missing; `pnpm dev` and the integration tests pass the flag.
 - The browser check needs software WebGL in headless Chromium (`--use-gl=angle`

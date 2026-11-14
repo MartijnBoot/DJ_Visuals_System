@@ -1,7 +1,9 @@
 // The live chain in a real browser on the fake devices (B-01 AC6, AC7, AC8, AC10, AC12, AC13,
-// AC15, AC17; plan PD8, PD13, PD21, PD22, T9): the click track's beats, the dials in pixels,
-// the latency number, loss and reattachment, and render scaling. Measured values are attached
-// to the report next to the thresholds they are held to.
+// AC15, AC17; plan PD8, PD21, PD22, T9): the click track's beats, the dials in pixels, the
+// latency line's structure (B-08 AC3), loss and reattachment, and render scaling. Measured
+// values are attached to the report next to the thresholds they are held to. The 50 ms latency
+// budget is checked only on the owner's screen machine (B-08 SD2), never here. Waits for a
+// behaviour the spec gives no time have no limit of their own (B-08 PD20).
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { createProfile, deleteAll, twelveEffects, type Definition } from "./fixtures/profiles.ts";
 import {
@@ -25,37 +27,68 @@ function note(name: string, value: unknown) {
   console.log(`${name}: ${JSON.stringify(value)}`);
 }
 
-/** Samples a panel meter once per animation frame in the page, for `forMs`. */
-async function sampleMeter(page: Page, name: string, forMs: number) {
-  return page.evaluate(
-    ([n, total]) =>
-      new Promise<{ t: number; v: number }[]>((resolve) => {
-        const el = document.querySelector(`[data-testid=meter-${n}]`)!;
-        const out: { t: number; v: number }[] = [];
-        const t0 = performance.now();
-        requestAnimationFrame(function each() {
-          const t = performance.now() - t0;
-          out.push({ t, v: Number(el.getAttribute("data-value")) });
-          if (t < (total as number)) requestAnimationFrame(each);
-          else resolve(out);
+type WindowsWindow = { __windows: { t: number; v: number }[][] };
+
+/**
+ * Before the page loads: every AudioWorkletNode gets a second `message` listener beside the
+ * product's `onmessage`, keeping each analysis window's beat on the audio clock
+ * (`contextTime` × 1000, ms). Test code only; the product is not changed (B-08 PD19).
+ */
+async function recordWindows(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as WindowsWindow;
+    w.__windows = [];
+    const Native = window.AudioWorkletNode;
+    window.AudioWorkletNode = class extends Native {
+      constructor(...args: ConstructorParameters<typeof AudioWorkletNode>) {
+        super(...args);
+        const kept: { t: number; v: number }[] = [];
+        w.__windows.push(kept);
+        this.port.addEventListener("message", (event: MessageEvent) => {
+          const data = event.data as { contextTime?: unknown; frame?: { beat?: unknown } };
+          if (typeof data?.contextTime === "number" && typeof data.frame?.beat === "number") {
+            kept.push({ t: data.contextTime * 1000, v: data.frame.beat });
+          }
         });
-      }),
-    [name, forMs] as const,
+      }
+    };
+  });
+}
+
+/** The newest node's windows from `fromMs` to `toMs` after its first one, audio clock. */
+async function audioWindows(page: Page, fromMs: number, toMs: number) {
+  await page.waitForFunction(
+    (span) => {
+      const kept = (window as unknown as WindowsWindow).__windows.at(-1) ?? [];
+      return kept.length > 0 && kept.at(-1)!.t - kept[0]!.t >= span;
+    },
+    toMs,
+    { polling: 100, timeout: 0 },
   );
+  const kept = await page.evaluate(() => (window as unknown as WindowsWindow).__windows.at(-1)!);
+  const t0 = kept[0]!.t;
+  return kept
+    .map((s) => ({ t: s.t - t0, v: s.v }))
+    .filter((s) => s.t >= fromMs && s.t <= toMs)
+    .map((s) => ({ t: s.t - fromMs, v: s.v }));
 }
 
 test("the beat fires on each click of the track and not between (AC6)", async ({ page }) => {
   await record(page);
+  await recordWindows(page);
   await page.goto("/");
   await start(page);
-  await page.waitForTimeout(1000); // past the first second: the adaptive threshold has history
-  const samples = await sampleMeter(page, "beat", 3000);
+  // B-08 PD19: on the audio clock, not the page's, so a busy machine that delivers windows or
+  // frames late cannot move a rise or pull a gap's end into the pulse's tail. The first second
+  // is skipped (the adaptive threshold has history by then), then 3 s are read.
+  const samples = await audioWindows(page, 1000, 4000);
   const rises = samples.filter((s, i) => s.v >= 0.5 && (i === 0 || samples[i - 1]!.v < 0.5));
   const gaps = rises.slice(1).map((r, i) => Math.round(r.t - rises[i]!.t));
   // The last 200 ms of each gap, measured back from the next rise and stopping short of it
   // (owner's decision of 2026-11-11: PD7's 120 ms decay is kept, so a gap's middle still
   // carries the tail of the pulse; its end must not). Measured from the next rise, not the
-  // previous one, so the window never reaches the next click however the gap jitters.
+  // previous one, so the window never reaches the next click however the gap jitters. The
+  // thresholds are unchanged since B-01; only the clock is the audio's (B-08 PD19).
   const ends = rises
     .slice(1)
     .map((next) => samples.filter((s) => s.t >= next.t - 200 && s.t < next.t).map((s) => s.v));
@@ -271,7 +304,7 @@ test.beforeEach(async ({ request }) => {
 });
 
 for (const look of LOOKS) {
-  test(`the overlay's in-app latency p95 is at most 50 ms once start-up has left the window, on ${look.name} (AC10, PD13, B-02 AC17)`, async ({
+  test(`the overlay records latency samples on ${look.name}, last and p95 never above worst (B-08 AC3, B-02 AC17)`, async ({
     page,
     request,
   }) => {
@@ -282,19 +315,27 @@ for (const look of LOOKS) {
     await expect(page.getByTestId("overlay-profile")).toHaveText(
       `profile: ${look.profile?.name ?? "Built-in"}`,
     );
-    // The window is 10 s. Start-up (module loading, the first frames, the refresh estimate) is
-    // inside it for the first 10 s; the owner decided (2026-11-11) to read it once that has
-    // left, so the number is the set's, not the page load's.
-    await page.waitForTimeout(20_000);
-    const line = (await page.getByTestId("overlay-latency").textContent())!;
-    const match = /latency ms ([\d.]+) \/ p95 ([\d.]+) \/ worst ([\d.]+)/.exec(line);
-    note(`AC10 overlay after 20 s on ${look.name} (p95 ≤ 50 ms)`, line);
-    note(`AC10 scale and fps on ${look.name}`, [
+    // B-08 SD1: structure, not milliseconds; load makes frames rarer but cannot break these.
+    // Wait (no limit of its own) until samples exist, then read the line once: the three
+    // numbers must come from one reading.
+    const latency = page.getByTestId("overlay-latency");
+    const NUMBER = String.raw`(-?\d+(?:\.\d+)?)`;
+    const shape = new RegExp(`^latency ms ${NUMBER} / p95 ${NUMBER} / worst ${NUMBER}$`);
+    await expect(latency).toHaveText(shape, { timeout: 0 });
+    const line = (await latency.textContent())!;
+    note(`B-08 AC3 overlay on ${look.name} (a measurement, no bound)`, line);
+    note(`B-08 AC3 scale and fps on ${look.name}`, [
       await page.getByTestId("overlay-scale").textContent(),
       await page.getByTestId("overlay-fps").textContent(),
     ]);
+    const match = shape.exec(line);
     expect(match, line).not.toBeNull();
-    expect(Number(match![2])).toBeLessThanOrEqual(50);
+    const [last, p95, worst] = match!.slice(1, 4).map(Number) as [number, number, number];
+    for (const n of [last, p95, worst]) expect(Number.isFinite(n), line).toBe(true);
+    expect(last, line).toBeGreaterThanOrEqual(0);
+    expect(last, line).toBeLessThanOrEqual(worst);
+    expect(p95, line).toBeGreaterThanOrEqual(0);
+    expect(p95, line).toBeLessThanOrEqual(worst);
   });
 }
 
@@ -331,6 +372,21 @@ async function expectNoTextOnOutput(page: Page) {
   expect(text).toBe("");
 }
 
+/**
+ * B-08 PD20 R2: the picture keeps changing after a loss (AC12, AC13 "keep rendering"). One read
+ * of the canvas's middle, then another every 250 ms, with no limit, until one differs; returns
+ * how many reads that took. Phase 0 AC11's "500 ms apart" stays in `expectCanvasChanging`.
+ */
+async function canvasKeepsChanging(page: Page): Promise<number> {
+  const { width, height } = page.viewportSize()!;
+  const clip = { x: width / 2, y: height / 2, width: 4, height: 4 };
+  const first = await page.screenshot({ clip });
+  for (let reads = 2; ; reads++) {
+    await page.waitForTimeout(250);
+    if (!(await page.screenshot({ clip })).equals(first)) return reads;
+  }
+}
+
 for (const [kind, track, label] of [
   ["audio", "audio", "AC12"],
   ["camera", "video", "AC13"],
@@ -359,11 +415,14 @@ for (const [kind, track, label] of [
       note("AC12 last non-zero meter after the unplug (ms, ≤ 1000)", Math.round(ms));
       expect(ms).toBeLessThanOrEqual(1000);
     }
-    await expectCanvasChanging(page);
+    note(`${label} canvas reads until one differed`, await canvasKeepsChanging(page));
     await expectNoTextOnOutput(page);
 
     await setFailing(page, track, false); // plugged back in
-    await expect(page.getByTestId(`overlay-${kind}`)).toHaveText(`${kind}: ok`, { timeout: 2500 });
+    // B-08 PD20 R3: AC12 gives audio 2 s from the device's return; AC13 gives the camera no time.
+    await expect(page.getByTestId(`overlay-${kind}`)).toHaveText(`${kind}: ok`, {
+      timeout: kind === "audio" ? 2500 : 0,
+    });
     expect(logs.some((l) => /capture/.test(l) && /lost/.test(l))).toBe(true);
     expect(logs.some((l) => /capture/.test(l) && /restored/.test(l))).toBe(true);
   });
@@ -396,7 +455,8 @@ for (const look of LOOKS) {
     // PD17's fallback, chosen by the owner 2026-11-12: software WebGL cannot hold the
     // twelve-effect profile at rest at 640x360 (about 31 ms a frame at 100%, 18 to 20 ms even at
     // 50%, so a step up can never hold). Only this look's scale check runs on a quarter of the
-    // pixels; the 50 ms latency check keeps the full size, and the real GPU is checked by hand (H3).
+    // pixels; the latency check (B-08 AC3) keeps the full size, and the real GPU, with the 50 ms
+    // budget, is checked by hand (H3).
     if (look.profile) await page.setViewportSize({ width: 320, height: 180 });
     await record(page);
     await page.goto("/");
@@ -419,21 +479,26 @@ for (const look of LOOKS) {
     await page.waitForTimeout(3000);
     await expect(page.getByTestId("overlay-scale")).toHaveText("scale 50%");
 
-    await page.evaluate(
-      () => ((window as unknown as { __slowFrames: boolean }).__slowFrames = false),
-    );
-    const recovered = await expect(page.getByTestId("overlay-scale"))
-      .toHaveText("scale 75%", { timeout: 12_000 })
-      .then(() => true)
-      .catch(() => false);
+    const unwrappedAt = await page.evaluate(() => {
+      (window as unknown as { __slowFrames: boolean }).__slowFrames = false;
+      return performance.now();
+    });
+    // B-08 PD20 R1: the step up must happen; when is a measurement. The 10 s rule itself is
+    // unit-tested on a fake clock (engine/src/scale.test.ts); on a busy machine headroom can
+    // take longer to hold, so this wait has no limit of its own.
+    await expect(page.getByTestId("overlay-scale")).toHaveText("scale 75%", { timeout: 0 });
+    const steppedUpAfter = await page.evaluate((t) => performance.now() - t, unwrappedAt);
     clearInterval(watch);
+    note(
+      "AC15 step up after (ms, a measurement; the rule is 10 s of headroom)",
+      Math.round(steppedUpAfter),
+    );
     note("AC15 scale readings every 200 ms", seen);
     note(
       "AC15 frame ms after the wrap was removed",
       await page.getByTestId("overlay-frame-ms").textContent(),
     );
     expect(seen.every((s) => /^scale (100|75|50)%$/.test(s))).toBe(true);
-    expect(recovered, "no step up within 12 s of headroom").toBe(true);
   });
 }
 

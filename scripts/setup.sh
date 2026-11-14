@@ -37,8 +37,9 @@ if [ -f .env.example ] && [ ! -f .env.local ]; then
 fi
 
 # --- project -----------------------------------------------------------------------------
-# Node 24 (.nvmrc) and pnpm (root package.json -> packageManager). pnpm refuses another Node
-# major (.npmrc engine-strict). The install needs the network and says so itself when it fails.
+# Node 24 (.nvmrc) and pnpm (root package.json -> packageManager). pnpm refuses a Node outside
+# engines.node, 24.16.0 or later in 24 (.npmrc engine-strict; 24.15.0 is D-03). The install
+# needs the network and says so itself when it fails.
 require node "https://nodejs.org/ (version in .nvmrc)"
 require pnpm "https://pnpm.io/installation"
 pnpm install --frozen-lockfile

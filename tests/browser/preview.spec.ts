@@ -193,6 +193,16 @@ test("with the camera denied the preview stays generative (AC4)", async ({ page,
   await page.getByTestId("preview-start").click();
   await expect(page.getByTestId("preview-camera-state")).toHaveText("camera: none");
   const series = await lumaSeries(page, 1500);
+  // B-08 PD20 R4: a black sample under load was seen once and not reproduced; say what was seen.
+  const t0 = series[0]?.t ?? 0;
+  const darkest = [...series]
+    .sort((a, b) => a.luma - b.luma)
+    .slice(0, 5)
+    .map((s) => ({ ms: Math.round(s.t - t0), luma: Math.round(s.luma * 10) / 10 }));
+  test.info().annotations.push({
+    type: "AC4 camera-denied preview luma (min ≥ 2)",
+    description: JSON.stringify({ samples: series.length, darkest }),
+  });
   expect(Math.min(...series.map((s) => s.luma))).toBeGreaterThanOrEqual(2);
   const { width, height } = await size(page);
   const [leftRgb, rightRgb] = await cameraColours(page);

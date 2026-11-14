@@ -25,7 +25,9 @@ describe("latency window (SD15)", () => {
     expect(w.read(20_000)).toEqual({ last: 0, p95: 0, worst: 0, samples: 0 });
   });
 
-  it("stays bounded to the window however long nobody reads it", () => {
+  // No per-test time limit: it asserts a size, and load made it exceed vitest's 5 s in 3 of 3
+  // runs (B-08 plan, Evidence T2; amendment 1, T9).
+  it("stays bounded to the window however long nobody reads it", { timeout: 0 }, () => {
     const w = createLatencyWindow(10_000);
     for (let i = 0; i < 100_000; i++) w.record(10, i * 8);
     expect(w.size()).toBeLessThanOrEqual(1251);
