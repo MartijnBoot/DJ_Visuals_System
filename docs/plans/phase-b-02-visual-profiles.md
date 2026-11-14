@@ -654,12 +654,13 @@ id; removing it selects the built-in.
     `Content-Type: text/plain` answered 415.
 - **H4 — push and CI.** Push the branches and open the pull requests in order; confirm the
   `check` job is green (Verification 10). Pushing is the owner's (CLAUDE.md hard stops).
-  - [ ] Notes: 2026-11-14 — pushed as one branch, PR #3, merged by the owner at 481a81a while
+  - [x] Notes: 2026-11-14 — pushed as one branch, PR #3, merged by the owner at 481a81a while
     the PR's CI was still running. Local gate green on Windows (91 passed, 9 steps). CI red on
     both the PR (run 43596764741) and `main` (run 43596776025): 3 failed, 88 passed in the
-    browser step, all three on the fake camera at dials 0/0 → D-01. Two of the three have been
-    red on `main` since B-01. Not done until `check` is green on `main`. D-01 fixed on
-    `fix/d-01-camera-decode` (tests only); its PR's `check` must be green before merging.
+    browser step, all three on the fake camera at dials 0/0 → D-01. Two of the three had been
+    red on `main` since B-01. D-01 fixed in PR #4 (tests only), its `check` green (run
+    43599800201) before the merge at 73aeb66. `main` green: run 43600731489, `check` all 9
+    steps, 91 browser tests passed; `secret-scan` green. Verification 10 met.
 
 ## Out of scope for this plan
 
