@@ -337,6 +337,55 @@ describe("import (AC10)", () => {
   });
 });
 
+describe("the primary colour (B-04 AC39)", () => {
+  it("keeps primary through create, get, list, export and import", async () => {
+    await boot();
+    const stored = await create({ ...warm, primary: 1 });
+    expect(stored.primary).toBe(1);
+    const got = storedProfileSchema.parse(
+      await (await fetch(`${base}/api/profiles/${stored.id}`)).json(),
+    );
+    expect(got.primary).toBe(1);
+    expect((await list())[0]?.primary).toBe(1);
+
+    const file = JSON.parse(JSON.stringify(toProfileFile([got]))) as unknown;
+    const imported = profileListSchema.parse(
+      await (await post("/api/profiles/import", file)).json(),
+    ).profiles;
+    expect(imported[0]).toMatchObject({ name: "Warm (2)", primary: 1 });
+  });
+
+  it("imports a version-1 file without primary unchanged, and refuses one outside the palette", async () => {
+    await boot();
+    const response = await post("/api/profiles/import", { formatVersion: 1, profiles: [warm] });
+    expect(response.status).toBe(201);
+    const [imported] = profileListSchema.parse(await response.json()).profiles;
+    expect(imported).not.toHaveProperty("primary");
+    expect(imported).toMatchObject(warm);
+
+    const outside = await post("/api/profiles", { ...warm, name: "Out", primary: 3 });
+    expect(outside.status).toBe(400);
+    expect(invalidErrorSchema.parse(await outside.json()).issues[0]?.path).toBe("primary");
+  });
+
+  it("lists and loads a row written without primary", async () => {
+    await boot();
+    const stored = await create();
+    await server!.kill();
+    const db = openDatabase(join(dataDir, "djvisuals.sqlite"));
+    const { name: _n, ...definition } = warm;
+    db.run(
+      "UPDATE profiles SET definition = ? WHERE id = ?",
+      JSON.stringify(definition),
+      stored.id,
+    );
+    db.close();
+    await boot();
+    expect(await list()).toEqual([stored]);
+    expect((await fetch(`${base}/api/profiles/${stored.id}`)).status).toBe(200);
+  });
+});
+
 describe("a row broken by hand (AC13)", () => {
   it("is absent from the list and 422 on get", async () => {
     await boot();

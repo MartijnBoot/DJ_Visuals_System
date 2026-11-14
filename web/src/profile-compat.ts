@@ -7,3 +7,12 @@ import type { Profile as FromShared } from "@djv/shared";
 
 export const sharedToEngine = (profile: FromShared): ForEngine => profile;
 export const engineToShared = (profile: ForEngine): FromShared => profile;
+
+// B-04 PD16: an optional field declared on one side only still assigns both ways, so the key
+// sets must also be equal. A key on one side alone makes its `Missing…` type that key, not
+// `never`, and the assignment below fails naming it.
+type MissingInEngine = Exclude<keyof FromShared, keyof ForEngine>;
+type MissingInShared = Exclude<keyof ForEngine, keyof FromShared>;
+export const sameKeys: [MissingInEngine, MissingInShared] extends [never, never]
+  ? true
+  : { missingInEngine: MissingInEngine; missingInShared: MissingInShared } = true;

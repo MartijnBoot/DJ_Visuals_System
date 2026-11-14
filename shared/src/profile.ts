@@ -74,11 +74,16 @@ export const profileFields = {
   palette: z.array(colour).min(LIMITS.paletteMin).max(LIMITS.paletteMax),
   dials: z.strictObject({ recognisability: unit, reactivity: unit }),
   effects: z.array(effectSchema).max(LIMITS.effects),
+  /** The palette slot a one-tap colour control aims at (B-04 SD10); derived when absent. */
+  primary: z.number().int().nonnegative().optional(),
 };
 
 type ProfileShape = z.infer<z.ZodObject<typeof profileFields>>;
 
-/** The cross-field rules: each type at most once (SD12), every slot inside the palette (SD11). */
+/**
+ * The cross-field rules: each type at most once (SD12), every slot inside the palette (SD11),
+ * and the primary slot inside the palette (B-04 SD10).
+ */
 export function checkProfileRules(profile: ProfileShape, ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
   profile.effects.forEach((effect, i) => {
@@ -98,12 +103,31 @@ export function checkProfileRules(profile: ProfileShape, ctx: z.RefinementCtx): 
       });
     }
   });
+  if (profile.primary !== undefined && profile.primary >= profile.palette.length) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["primary"],
+      message: `primary slot ${profile.primary} is outside a palette of ${profile.palette.length}`,
+    });
+  }
 }
 
 export const profileSchema = z.strictObject(profileFields).superRefine(checkProfileRules);
 
 export type Profile = z.infer<typeof profileSchema>;
 export type Effect = Profile["effects"][number];
+
+/**
+ * The primary colour's slot (B-04 SD10, AC38): the stored `primary`, else the `colourSlot` of
+ * the first effect in stack order that has one, else 0. The built-in derives 1.
+ */
+export function derivePrimary(profile: Pick<Profile, "effects" | "primary">): number {
+  if (profile.primary !== undefined) return profile.primary;
+  for (const effect of profile.effects) {
+    if ("colourSlot" in effect) return effect.colourSlot;
+  }
+  return 0;
+}
 
 export const FORMAT_VERSION = 1;
 
@@ -115,15 +139,19 @@ export const profileFileSchema = z.strictObject({
 
 export type ProfileFile = z.infer<typeof profileFileSchema>;
 
-/** The file for some profiles: their definitions only, never an id, revision or timestamp (AC9). */
+/**
+ * The file for some profiles: their definitions only, never an id, revision or timestamp (AC9).
+ * `primary` only when set, so a file without it stays what B-02 wrote (B-04 AC39).
+ */
 export function toProfileFile(profiles: readonly Profile[]): ProfileFile {
   return {
     formatVersion: FORMAT_VERSION,
-    profiles: profiles.map(({ name, palette, dials, effects }) => ({
+    profiles: profiles.map(({ name, palette, dials, effects, primary }) => ({
       name,
       palette,
       dials,
       effects,
+      ...(primary === undefined ? {} : { primary }),
     })),
   };
 }
