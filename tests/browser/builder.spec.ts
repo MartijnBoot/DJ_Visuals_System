@@ -10,7 +10,13 @@ import {
   type Route,
 } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { createProfile, deleteAll, flat, listStored } from "./fixtures/profiles.ts";
+import {
+  createProfile,
+  deleteAll,
+  flat,
+  listStored,
+  type Definition,
+} from "./fixtures/profiles.ts";
 
 test.beforeEach(async ({ request }) => {
   await deleteAll(request);
@@ -268,6 +274,61 @@ test("edit the palette, effects, binding and dials, Save: the API holds exactly 
     binding: { feature: "high", amount: 1 },
     colourSlot: 1,
   });
+});
+
+const marks = (): Definition => ({
+  name: "Marks",
+  palette: ["#111111", "#222222", "#333333"],
+  dials: { recognisability: 0.5, reactivity: 0.5 },
+  effects: [{ type: "edges", amount: 0.5, colourSlot: 0 }],
+});
+
+const checkedPrimary = (page: Page) =>
+  page.locator("[data-testid^=palette-primary-]:checked").getAttribute("data-testid");
+
+test("the primary mark is saved, and follows its colour when slots are removed (B-04 AC40)", async ({
+  page,
+  request,
+}) => {
+  const profile = await createProfile(request, marks());
+  await openProfile(page, profile.id);
+  expect(await checkedPrimary(page)).toBe("palette-primary-0"); // derived: edges uses slot 0
+  await page.getByTestId("palette-primary-2").check();
+  await expect(page.getByTestId("editor-dirty")).toBeVisible();
+  await page.getByTestId("editor-save").click();
+  await expect(page.getByTestId("editor-save")).toBeDisabled();
+  expect((await stored(request, "Marks")).primary).toBe(2);
+
+  await openProfile(page, profile.id);
+  expect(await checkedPrimary(page)).toBe("palette-primary-2");
+  await page.getByTestId("palette-add").click();
+  await page.getByTestId("palette-remove-0").click(); // a slot before the mark
+  expect(await checkedPrimary(page)).toBe("palette-primary-1");
+  await expect(page.getByTestId("palette-colour-1")).toHaveValue("#333333");
+  await page.getByTestId("palette-remove-1").click(); // the marked slot itself
+  expect(await checkedPrimary(page)).toBe("palette-primary-0");
+  await page.getByTestId("editor-save").click();
+  await expect(page.getByTestId("editor-save")).toBeDisabled();
+  expect((await stored(request, "Marks")).primary).toBe(0);
+});
+
+test("the hint shows while no effect uses the primary colour and goes when one does (B-04 AC41)", async ({
+  page,
+  request,
+}) => {
+  const profile = await createProfile(request, marks());
+  await openProfile(page, profile.id);
+  await expect(page.getByTestId("primary-unused")).toHaveCount(0);
+  await page.getByTestId("palette-primary-2").check();
+  await expect(page.getByTestId("primary-unused")).toHaveText(
+    "this colour is not used by any effect",
+  );
+  await page.getByTestId("effect-slot-edges").selectOption({ value: "2" }); // slot 2, shown as "3"
+  await expect(page.getByTestId("primary-unused")).toHaveCount(0);
+  await page.getByTestId("palette-primary-1").check();
+  await expect(page.getByTestId("primary-unused")).toBeVisible();
+  await page.getByTestId("effect-add").selectOption("paletteMap"); // the map uses every colour
+  await expect(page.getByTestId("primary-unused")).toHaveCount(0);
 });
 
 test("the add menu never lists a present type and is empty at twelve (AC3)", async ({

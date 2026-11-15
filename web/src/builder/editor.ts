@@ -4,6 +4,7 @@
 // (the schema is the only gate; the editor never lets the rest drift from it).
 import {
   COLOUR_SLOT_TYPES,
+  derivePrimary,
   EFFECT_TYPES,
   FEATURE_NAMES,
   LIMITS,
@@ -25,6 +26,8 @@ export type Action =
   | { type: "paletteAdd" }
   | { type: "paletteRemove"; index: number }
   | { type: "paletteReplace"; palette: readonly string[] }
+  /** Marks one slot as the primary colour (B-04 SD10). */
+  | { type: "primarySet"; index: number }
   | { type: "effectAdd"; effectType: EffectType }
   | { type: "effectRemove"; index: number }
   | { type: "effectMove"; index: number; direction: -1 | 1 }
@@ -47,6 +50,33 @@ function fit(effects: Effect[], paletteLength: number): Effect[] {
     "colourSlot" in effect && effect.colourSlot >= paletteLength
       ? { ...effect, colourSlot: paletteLength - 1 }
       : effect,
+  );
+}
+
+/**
+ * The stored primary after slot `removed` goes (B-04 SD10, AC40): it stays on its colour, and on
+ * slot 0 when its own slot goes. A draft without one stays without one.
+ */
+function primaryAfterRemove(draft: Profile, removed: number): { primary?: number } {
+  const { primary } = draft;
+  if (primary === undefined) return {};
+  if (removed < primary) return { primary: primary - 1 };
+  if (removed === primary) return { primary: 0 };
+  return { primary };
+}
+
+/** A primary a shorter palette no longer holds goes to slot 0, so the draft stays valid. */
+const primaryWithin = (draft: Profile, length: number): { primary?: number } =>
+  draft.primary === undefined ? {} : { primary: draft.primary < length ? draft.primary : 0 };
+
+/**
+ * The builder's hint (B-04 SD10, AC41): the effective primary colour reaches the picture through
+ * no effect's own slot, and no palette map uses the whole palette.
+ */
+export function primaryUnused(draft: Profile): boolean {
+  const primary = derivePrimary(draft);
+  return !draft.effects.some(
+    (e) => e.type === "paletteMap" || ("colourSlot" in e && e.colourSlot === primary),
   );
 }
 
@@ -103,7 +133,13 @@ export function reduce(draft: Profile, action: Action): Profile {
       if (draft.palette.length <= LIMITS.paletteMin) return draft;
       if (!Number.isInteger(index) || index < 0 || index >= draft.palette.length) return draft;
       const palette = draft.palette.filter((_, i) => i !== index);
-      return { ...draft, palette, effects: fit(draft.effects, palette.length) };
+      const { primary: _old, ...rest } = draft;
+      return {
+        ...rest,
+        palette,
+        effects: fit(draft.effects, palette.length),
+        ...primaryAfterRemove(draft, index),
+      };
     }
 
     case "paletteReplace": {
@@ -113,7 +149,18 @@ export function reduce(draft: Profile, action: Action): Profile {
         palette.length <= LIMITS.paletteMax &&
         palette.every((c) => COLOUR.test(c));
       if (!valid) return draft;
-      return { ...draft, palette: [...palette], effects: fit(draft.effects, palette.length) };
+      return {
+        ...draft,
+        palette: [...palette],
+        effects: fit(draft.effects, palette.length),
+        ...primaryWithin(draft, palette.length),
+      };
+    }
+
+    case "primarySet": {
+      const { index } = action;
+      if (!Number.isInteger(index) || index < 0 || index >= draft.palette.length) return draft;
+      return { ...draft, primary: index };
     }
 
     case "effectAdd":
@@ -187,11 +234,12 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-const fieldsOf = ({ name, palette, dials, effects }: Profile) => ({
+const fieldsOf = ({ name, palette, dials, effects, primary }: Profile) => ({
   name,
   palette,
   dials,
   effects,
+  ...(primary === undefined ? {} : { primary }),
 });
 
 /** Whether the draft differs from the saved profile in any of its own fields. */

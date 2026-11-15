@@ -4,7 +4,10 @@
 // (SD13). The panel is open on load with Start; capture begins only from that click (AC1, AC2,
 // PD12), and from then on the page holds a screen wake lock (AC16). Profiles (B-02): nothing is
 // fetched on load; Start and each opening of the panel fetch the list, and picking a profile
-// re-fetches it and cuts to it, applying its starting dials (`profiles/active.ts`).
+// re-fetches it and cuts to it, applying its starting dials (`profiles/active.ts`). External
+// control (B-04): the page opens one WebSocket to its own server on load (`control/
+// screen-link.ts`); received controls are applied at the start of the next frame, before the
+// engine draws (`control/apply.ts`), and the page sends its state at most once per frame.
 import { createFeatureSource, ZERO_FEATURES } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
 import {
@@ -19,6 +22,9 @@ import { listDevices, supportsSystemAudio, type DeviceOption } from "./capture/d
 import { loadRemembered, type AudioChoice } from "./capture/remembered.ts";
 import { createSession, type Session, type SessionState } from "./capture/session.ts";
 import { createVideo } from "./capture/video.ts";
+import { createApplier } from "./control/apply.ts";
+import { openSocket } from "./control/device-link.ts";
+import { createScreenLink, toScreenState } from "./control/screen-link.ts";
 import { audioToEngine } from "./features-compat.ts";
 import { startFrameFeed } from "./frame-feed.ts";
 import { Overlay } from "./Overlay.tsx";
@@ -48,6 +54,16 @@ export function Screen() {
   });
   const [remembered] = useState(() => loadRemembered());
   const [wakeLock] = useState(() => createWakeLock(navigator, document));
+  // What the screen's state is built from, read at the start of a frame rather than from React
+  // state, whose updates land after it (B-04 PD5).
+  const facts = useRef({ dials: DEFAULT_DIALS, capture: IDLE, cameras: [] as DeviceOption[] });
+  const startedRef = useRef(false);
+  /** Dials go to the engine at once and to the panel's sliders (B-04 AC19). */
+  const applyDials = useCallback((next: Dials) => {
+    facts.current.dials = next;
+    engineRef.current?.setDials(next);
+    setDials(next);
+  }, []);
   // The controller reaches the engine through the ref, which is set once the canvas mounts.
   const [active] = useState(() =>
     createActiveProfile({
@@ -55,12 +71,40 @@ export function Screen() {
       storage: { load: () => loadProfileId(), save: (id) => saveProfileId(id) },
       setProfile: (profile) =>
         engineRef.current?.setProfile(sharedToEngine(profile)) ?? Promise.resolve(),
-      setDials: (next) => setDials(next),
+      setDials: (next) => applyDials(next),
       log: (id) => console.info("profile", { id }),
     }),
   );
   const [profiles, setProfiles] = useState(() => active.state());
   useEffect(() => active.subscribe(() => setProfiles(active.state())), [active]);
+
+  const [control] = useState(() => {
+    const applier = createApplier({
+      dials: () => facts.current.dials,
+      setDials: (next) => applyDials(next),
+      setColour: (slot, value) => active.setColour(slot, value),
+      resetColour: (slot) => active.resetColour(slot),
+      setCamera: (deviceId) => void sessionRef.current?.setCamera(deviceId),
+      pick: (id) => active.pick(id),
+      refresh: () => void active.open(),
+      started: () => startedRef.current,
+    });
+    const link = createScreenLink({
+      url: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/control/screen`,
+      connect: openSocket,
+      buildState: () =>
+        toScreenState({ ...facts.current, profiles: active.state(), started: startedRef.current }),
+      onControl: (deviceId, received) => applier.receive(deviceId, received),
+      onNewDevice: () => void active.open(), // a controller connecting is a user action (SD22)
+    });
+    return { applier, link };
+  });
+  useEffect(() => {
+    control.link.start();
+    return () => control.link.stop();
+  }, [control]);
+  const [controlView, setControlView] = useState(() => control.link.view());
+  useEffect(() => control.link.subscribe(() => setControlView(control.link.view())), [control]);
   // Mirrors `panel` so a key handler can tell an opening from a closing without an updater side effect.
   const panelRef = useRef(true);
   const showPanel = useCallback((next: boolean) => {
@@ -96,7 +140,12 @@ export function Screen() {
       if (state.video !== video) engine.setSource((video = state.video));
     });
     // Each frame reads the features just before the engine draws with them (frame-feed.ts).
-    const stopFeed = startFrameFeed(engine, () => audioToEngine(session.read(performance.now())));
+    // B-04: received controls first, then this frame's acknowledgements and state.
+    const stopFeed = startFrameFeed(
+      engine,
+      () => audioToEngine(session.read(performance.now())),
+      () => control.link.flush(control.applier.drain()),
+    );
     return () => {
       stopFeed();
       unsubscribe();
@@ -105,7 +154,16 @@ export function Screen() {
       engineRef.current = null;
       sessionRef.current = null;
     };
-  }, []);
+  }, [control]);
+
+  // Every change a controller mirrors marks the state for the next frame (B-04 SD5).
+  useEffect(() => {
+    facts.current.capture = capture;
+    facts.current.cameras = devices.cameras;
+    facts.current.dials = dials;
+    startedRef.current = started;
+    control.link.markDirty();
+  }, [control, profiles, capture, devices, dials, started]);
 
   // Dials and the cap go straight to the engine: the next frame uses them, capture runs on (AC9).
   useEffect(() => engineRef.current?.setDials(dials), [dials]);
@@ -195,12 +253,14 @@ export function Screen() {
           onCamera={(id) => void sessionRef.current?.setCamera(id)}
           onAudio={(choice: AudioChoice) => void sessionRef.current?.setAudio(choice)}
           dials={dials}
-          onDials={setDials}
+          onDials={applyDials}
           cap={cap}
           onCap={setCap}
           read={read}
           profiles={profiles}
           onProfile={(id) => void active.pick(id)}
+          control={controlView}
+          onControl={(action) => void control.link.send(action)}
         />
       )}
     </>

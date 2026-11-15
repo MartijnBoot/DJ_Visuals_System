@@ -18,10 +18,14 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 
 | # | ID | Feature | Size | Status |
 |---|---|---|---|---|
-| 1 | B-04 | Live set controls | M | idea |
-| 2 | B-03 | Claude Code-authored profiles | M | idea |
-| 3 | B-06 | Remote input devices | L | idea |
-| 4 | B-07 | Scenes | M | idea |
+| 1 | B-03 | Claude Code-authored profiles | M | idea |
+| 2 | B-06 | Remote input devices | L | idea |
+| 3 | B-07 | Scenes | M | idea |
+| 4 | B-09 | Transitions | M | idea |
+| 5 | B-10 | Global colour layer | S | idea |
+| 6 | B-11 | "No camera" as a feed option | S | idea |
+| 7 | B-12 | Hosted home on Oracle Cloud (free tier trial) | L | idea |
+| 8 | B-13 | Selling it | L | idea |
 
 ## Items
 
@@ -143,9 +147,9 @@ change to this model.
 
 ### B-04 — Live set controls
 
-- **Status:** idea
+- **Status:** specced → `docs/specs/phase-b-04-live-set-controls.md`
 - **Added:** 2026-11-11
-- **Size:** M
+- **Size:** L (grew from M at its spec interview: LAN listener, pairing and approval are in)
 
 **Problem.** Mid-set the mood shifts, the camera needs to swing from DJ to crowd, and whoever
 is at the controls may be the DJ with one hand free or a VJ (Visual Jockey) with full
@@ -242,6 +246,13 @@ feeds. An app the sending devices must install.
 **Touches.** Server bind address and TLS, pairing (from B-04's design), WebRTC signalling, the
 B-01 capture seam (spec SD1), `docs/invariants.md` rows for `127.0.0.1` and "no media reaches
 the server", SDR questions 2 and 3. A guess. Depends on B-01 and B-04. Supersedes B-05.
+
+**Note from B-04.** B-04 builds the LAN side this item reuses
+(`docs/specs/phase-b-04-live-set-controls.md`): a listener on private IPv4 addresses only, on
+`CONTROL_PORT`, opened by the operator at runtime (SD2, SD14); a 6-character code by QR plus an
+approval per device, with a session key bound to the source IP (SD3, SD4, SD15, SD18); and the
+control WebSocket (SD16). B-04 stays on plain HTTP and leaves HTTPS to this item, which needs a
+secure context for `getUserMedia` on remote devices: decide it once here, for both (B-04 SD15).
 
 ### B-07 — Scenes
 
@@ -346,3 +357,167 @@ regression.
 `docs/specs/defect-register.md` (D-02), `docs/invariants.md` (B-01 and B-02 compat rows),
 B-01 SD2/AC10, B-02 AC17. Bug-fix rules apply: it starts with a failing test (the induced-load
 reproduction).
+
+### B-09 — Transitions
+
+- **Status:** idea
+- **Added:** 2026-11-14
+- **Size:** M (a guess)
+
+**Problem.** A profile switch is a hard cut (B-02 SD15, B-04 SD6). Mid-set a cut is sometimes
+right and often too abrupt: a mood change wants to arrive, not jump.
+
+**Idea.** A family of transitions between profiles, chosen live from the controller: hard cut,
+crossfade, and more types (for example a wipe, a dissolve through noise, a cut on the next beat,
+a flash to the primary colour). Each with a duration where it has one.
+
+**Why it matters.** It lets a VJ shape the change of mood as part of the show rather than only
+choosing its end state. Split out of B-04 at its spec interview: the owner wants more options
+than cut and crossfade.
+
+**Not this.** A transition that drops frames or pushes the audio-to-frame p95 over B-01's 50 ms
+on the owner's machine. A pre-scripted sequence (that is a timeline, which B-07 also rules out).
+
+**Open questions.**
+
+- Which transition types come first, and which take a duration.
+- What a pick during a running transition does: restart from the current mix, queue, or cut.
+- The GPU cost of rendering two profiles at once (two programs, the old look's smear feedback),
+  and how render scaling (B-01 SD8) treats a transition.
+- Whether "cut on the next beat" belongs here, since it uses the audio features.
+- The controller UI: a default transition plus a per-pick override, or one current choice.
+- Whether B-07 scenes reuse these transitions.
+
+**Touches.** `engine/` (two looks in one frame, a mix pass), B-04's controller and messages,
+B-01's latency and render-scale checks, B-07. Depends on B-04.
+
+### B-10 — Global colour layer
+
+- **Status:** idea
+- **Added:** 2026-11-14
+- **Size:** S (a guess)
+
+**Problem.** B-04's live colour changes edit the active profile's palette and are gone at the
+next profile switch (B-04 SD7). A VJ who wants the whole night warmer, or tinted to the venue's
+lighting, has to redo it after every switch.
+
+**Idea.** A colour layer applied after every profile: a hue shift and a tint colour with an
+amount, set live from the controller, kept across profile switches until changed or the set
+ends. Added on top of B-04's palette edits, not instead of them (owner, B-04 interview).
+
+**Why it matters.** One move recolours everything, whatever profile comes next.
+
+**Not this.** Saved into a profile (ADR 0001: live changes are never saved). A replacement for
+the palette edit.
+
+**Open questions.**
+
+- Hue shift, tint, or both; whether it also affects the camera picture or only the palette
+  colours.
+- Whether it survives a screen page reload (B-04 resets live state on reload, SD13).
+- Where it sits in the shader (after the last effect, or on the palette only) and its cost.
+- Whether B-07 scenes store it.
+
+**Touches.** `engine/` (one stage and uniforms), B-04's controller and messages. Depends on B-04.
+
+### B-11 — "No camera" as a feed option
+
+- **Status:** idea
+- **Added:** 2026-11-15
+- **Size:** S (a guess: one more entry in the existing pickers; the look already exists)
+
+**Problem.** The operator wants the visuals without the camera picture. The camera list offers
+only real cameras, so today the only ways to get the camera-free look are to unplug the camera or
+deny the browser permission.
+
+**Idea.** A "No camera" entry in the camera feed list. Picking it switches the screen to the
+no-camera look B-01 already renders: the active profile over a slow noise field, driven by audio
+only (B-01 SD10, AC13). Picking a camera again switches back. Offered wherever a feed is picked:
+the panel's camera picker and the `/control` camera tiles (a proposal, not asked).
+
+**Why it matters.** Turning the camera off becomes a deliberate one-move choice mid-set, not
+something that only happens when a camera fails. It also gives B-07 Scenes a "no camera" feed to
+store.
+
+**Not this.** A new visualiser or a new look; it reuses the existing one. A screen that reattaches
+a camera on its own while "No camera" is chosen (today a lost camera reattaches without a click,
+AC13).
+
+**Open questions.**
+
+- Whether choosing it releases the camera device, so the webcam light goes off.
+- Whether the choice is remembered across a reload or restart, as the chosen camera is (B-01
+  PD12).
+- How the panel, overlay and controller tell "off" (chosen) apart from `none` and `lost`
+  (failures).
+- Whether it can be picked before Start, when the camera controls are disabled (B-04 AC24).
+
+**Touches.** A guess: `web/src/SourcePickers.tsx`, the capture session
+(`web/src/capture/session.ts`) and the remembered choice, the `camera` control message in
+`shared/src/control.ts`, the `/control` camera tiles. Builds on B-01 SD10/AC13 and B-04 AC24.
+Depends on B-04.
+
+### B-12 — Hosted home on Oracle Cloud (free tier trial)
+
+- **Status:** idea
+- **Added:** 2026-11-15
+- **Size:** L
+
+**Problem.** The app and its profiles live on one machine. Playing at another location, or on a
+different screen machine, means carrying that machine or moving profiles by export and import;
+if the machine fails, the profiles go with it (ADR 0001 §8).
+
+**Idea.** The app is reachable at a URL on Oracle Cloud, and the profiles live there. Whatever
+device is the screen machine connects to it, gets the app and the profiles, and runs the engine
+locally: audio, camera, rendering and External control stay on the local network. Every change
+merged to `main` on GitHub deploys to Oracle automatically. Free tier first, to see how it
+works there.
+
+**Why it matters.** A stable home, reachable from any location and any screen machine, with
+profiles no longer tied to one machine. It is also the first step towards selling the app
+(B-13).
+
+**Not this.** A set that stops when venue internet drops. Rendering or media on the server.
+Accounts for other people or payments (B-13). Deploying by hand. Paid Oracle resources the
+owner has not decided on.
+
+**Open questions.**
+
+- A new ADR: ADR 0001 defers hosting (§7) and names Azure.
+- What a screen machine needs: only a browser (the app kept for offline after the first load),
+  or a local install that syncs with the cloud. This decides where B-04's LAN pairing runs.
+- Behaviour without internet: at start-up, mid-set, and profiles edited offline then synced.
+- Login for the hosted URL: bought, not built (ADR 0001 Q3), and able to grow into customer
+  accounts (B-13).
+- HTTPS and a domain name.
+- Free-tier limits: idle instances can be reclaimed, ARM or x86, region, and what "stable"
+  means in numbers.
+- The GitHub to Oracle deploy: how GitHub gets access, how a failed deploy is undone,
+  migrations on deploy.
+- Backups of the cloud database, and logs (ADR 0001 expected Application Insights at hosting).
+
+**Touches.** A guess: a new ADR, the `127.0.0.1` row in `docs/invariants.md`,
+`server/src/config.ts`, server bind address and TLS, B-04 External control, profile storage, a
+GitHub Actions workflow, a new infrastructure folder. Oracle credentials are the owner's (a hard
+stop). Depends on B-04.
+
+### B-13 — Selling it
+
+- **Status:** idea
+- **Added:** 2026-11-15
+- **Size:** L
+
+**Problem.** Other DJs and VJs could pay for the app, but today it is a single-owner tool.
+
+**Idea.** A placeholder (wording proposed, not yet the owner's): the hosted app serves paying
+customers, each with their own profiles.
+
+**Why it matters.** It is the owner's stated long-term goal, and it keeps B-12 from making
+choices that block it.
+
+**Not this.** Something B-12 builds now; B-12 only must not block it.
+
+**Open questions.** Who the buyers are, pricing model, keeping each customer's data separate,
+payments, terms and privacy, support.
+
+**Touches.** A guess: auth, profile storage, ADR 0001 (Q3, §7). Depends on B-12.

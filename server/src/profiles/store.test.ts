@@ -67,6 +67,21 @@ describe("create and get", () => {
     expect(JSON.parse(row!.definition)).toEqual(definitionOf(warm));
   });
 
+  it("stores primary in definition when set, and no primary key when absent (B-04 AC39)", () => {
+    const marked = created({ ...warm, name: "Marked", primary: 1 });
+    const plain = created();
+    const definitions = db
+      .all<{ id: string; definition: string }>("SELECT id, definition FROM profiles")
+      .map((row) => [row.id, JSON.parse(row.definition) as Record<string, unknown>] as const);
+    const byId = new Map(definitions);
+    expect(byId.get(marked.id)).toEqual({ ...definitionOf(warm), primary: 1 });
+    expect(byId.get(plain.id)).not.toHaveProperty("primary");
+    expect(store.get(marked.id)).toEqual({ kind: "ok", profile: marked });
+    expect(marked.primary).toBe(1);
+    const updated = store.update(marked.id, { ...warm, name: "Marked", primary: 2 }, 1);
+    expect(updated.kind === "ok" && updated.profile.primary).toBe(2);
+  });
+
   it("refuses a second create with the name in another case (AC7)", () => {
     created();
     expect(store.create({ ...warm, name: "WARM" })).toEqual({ kind: "name_taken" });

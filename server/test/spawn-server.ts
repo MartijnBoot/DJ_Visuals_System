@@ -120,12 +120,17 @@ export function freePort(): Promise<number> {
   });
 }
 
-/** The four variables with test values; `undefined` removes one. Never reads the test's env. */
+/**
+ * The five variables with test values; `undefined` removes one. Never reads the test's env.
+ * Nothing listens on `CONTROL_PORT` until External control is switched on (B-04 AC1), so the
+ * default is never bound; a test that switches it on passes a free port of its own.
+ */
 export function baseEnv(overrides: Record<string, string | undefined>): Record<string, string> {
   const env: Record<string, string | undefined> = {
     APP_ENV: "test",
     LOG_LEVEL: "info",
     PORT: "0",
+    CONTROL_PORT: "8001",
     DATA_DIR: "",
     ...overrides,
   };

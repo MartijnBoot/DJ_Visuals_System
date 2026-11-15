@@ -1,7 +1,9 @@
 // The browser check (spec SD9, AC10 to AC13): Chromium only, headless, software WebGL, against
 // `pnpm start` (the built app served by the one Node process), never the Vite dev server.
-// The server always starts fresh on its own port with a temporary DATA_DIR; all four variables
+// The server always starts fresh on its own port with a temporary DATA_DIR; all five variables
 // are passed here, so nothing comes from .env.local (the process environment wins over it).
+// Nothing listens on CONTROL_PORT until External control is switched on (B-04 AC1); the
+// External control specs boot their own server (B-04 PD13).
 // B-01 (SD17): Chromium's fake camera and microphones, fed by fixtures generated into the same
 // temporary directory, and a smaller viewport to keep software WebGL stable. The port, the
 // viewport and the flags live in `tests/browser/fixtures/launch.ts`, shared with the load
@@ -14,6 +16,7 @@ import { chromiumArgs, GATE_PORT, VIEWPORT } from "./tests/browser/fixtures/laun
 import { writeFakeMedia } from "./tests/browser/fixtures/media.ts";
 
 const PORT = GATE_PORT;
+const CONTROL_PORT = 8125;
 const dataDir = mkdtempSync(join(tmpdir(), "djv-browser-"));
 const media = writeFakeMedia(dataDir);
 
@@ -48,6 +51,12 @@ export default defineConfig({
     timeout: 120_000,
     stdout: "ignore",
     stderr: "pipe",
-    env: { APP_ENV: "test", LOG_LEVEL: "warn", PORT: String(PORT), DATA_DIR: dataDir },
+    env: {
+      APP_ENV: "test",
+      LOG_LEVEL: "warn",
+      PORT: String(PORT),
+      CONTROL_PORT: String(CONTROL_PORT),
+      DATA_DIR: dataDir,
+    },
   },
 });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+export * from "./control.ts";
 export * from "./profile.ts";
 export * from "./profile-api.ts";
 export { nextFreeName } from "./names.ts";

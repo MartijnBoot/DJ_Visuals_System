@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ConfigError, loadConfig } from "./config.ts";
 
-const valid = { APP_ENV: "development", LOG_LEVEL: "info", PORT: "8000", DATA_DIR: "./data" };
+const valid = {
+  APP_ENV: "development",
+  LOG_LEVEL: "info",
+  PORT: "8000",
+  CONTROL_PORT: "8001",
+  DATA_DIR: "./data",
+};
 
 function problemsOf(env: Record<string, string | undefined>): Record<string, string> {
   try {
@@ -16,20 +22,24 @@ function problemsOf(env: Record<string, string | undefined>): Record<string, str
 }
 
 describe("loadConfig", () => {
-  it("accepts all four variables valid and ignores the rest of the environment", () => {
+  it("accepts all five variables valid and ignores the rest of the environment", () => {
     expect(loadConfig({ ...valid, PATH: "/usr/bin", SESSION_SECRET: "x" })).toEqual({
       APP_ENV: "development",
       LOG_LEVEL: "info",
       PORT: 8000,
+      CONTROL_PORT: 8001,
       DATA_DIR: "./data",
     });
   });
 
-  it.each(["APP_ENV", "LOG_LEVEL", "PORT", "DATA_DIR"])("reports %s missing", (name) => {
-    const env: Record<string, string | undefined> = { ...valid };
-    delete env[name];
-    expect(problemsOf(env)).toEqual({ [name]: "is missing" });
-  });
+  it.each(["APP_ENV", "LOG_LEVEL", "PORT", "CONTROL_PORT", "DATA_DIR"])(
+    "reports %s missing",
+    (name) => {
+      const env: Record<string, string | undefined> = { ...valid };
+      delete env[name];
+      expect(problemsOf(env)).toEqual({ [name]: "is missing" });
+    },
+  );
 
   it("reports APP_ENV malformed", () => {
     expect(problemsOf({ ...valid, APP_ENV: "staging" })).toEqual({
@@ -47,6 +57,48 @@ describe("loadConfig", () => {
     expect(problemsOf({ ...valid, PORT: port })).toEqual({
       PORT: "must be an integer from 1 to 65535",
     });
+  });
+
+  it.each(["abc", "0", "65536", "80.5", "", " 80", "-1"])(
+    "reports CONTROL_PORT=%j malformed (B-04 AC2)",
+    (port) => {
+      expect(problemsOf({ ...valid, CONTROL_PORT: port })).toEqual({
+        CONTROL_PORT: "must be an integer from 1 to 65535",
+      });
+    },
+  );
+
+  it("reports CONTROL_PORT equal to PORT, also written differently (B-04 AC2, PD9)", () => {
+    expect(problemsOf({ ...valid, CONTROL_PORT: "8000" })).toEqual({
+      CONTROL_PORT: "must differ from PORT",
+    });
+    expect(problemsOf({ ...valid, CONTROL_PORT: "08000" })).toEqual({
+      CONTROL_PORT: "must differ from PORT",
+    });
+  });
+
+  it("reports only PORT when PORT is bad and CONTROL_PORT would equal it (PD9)", () => {
+    expect(problemsOf({ ...valid, PORT: " 8001" })).toEqual({
+      PORT: "must be an integer from 1 to 65535",
+    });
+    expect(problemsOf({ ...valid, PORT: undefined })).toEqual({ PORT: "is missing" });
+    expect(problemsOf({ ...valid, PORT: "abc", CONTROL_PORT: "abc" })).toEqual({
+      PORT: "must be an integer from 1 to 65535",
+      CONTROL_PORT: "must be an integer from 1 to 65535",
+    });
+  });
+
+  it("reports CONTROL_PORT equal to PORT alongside another bad variable, in schema order", () => {
+    const error = (() => {
+      try {
+        loadConfig({ ...valid, APP_ENV: "nope", CONTROL_PORT: "8000", DATA_DIR: "" });
+      } catch (e) {
+        return e as ConfigError;
+      }
+      throw new Error("expected a throw");
+    })();
+    expect(error.problems.map((p) => p.variable)).toEqual(["APP_ENV", "CONTROL_PORT", "DATA_DIR"]);
+    expect(JSON.stringify(error.problems)).not.toContain("8000");
   });
 
   it("reports DATA_DIR empty", () => {
@@ -69,6 +121,7 @@ describe("loadConfig", () => {
       "APP_ENV",
       "LOG_LEVEL",
       "PORT",
+      "CONTROL_PORT",
       "DATA_DIR",
     ]);
     expect(JSON.stringify(error.problems)).not.toContain("secret-looking-value");

@@ -264,3 +264,95 @@ describe("subscribe", () => {
     expect(listener).toHaveBeenCalledTimes(calls);
   });
 });
+
+describe("live colours (B-04 SD7, AC20, AC21, PD6)", () => {
+  const palette3: Profile = { ...definition, palette: ["#000000", "#ffffff", "#ff0000"] };
+
+  it("exposes the live palette, the stored palette and the primary slot", async () => {
+    const { active } = setup();
+    // The built-in before any pick: primary derived as 1 (SD10).
+    expect(active.state()).toMatchObject({
+      palette: ["#000000", "#ffffff"],
+      storedPalette: ["#000000", "#ffffff"],
+      primary: 1,
+    });
+    const { active: other } = setup({
+      get: { kind: "ok", profile: { ...stored("w1", "Warm"), ...palette3, primary: 2 } },
+    });
+    await other.pick("w1");
+    expect(other.state()).toMatchObject({ palette: palette3.palette, primary: 2 });
+  });
+
+  it("setColour hands the engine the same effects with the new palette, once", async () => {
+    const { active, setProfile, warm } = setup();
+    await active.pick("w1");
+    setProfile.mockClear();
+    active.setColour(1, "#123456");
+    expect(setProfile).toHaveBeenCalledTimes(1);
+    const sent = setProfile.mock.calls[0]![0];
+    expect(sent.effects).toEqual(warm.effects);
+    expect(sent.palette).toEqual(["#000000", "#123456"]);
+    expect(active.state().palette).toEqual(["#000000", "#123456"]);
+    expect(active.state().storedPalette).toEqual(["#000000", "#ffffff"]);
+  });
+
+  it("resetColour restores the stored colour", async () => {
+    const { active, setProfile } = setup();
+    await active.pick("w1");
+    active.setColour(0, "#abcdef");
+    active.resetColour(0);
+    expect(active.state().palette).toEqual(["#000000", "#ffffff"]);
+    expect(setProfile.mock.calls.at(-1)![0].palette).toEqual(["#000000", "#ffffff"]);
+  });
+
+  it("works on the built-in before any pick", () => {
+    const { active, setProfile } = setup();
+    active.setColour(1, "#00ff00");
+    expect(setProfile.mock.calls[0]![0]).toMatchObject({
+      name: "Built-in",
+      palette: ["#000000", "#00ff00"],
+    });
+  });
+
+  it("a pick of the same profile discards the edits", async () => {
+    const { active } = setup();
+    await active.pick("w1");
+    active.setColour(1, "#123456");
+    await active.pick("w1");
+    expect(active.state().palette).toEqual(["#000000", "#ffffff"]);
+  });
+
+  it("drops a colour while a pick is pending: no setProfile, no reason", async () => {
+    let release!: () => void;
+    const { active, setProfile } = setup();
+    setProfile.mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+    const picking = active.pick("w1");
+    await vi.waitFor(() => expect(setProfile).toHaveBeenCalledTimes(1));
+    active.setColour(1, "#123456");
+    active.resetColour(1);
+    expect(setProfile).toHaveBeenCalledTimes(1);
+    release();
+    await picking;
+    expect(active.state().reason).toBeNull();
+    expect(active.state().palette).toEqual(["#000000", "#ffffff"]);
+    active.setColour(1, "#123456"); // and takes colours again once the pick is done
+    expect(setProfile).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a slot outside the palette", async () => {
+    const { active, setProfile } = setup();
+    await active.pick("w1");
+    setProfile.mockClear();
+    active.setColour(5, "#123456");
+    active.resetColour(5);
+    expect(setProfile).not.toHaveBeenCalled();
+  });
+
+  it("notifies on a colour change", async () => {
+    const { active } = setup();
+    const listener = vi.fn();
+    active.subscribe(listener);
+    active.setColour(0, "#111111");
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});

@@ -126,6 +126,31 @@ describe("fail-fast config (AC4)", () => {
     expect(variablesOf(fatal[0]!)).toEqual(["APP_ENV", "LOG_LEVEL", "PORT", "DATA_DIR"]);
   });
 
+  it.each([
+    ["missing", undefined],
+    ["malformed", "70000"],
+    ["equal to PORT", "PORT"],
+  ])(
+    "exits 1 on CONTROL_PORT %s with one line naming it, no value, no directory (B-04 AC2)",
+    async (_case, value) => {
+      const dataDir = join(tmp, "data");
+      const port = String(await freePort());
+      const controlPort = value === "PORT" ? port : value;
+      server = spawnServer(baseEnv({ PORT: port, CONTROL_PORT: controlPort, DATA_DIR: dataDir }));
+      const { code } = await server.exited;
+      expect(code).toBe(1);
+      const fatal = fatalLines(server);
+      expect(fatal).toHaveLength(1);
+      expect((fatal[0]!.problems as { variable: string }[])[0]!.variable).toBe("CONTROL_PORT");
+      expect(variablesOf(fatal[0]!)).toEqual(["CONTROL_PORT"]);
+      expect(server.lines()).toHaveLength(1);
+      if (controlPort !== undefined) {
+        for (const line of server.lines()) expect(JSON.stringify(line)).not.toContain(controlPort);
+      }
+      expect(existsSync(dataDir)).toBe(false);
+    },
+  );
+
   it("reports a DATA_DIR that cannot be created as DATA_DIR (PD6)", async () => {
     const file = join(tmp, "a-file");
     writeFileSync(file, "not a directory\n");
@@ -178,7 +203,14 @@ describe("JSON logs (AC14, PD7)", () => {
     const { port } = await bootOk({ DJV_TEST_SENTINEL: sentinel });
     await fetch(`http://127.0.0.1:${port}/x`);
     await server!.waitForLine((l) => l.msg === "request completed");
-    const envKeys = ["APP_ENV", "LOG_LEVEL", "PORT", "DATA_DIR", "DJV_TEST_SENTINEL"];
+    const envKeys = [
+      "APP_ENV",
+      "LOG_LEVEL",
+      "PORT",
+      "CONTROL_PORT",
+      "DATA_DIR",
+      "DJV_TEST_SENTINEL",
+    ];
     const keysOf = (v: unknown): string[] =>
       v && typeof v === "object"
         ? Object.entries(v).flatMap(([k, inner]) => [k, ...keysOf(inner)])

@@ -5,7 +5,11 @@
 // profile to the engine, then applies its starting dials and remembers it. The page keeps the
 // copy it loaded: an edit or delete elsewhere changes nothing until a profile is picked (SD9).
 // Every failure keeps the current look and sets a one-line reason; the screen never goes blank.
-import type { Profile } from "@djv/shared";
+// B-04 (SD7, PD6): the active profile is kept whole, with a live copy of its palette that a
+// controller edits in memory and never saves; a pick, the same profile included, starts again
+// from the stored palette. While a pick is pending a colour change is dropped: handing the engine
+// a profile then would cancel the pick, and the swap would discard the colour anyway.
+import { derivePrimary, type Profile } from "@djv/shared";
 import type { ListResult, ProfileResult } from "./api.ts";
 import { BUILTIN_ID, builtinEntry } from "./builtin.ts";
 
@@ -26,6 +30,12 @@ export interface ActiveState {
   reason: string | null;
   /** A list has been fetched: the picker is enabled. */
   loaded: boolean;
+  /** The colours on screen: the stored palette with any live edits (B-04 SD7). */
+  palette: string[];
+  /** The active profile's palette as stored. */
+  storedPalette: string[];
+  /** The primary slot: stored, or derived when absent (B-04 SD10). */
+  primary: number;
 }
 
 export interface ActiveDeps {
@@ -43,6 +53,10 @@ export interface ActiveDeps {
 export interface ActiveProfile {
   open(): Promise<void>;
   pick(id: string): Promise<void>;
+  /** Sets one palette slot live; dropped while a pick is pending or outside the palette. */
+  setColour(slot: number, value: string): void;
+  /** Puts one slot back to its stored colour. */
+  resetColour(slot: number): void;
   state(): ActiveState;
   subscribe(listener: () => void): () => void;
 }
@@ -68,6 +82,10 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   let stored: Entry[] = [];
   let loaded = false;
   let active: Entry = { id: BUILTIN_ID, name: builtin.name };
+  let activeProfile: Profile = builtin;
+  let live: string[] = [...builtin.palette];
+  /** The token of the pick in flight, or 0. */
+  let picking = 0;
   let reason: string | null = null;
   let rememberedPicked = false;
   let token = 0;
@@ -92,6 +110,9 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     selectedId: loaded ? active.id : (entries()[0]?.id ?? BUILTIN_ID),
     reason,
     loaded,
+    palette: [...live],
+    storedPalette: [...activeProfile.palette],
+    primary: derivePrimary(activeProfile),
   });
 
   /** Switches to `profile` in the engine, then its dials; `false` when the engine refuses. */
@@ -110,6 +131,8 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     deps.storage.save(id);
     deps.log(id);
     active = { id, name: profile.name };
+    activeProfile = profile;
+    live = [...profile.palette];
     reason = null;
     emit();
     return true;
@@ -117,6 +140,15 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
 
   const pick = async (id: string): Promise<void> => {
     const mine = ++token;
+    picking = mine;
+    try {
+      await pickAs(id, mine);
+    } finally {
+      if (picking === mine) picking = 0;
+    }
+  };
+
+  const pickAs = async (id: string, mine: number): Promise<void> => {
     if (id === BUILTIN_ID) {
       await apply(BUILTIN_ID, builtin, mine);
       return;
@@ -156,9 +188,24 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     }
   };
 
+  /** Hands the engine the active profile with the live palette: same effects, no new program. */
+  const recolour = (slot: number, value: string) => {
+    if (picking !== 0 || slot >= live.length) return;
+    live = live.map((c, i) => (i === slot ? value : c));
+    // The same effect list swaps on the next frame without linking, so it cannot fail; were it
+    // to, the colour simply stays as it was.
+    deps.setProfile({ ...activeProfile, palette: [...live] }).catch(() => {});
+    emit();
+  };
+
   return {
     open,
     pick,
+    setColour: recolour,
+    resetColour(slot) {
+      const stored = activeProfile.palette[slot];
+      if (stored !== undefined) recolour(slot, stored);
+    },
     state,
     subscribe(listener) {
       listeners.add(listener);

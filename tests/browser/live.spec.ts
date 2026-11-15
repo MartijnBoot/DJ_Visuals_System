@@ -516,7 +516,7 @@ test("with the cap at 75% the scale never reads 100% (AC15)", async ({ page }) =
   expect(seen.filter((s) => s === "scale 100%")).toEqual([]);
 });
 
-test("nothing but the page, its assets, health and the two profile reads is ever requested, the profile reads only after a user action (AC17, B-02 AC18)", async ({
+test("nothing but the page, its assets, health, the screen socket and the two profile reads is ever requested, the profile reads only after a user action (AC17, B-02 AC18, B-04 AC36)", async ({
   page,
   request,
 }) => {
@@ -541,12 +541,12 @@ test("nothing but the page, its assets, health and the two profile reads is ever
   await page.waitForTimeout(6000); // past one health poll after the first
   note("AC17 requests", [...new Set(requests)]);
   const allowed = /^GET (\/|\/assets\/[^/]+|\/api\/health|\/api\/profiles|\/api\/profiles\/[^/]+)$/;
-  expect(requests.filter((r) => !allowed.test(r))).toEqual([]);
+  const sockets = requests.filter((r) => r.startsWith("WS "));
+  expect(requests.filter((r) => !r.startsWith("WS ") && !allowed.test(r))).toEqual([]);
   expect(bodies, "a request carried a body").toEqual([]);
-  expect(
-    requests.filter((r) => r.startsWith("WS")),
-    "a WebSocket was opened",
-  ).toEqual([]);
+  // B-04 (SD25, AC36): exactly one WebSocket, the screen socket on the page's own server.
+  const origin = new URL(page.url());
+  expect(sockets, "the WebSockets opened").toEqual([`WS ws://${origin.host}/api/control/screen`]);
   expect(requests).toContain("GET /api/profiles");
   expect(requests).toContain(`GET /api/profiles/${stored.id}`);
   await deleteAll(request);

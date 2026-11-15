@@ -27,4 +27,11 @@ describe("Profile compatibility (AC19)", { timeout: 0 }, () => {
       s.replace(/^(\s*)palette: string\[\];/m, "$1palette: string[];\n$1tempo: number;");
     expect(diagnostics(extra).join("\n")).toMatch(/tempo/);
   });
+
+  // B-04 PD16: an optional field missing on one side still assigns both ways, so the compat
+  // file also asserts the key sets are equal.
+  it("fails when the engine drops the optional primary shared declares", () => {
+    const dropped = (s: string) => s.replace(/^\s*primary\?: number;\r?\n/m, "");
+    expect(diagnostics(dropped).join("\n")).toMatch(/primary/);
+  });
 });

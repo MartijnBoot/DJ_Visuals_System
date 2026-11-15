@@ -1,9 +1,10 @@
 # Architecture
 
-The system as built at the end of B-02 (visual profiles): specs
+The system as built at the end of B-04 (live set controls): specs
 [phase-0-walking-skeleton](../specs/phase-0-walking-skeleton.md),
-[phase-b-01-live-visual-engine](../specs/phase-b-01-live-visual-engine.md) and
-[phase-b-02-visual-profiles](../specs/phase-b-02-visual-profiles.md), decisions in the
+[phase-b-01-live-visual-engine](../specs/phase-b-01-live-visual-engine.md),
+[phase-b-02-visual-profiles](../specs/phase-b-02-visual-profiles.md) and
+[phase-b-04-live-set-controls](../specs/phase-b-04-live-set-controls.md), decisions in the
 [Setup Decision Record](../adr/0001-setup-decision-record.md). Plans read this and do not
 redesign it; a change here is an owner stop (CLAUDE.md). Diagrams stay text so they diff.
 
@@ -17,7 +18,10 @@ and, while the overlay is shown, asks the server for its health. A second route,
 canvas and engine instance. Rendering, analysis and the media stay in the browser: no camera
 frame or audio sample reaches the server, the disk or a network (B-01 SD14; the server has no
 endpoint for either, and `tests/browser/live.spec.ts` asserts every request a running set makes).
-Five workspace packages:
+External control (B-04) lets a phone, tablet or laptop on the LAN drive the set: while the
+operator switches it on, a second listener on the machine's private addresses serves `/control`
+and a device socket; every change goes over the server to the screen page, which applies it and
+mirrors its state back (External control, below). Five workspace packages:
 
 ```
   browser, screen machine                                  Node 24 process, 127.0.0.1:PORT
@@ -57,9 +61,9 @@ browser check runs only against `pnpm start`.
 |---|---|---|---|
 | `engine/` | The WebGL2 context, the animation loop, the look (one shader pass composed from a profile, `shader.ts`; its constants and B-01's reference mapping in `look.ts`), the profile model, strength formula and built-in profile (`profile.ts`), render scaling (`scale.ts`), the latency record (`latency.ts`), frame statistics; its own `AudioFeatures`, `Dials` (`features.ts`) and `Profile` | `createEngine(canvas)` returning `{ start, stop, stats, latency, setFeatures, setDials, setSource, setScaleCap, setProfile }`, `BUILT_IN_PROFILE`, `EFFECTS`, `effectStrength`, `DEFAULT_DIALS`, `ZERO_FEATURES`, `WebGL2UnavailableError`, `ProfileSupersededError` (`engine/src/index.ts`) | Declare or import any package, including `audio/` and `shared/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
 | `audio/` | The `AudioWorklet` processor (`djv-features`, `audio/src/processor.ts`), the analysis maths as pure functions (`analysis.ts`; every number in `constants.ts`), the `AudioFeatures` contract (`features.ts`), the main-thread source that maps the worklet's clock and decays stale features (`source.ts`, `clock.ts`), the synthetic feature loop for the builder's preview (`synthetic.ts`) | `createFeatureSource(context, stream, moduleUrl)` resolving to `{ read(now), stop, lastBlockAt }`, `createAnalyser`, `windowFrames`, `createClockMap`, `decayFeatures`, `syntheticFeatures`, `AudioFeatures`, `ZERO_FEATURES` (`audio/src/index.ts`); the worklet file as `@djv/audio/processor` | Declare or import any package, including `engine/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
-| `web/` | The screen page at `/` and the builder at `/builder` (`web/src/main.tsx` reads `location.pathname`; no router), the capture session (`web/src/capture/`), the panel and its profile picker (`profiles/active.ts`), the overlay, the wake lock, the health and profile clients (`profiles/api.ts`), the builder (`web/src/builder/`: list, editor reducer, preview, conflict, export and import); wiring `audio/` and `shared/` to `engine/` (`features-compat.ts`, `profile-compat.ts`, checked both ways by `tests/meta/features-compat.test.ts` and `tests/meta/profile-compat.test.ts`) | The built app in `web/dist` | Import from `server/`; read the environment |
-| `server/` | Configuration, logging, the database and migrations, the profile store (`server/src/profiles/store.ts`, the only SQL for profiles) and routes (`routes.ts`), HTTP | `GET /api/health`, the profile endpoints below, `GET /builder`, static `web/dist`, `pnpm migrate` | Listen on anything but `127.0.0.1`; read the environment outside `config.ts` |
-| `shared/` | The schemas both sides validate against: health, the profile and its file format (`profile.ts`), the endpoint bodies and error shapes (`profile-api.ts`), the "Name (n)" rule (`names.ts`) | `healthResponseSchema`, `profileSchema`, `profileFileSchema`, `toProfileFile`, `storedProfileSchema`, `updateProfileSchema`, `issuesFrom`, `nextFreeName`, `LIMITS` (`shared/src/index.ts`) | — |
+| `web/` | The screen page at `/`, the builder at `/builder` and the External control page at `/control` (`web/src/main.tsx` reads `location.pathname`; no router), the screen's control client and the controller (`web/src/control/`), the capture session (`web/src/capture/`), the panel and its profile picker (`profiles/active.ts`), the overlay, the wake lock, the health and profile clients (`profiles/api.ts`), the builder (`web/src/builder/`: list, editor reducer, preview, conflict, export and import); wiring `audio/` and `shared/` to `engine/` (`features-compat.ts`, `profile-compat.ts`, checked both ways by `tests/meta/features-compat.test.ts` and `tests/meta/profile-compat.test.ts`) | The built app in `web/dist` | Import from `server/`; read the environment |
+| `server/` | Configuration, logging, the database and migrations, the profile store (`server/src/profiles/store.ts`, the only SQL for profiles) and routes (`routes.ts`), HTTP, External control (`server/src/control/`: pairing, the LAN listener, the sockets, relaying) | `GET /api/health`, the profile endpoints below, `GET /builder`, static `web/dist`, the screen socket `/api/control/screen`; on the LAN listener while switched on `GET /control`, `GET /assets/*`, the device socket `/api/control/device`; `pnpm migrate` | Listen on anything but `127.0.0.1`, except the External control listener on private IPv4 addresses while switched on; read the environment outside `config.ts` |
+| `shared/` | The schemas both sides validate against: health, the profile and its file format (`profile.ts`, with the optional `primary` and `derivePrimary`), the endpoint bodies and error shapes (`profile-api.ts`), the "Name (n)" rule (`names.ts`), every External control message both ways and its limits (`control.ts`) | `healthResponseSchema`, `profileSchema`, `profileFileSchema`, `toProfileFile`, `derivePrimary`, `storedProfileSchema`, `updateProfileSchema`, `issuesFrom`, `nextFreeName`, `LIMITS`, the control schemas and constants (`shared/src/index.ts`) | — |
 
 `shared/`, `engine/` and `audio/` export their `src/index.ts`; there is no build step for the
 server or those packages. Only `web/` is built, by Vite, into `web/dist`; the worklet reaches
@@ -166,6 +170,81 @@ sends `index.html`; every other unknown path stays 404.
   `pointerdown` resumes it. State changes are logged to the console as
   `capture { kind, state, reason }`, never with a device label.
 
+## External control
+
+B-04 (spec [phase-b-04-live-set-controls](../specs/phase-b-04-live-set-controls.md)): any browser
+on the LAN, once paired and approved, picks profiles, moves the two dials, edits palette colours
+live and switches the camera. The screen page stays the single source of truth; the server holds
+the pairing and relays.
+
+```
+  controller (any LAN browser)        Node 24 process                     screen page (127.0.0.1)
+ +----------------------------+      +--------------------------------+   +--------------------+
+ | /control (web/)            |      | LAN listener, CONTROL_PORT:    |   | / (web/)           |
+ |   device-link.ts           |----->|   private IPv4 only, only      |   |   screen-link.ts   |
+ |   DJ / VJ, colour wheel    |  WS  |   while switched on            |   |   apply.ts         |
+ |                            |      |   GET /control, /assets/*      |   |   (beforeFrame ->  |
+ |                            |      |   WS /api/control/device       |   |    engine)         |
+ |                            |      | server/src/control/            |   |                    |
+ |                            |      |   pairing.ts: code, approvals, |   |                    |
+ |                            |      |     keys bound to the IP       |   |                    |
+ |                            |<-----|   hub.ts: relay, last state    |<--|                    |
+ |   state, applied, pending  |      | main listener, 127.0.0.1:PORT  |   |   state, applied,  |
+ |                            |      |   WS /api/control/screen  -----+-->|   panel actions    |
+ +----------------------------+      +--------------------------------+   +--------------------+
+                                        control { deviceId } -> screen
+```
+
+- **Listeners.** The main listener is unchanged and gains the screen socket. The External control
+  listener is one small Fastify instance per private IPv4 address of the machine (10/8,
+  172.16/12, 192.168/16; never `0.0.0.0`, a public address or IPv6; `control/addresses.ts`) on
+  `CONTROL_PORT`, created when the operator switches on in the panel and closed when they switch
+  off; binding is all or nothing ("Port <n> is in use", "No local network address found"). It
+  answers `GET /control` (`index.html`), `GET /assets/*` (rooted at the assets folder, nothing
+  else of `web/dist`) and the device socket; everything else is 404, with no CORS header. Boot
+  never switches it on.
+- **Sockets.** `ws` in `noServer` mode behind each listener's `upgrade` event
+  (`control/upgrade.ts`): a path no route names is 404, an `Origin` other than the listener's own
+  is 403 before the handshake. The screen socket accepts `http://127.0.0.1:PORT`,
+  `http://localhost:PORT` and Vite's `http://localhost:5173`; a device socket only
+  `http://<that address>:CONTROL_PORT`. Every received message goes through `control/channel.ts`:
+  the rate limit (120 a second per device socket, none for the screen), the size limit (4 KB per
+  device message, 256 KB on the screen socket), JSON, the shared schema (`shared/src/control.ts`);
+  a failure is dropped with one `warn` naming its type and the socket stays open.
+- **Pairing** (`control/pairing.ts`, in memory, dies with the process). Switching on issues a
+  six-character code from a 31-character alphabet (no `0 O 1 I L`), carried in the QR URL's
+  fragment so it never reaches a request line. A device's first message is `hello` with the code
+  (a request, shown with a hint like "Safari on iPhone" and a sequence label) or a session key (a
+  reconnect). The panel or any approved controller accepts or rejects; a request expires after
+  60 s. Accepting gives a 128-bit key bound to the device's source IP. Limits: 8 approved, 4
+  pending; five wrong codes from one IP within 60 s refuse it for 60 s. New code, Disconnect,
+  switching off or a restart end pairings; a key from another IP ends that approval.
+- **Message flow** (`control/hub.ts`). An approved device's controls (`pick`, `dials`, `colour`,
+  `resetColour`, `camera`, `refresh`, each with a `seq`) go to the target screen as
+  `control { deviceId }`; the last screen page to connect is the target and an older one gets
+  `superseded`. The screen page queues them and applies them at the start of the next frame, in
+  the frame feed's `beforeFrame`, registered before the engine's own frame callback
+  (`web/src/control/apply.ts`, `web/src/frame-feed.ts`): dials straight to the engine, colours to
+  the live palette (`profiles/active.ts`: the same effect list, so no new program; never saved;
+  any pick restores the stored palette), cameras through the capture session (the latest request
+  wins), picks through the panel's own pick. Each frame then sends one `applied` batch and at most
+  one `state` (`web/src/control/screen-link.ts`); the server keeps the last state, hands it first
+  to a device that (re)connects, and relays `applied { seq }` to its own device, which times the
+  round trip. A device the screen has not seen, and Refresh, list the profiles (B-02's
+  user-action rule); nothing polls.
+- **Controller** (`web/src/control/`). `device-link.ts` holds the link: "Waiting for approval",
+  locked until the first state, "Reconnecting…" at 0.5 s doubling to 5 s and at once on `online`
+  or the page becoming visible, nothing queued while down, "Pairing ended — scan the code again"
+  when the server refuses the key. `Controller.tsx` has DJ mode (tiles, wide sliders, the Primary
+  colour) and VJ mode (every swatch, the status strip with the round trip, pending requests
+  inline); `Wheel.tsx` is the hand-drawn colour wheel, sending at most one change per frame and
+  the last position on release.
+- **The test seam.** `boot(config, { controlAddresses })` takes the address list; absent, it is
+  the machine's private addresses. Every integration and browser check passes `127.0.0.1`, so the
+  gate never binds a LAN address; the browser checks boot their own server in the test process
+  (`tests/browser/control-server.ts`) and can restart it on the same ports. Real addresses and
+  Wi-Fi latency are the owner's checks ([runbook](../runbooks/README.md)).
+
 ## Latency and render scale
 
 - **The in-app number** (B-01 SD15). The worklet posts each window's end in context seconds.
@@ -202,6 +281,11 @@ sends `index.html`; every other unknown path stays 404.
   transaction. `DATA_DIR/assets/` exists and is empty: no effect uses an asset.
 - **Browser storage.** `djv.sources` (device ids) and `djv.profile` (the picked profile's id, a
   plain string; removing it selects the built-in). No profile data is stored in the browser.
+  External control: `djv.controlAddress` on the screen machine (the address for the QR code);
+  `djv.controlKey` (the session key) and `djv.controlMode` (`dj` or `vj`) on a controller's LAN
+  origin.
+- **Profile definition.** `definition` may carry `primary` (B-04 SD10), written only when set;
+  rows and version-1 files without it stay valid and `formatVersion` stays 1.
 - **Migrations.** Files `server/migrations/NNNN_<slug>.sql`, applied in name order by
   `server/src/migrate.ts`, each in its own transaction together with its `schema_migrations`
   row. The runner takes `BEGIN IMMEDIATE` on every run, so a file locked by another process
@@ -216,9 +300,11 @@ sends `index.html`; every other unknown path stays 404.
 ## Configuration
 
 `server/src/config.ts` is the one module that reads the environment. `loadConfig(env)` is a pure
-zod parse of four variables, all required, no defaults in code: `APP_ENV` (`development`,
-`test`, `production`), `LOG_LEVEL` (`debug`, `info`, `warn`, `error`), `PORT` (1 to 65535) and
-`DATA_DIR` (a non-empty path). `loadConfigFromProcess()` is the single `process.env` reader.
+zod parse of five variables, all required, no defaults in code: `APP_ENV` (`development`,
+`test`, `production`), `LOG_LEVEL` (`debug`, `info`, `warn`, `error`), `PORT` (1 to 65535),
+`CONTROL_PORT` (1 to 65535 and different from `PORT`, checked only when both parse; the External
+control listener's port, nothing listens on it until switched on) and `DATA_DIR` (a non-empty
+path). `loadConfigFromProcess()` is the single `process.env` reader.
 `.env.example` is the contract; `scripts/setup.sh` copies it to `.env.local`.
 
 The run scripts start `node --env-file-if-exists=.env.local` from the repository root, so a
@@ -230,20 +316,27 @@ is reported the same way. `scripts/dev.ts` learns `PORT` for the Vite proxy by i
 
 ## Cross-cutting
 
-- **Auth.** None (SDR question 3). The server binds `127.0.0.1` only, so no other device can
-  reach it, `/api/profiles` included (`server/test/boot.int.test.ts`).
+- **Auth.** None (SDR question 3). The main listener binds `127.0.0.1` only, so no other device
+  can reach it, `/api/profiles` included (`server/test/boot.int.test.ts`). The External control
+  listener is the only door to the LAN: open only while switched on, it serves no API, and a
+  device needs the code and an approval (External control, above).
 - **Writes** (B-02 SD18). No response carries a CORS header. A `POST` or `PUT` without
   `Content-Type: application/json` is 415, answered before the body is read, and `text/plain` is
   not a parser, so a page on another origin cannot write with a simple request. The body limit
   is 64 KB, 1 MB for an import (413). `server/src/app.ts` sets all three.
-- **Requests a running set makes.** `GET /`, `/assets/*`, `/api/health`, and `/api/profiles` and
-  `/api/profiles/:id` only on a user action (Start, opening the panel, picking a profile); no
-  media endpoint exists (`docs/invariants.md`, `tests/browser/live.spec.ts`).
+- **Requests a running set makes.** `GET /`, `/assets/*`, `/api/health`, the screen socket
+  (`/api/control/screen`, one WebSocket from load), and `/api/profiles` and `/api/profiles/:id`
+  only on a user action in the panel or on a paired controller (Start, opening the panel,
+  picking a profile, a controller connecting or pressing Refresh); no media endpoint exists
+  (`docs/invariants.md`, `tests/browser/live.spec.ts`).
 - **Logging.** pino JSON lines on stdout at `LOG_LEVEL`. Fastify's request id (`reqId`) is on
   every line that belongs to a request. The environment and the config object are never
   logged whole. The server logs profile create, update, delete and import at `info` with the id
-  and revision, never the definition. The browser logs capture state changes and profile
-  switches at info level, without device labels or media data.
+  and revision, never the definition. External control logs on and off (addresses, port), a new
+  code (never the code), screens connecting and superseded, and each device step by its sequence
+  label ("Device 3"); control messages at `debug`, type only. Never a code, a session key, a
+  User-Agent, a device hint, a camera label or a colour. The browser logs capture state changes
+  and profile switches at info level, without device labels or media data.
 - **Errors.** Every boot failure goes through `fatal` in `server/src/log.ts`: one `fatal` line,
   exit 1, nothing listening. In the browser, a failed or invalid health answer reads
   `server: unreachable` and never stops the engine; no WebGL2 context shows one line of text

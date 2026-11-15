@@ -29,6 +29,34 @@ pnpm dev                  # hot reload on http://localhost:5173, /api proxied to
 The output screen is `/`; the profile builder is `/builder` (also linked from the screen's
 settings panel, key `s`).
 
+`.env.local` needs five variables: `APP_ENV`, `LOG_LEVEL`, `PORT`, `CONTROL_PORT` and `DATA_DIR`
+(see `.env.example`). A `.env.local` made before External control lacks `CONTROL_PORT`; add
+`CONTROL_PORT=8001` (any free port other than `PORT`), or the server refuses to boot and says
+which variable is missing.
+
+## Pair a phone (External control)
+
+A phone, tablet or laptop on the same network can control the set: switch profiles, move the two
+dials, change colours live and switch the camera. Nothing is reachable from the network until you
+switch it on, and nothing survives a restart.
+
+1. `pnpm start`, open `http://127.0.0.1:8000/` on the screen machine, press **Start**.
+2. Press `s` for the panel. Under **External control**, switch it on. The panel shows the
+   address, a QR code, the URL and a six-character code. (`pnpm dev` has no controller page; use
+   `pnpm start`.)
+3. Scan the QR code with the phone, or open the URL and type the code. The phone shows "Waiting
+   for approval".
+4. Press **Accept** in the panel (or on an already paired controller). The phone gets the
+   controls.
+5. On the phone, pick **DJ** (large tiles, one Primary colour) or **VJ** (every colour, the
+   status strip and the round-trip time).
+
+The phone reconnects by itself after a Wi-Fi drop or a locked screen. **New code** disconnects
+every device; **Disconnect** removes one; switching off, or restarting the server, ends every
+pairing ("Pairing ended — scan the code again"). The first time you switch on, Windows asks
+whether Node.js may use the network: allow it on private networks, or no device can reach it
+(see [docs/runbooks/README.md](docs/runbooks/README.md)).
+
 ## How work is done here
 
 Every change goes through the loop in [docs/way-of-working.md](docs/way-of-working.md) §4.2,

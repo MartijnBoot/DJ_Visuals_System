@@ -40,8 +40,9 @@ export interface ProfileStore {
 
 const COLUMNS = "id, name, revision, definition, created_at, updated_at";
 
-const definitionOf = ({ palette, dials, effects }: Profile) =>
-  JSON.stringify({ palette, dials, effects });
+/** `primary` only when set, so a row without it stays what B-02 wrote (B-04 AC39). */
+const definitionOf = ({ palette, dials, effects, primary }: Profile) =>
+  JSON.stringify({ palette, dials, effects, ...(primary === undefined ? {} : { primary }) });
 
 export function createProfileStore(
   db: Db,

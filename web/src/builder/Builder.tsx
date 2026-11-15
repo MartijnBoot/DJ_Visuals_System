@@ -20,11 +20,12 @@ const byName = (a: StoredProfile, b: StoredProfile) =>
   a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
 
 /** The profile's own fields, as the API takes them. */
-const definitionOf = ({ name, palette, dials, effects }: StoredProfile): Profile => ({
+const definitionOf = ({ name, palette, dials, effects, primary }: StoredProfile): Profile => ({
   name,
   palette,
   dials,
   effects,
+  ...(primary === undefined ? {} : { primary }),
 });
 
 const describe = describeFailure;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  derivePrimary,
   EFFECT_TYPES,
   FORMAT_VERSION,
   LIMITS,
@@ -249,5 +250,67 @@ describe("the API shapes", () => {
         { path: "profiles.3.name", message: expect.any(String) },
       ]);
     }
+  });
+});
+
+describe("the primary colour (B-04 AC37, AC38, AC39, SD10)", () => {
+  it("accepts a profile with primary inside its palette and one without", () => {
+    expect(profileSchema.parse({ ...builtInShaped, primary: 0 })).toEqual({
+      ...builtInShaped,
+      primary: 0,
+    });
+    expect(profileSchema.parse({ ...builtInShaped, primary: 1 }).primary).toBe(1);
+    expect(profileSchema.parse(builtInShaped)).not.toHaveProperty("primary");
+  });
+
+  it("rejects primary outside the palette, negative or fractional, naming the field", () => {
+    expect(failingPaths({ ...builtInShaped, primary: 2 })).toEqual(["primary"]);
+    expect(failingPaths({ ...builtInShaped, primary: -1 })).toEqual(["primary"]);
+    expect(failingPaths({ ...builtInShaped, primary: 0.5 })).toEqual(["primary"]);
+    const result = profileSchema.safeParse({ ...builtInShaped, primary: 5 });
+    if (!result.success) expect(issuesFrom(result.error)[0]?.message).toMatch(/primary slot 5/);
+  });
+
+  it("applies the rule to the stored and update shapes too", () => {
+    const stored = {
+      ...builtInShaped,
+      primary: 3,
+      id: "abc",
+      revision: 1,
+      createdAt: "2026-11-12T10:00:00.000Z",
+      updatedAt: "2026-11-12T10:00:00.000Z",
+    };
+    expect(storedProfileSchema.safeParse(stored).success).toBe(false);
+    expect(
+      updateProfileSchema.safeParse({ ...builtInShaped, primary: 1, revision: 2 }).success,
+    ).toBe(true);
+  });
+
+  it("derives the stored primary when set", () => {
+    expect(derivePrimary({ ...builtInShaped, primary: 0 })).toBe(0);
+  });
+
+  it("derives the first effect's colour slot in stack order when absent", () => {
+    const palette = ["#000000", "#111111", "#222222"];
+    const effects: Profile["effects"] = [
+      { type: "zoom", amount: 0 },
+      { type: "grain", amount: 0, colourSlot: 2 },
+      { type: "flash", amount: 0, colourSlot: 1 },
+    ];
+    const profile: Profile = { ...builtInShaped, palette, effects };
+    expect(derivePrimary(profile)).toBe(2);
+  });
+
+  it("derives 0 when no effect has a colour slot, and 1 for the built-in", () => {
+    expect(derivePrimary({ ...builtInShaped, effects: [{ type: "zoom", amount: 0 }] })).toBe(0);
+    expect(derivePrimary({ ...builtInShaped, effects: [] })).toBe(0);
+    expect(derivePrimary(builtInShaped)).toBe(1);
+  });
+
+  it("carries primary through the file when set, and omits the key when absent", () => {
+    const file = toProfileFile([{ ...builtInShaped, primary: 0 }, builtInShaped]);
+    expect(file.profiles[0]).toEqual({ ...builtInShaped, primary: 0 });
+    expect(file.profiles[1]).not.toHaveProperty("primary");
+    expect(profileFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
   });
 });

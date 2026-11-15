@@ -75,6 +75,8 @@ export async function runUnderLoad({
       APP_ENV: "test",
       LOG_LEVEL: "warn",
       PORT: String(port),
+      // Never bound: nothing listens on it until External control is switched on (B-04 AC1).
+      CONTROL_PORT: String(port + 2),
       DATA_DIR: join(dir, "data"),
     });
     server = await boot(config, {

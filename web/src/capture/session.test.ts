@@ -461,3 +461,40 @@ describe("the session type", () => {
     expect(typeof session.read).toBe("function");
   });
 });
+
+describe("camera requests while one is opening (B-04 AC25, PD7)", () => {
+  it("ends on the latest of two quick requests", async () => {
+    const r = rig();
+    await r.session.start({});
+    const first = r.session.setCamera("cam-2");
+    const second = r.session.setCamera("cam-1");
+    await Promise.all([first, second]);
+    expect(r.session.state().cameraId).toBe("cam-1");
+    expect(r.live("video").map((t) => t.deviceId)).toEqual(["cam-1"]);
+  });
+
+  it("keeps at most one queued: a third request replaces the second", async () => {
+    const r = rig();
+    r.present.video.push("cam-3");
+    await r.session.start({});
+    const calls = r.getUserMedia.mock.calls.length;
+    const requests = [
+      r.session.setCamera("cam-2"),
+      r.session.setCamera("cam-3"),
+      r.session.setCamera("cam-1"),
+    ];
+    await Promise.all(requests);
+    expect(r.session.state().cameraId).toBe("cam-1");
+    // The one in flight, then only the latest: cam-3 was never asked for.
+    const asked = r.getUserMedia.mock.calls
+      .slice(calls)
+      .map(([c]) => ((c.video as MediaTrackConstraints).deviceId as { exact: string }).exact);
+    expect(asked).toEqual(["cam-2", "cam-1"]);
+  });
+
+  it("is still a no-op before Start", async () => {
+    const r = rig();
+    await r.session.setCamera("cam-2");
+    expect(r.getUserMedia).not.toHaveBeenCalled();
+  });
+});

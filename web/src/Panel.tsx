@@ -2,15 +2,18 @@
 // two device pickers, the profile picker with its reason line and a link to the builder, the
 // two dials, the quality cap, the feature meters, the source states and one reason line. It is
 // scaffolding over the canvas that B-04's control surface replaces. Keyboard-operable: native
-// controls in tab order, each labelled.
+// controls in tab order, each labelled. B-04 (SD24): an External control section at the end; the
+// panel scrolls when it is taller than the window, never sideways (T18, D-05).
 import type { AudioFeatures } from "@djv/audio";
 import type { Dials, RenderScale } from "@djv/engine";
 import { useEffect, useState } from "react";
 import type { DeviceOption } from "./capture/devices.ts";
 import type { AudioChoice } from "./capture/remembered.ts";
 import type { SessionState } from "./capture/session.ts";
+import { ExternalControl } from "./control/ExternalControl.tsx";
+import type { PanelAction, ScreenLinkView } from "./control/screen-link.ts";
 import type { ActiveState } from "./profiles/active.ts";
-import { Row, SourcePickers } from "./SourcePickers.tsx";
+import { FIT, Row, SourcePickers } from "./SourcePickers.tsx";
 
 const METERS = ["level", "low", "mid", "high", "beat"] as const;
 
@@ -32,6 +35,8 @@ export interface PanelProps {
   read(now: number): AudioFeatures;
   profiles: ActiveState;
   onProfile(id: string): void;
+  control: ScreenLinkView;
+  onControl(action: PanelAction): void;
 }
 
 export function Panel(props: PanelProps) {
@@ -56,8 +61,15 @@ export function Panel(props: PanelProps) {
         position: "fixed",
         top: 8,
         right: 8,
-        width: 340,
+        // 400 px, never wider than the window; the one column may shrink below its content so
+        // nothing in it scrolls the panel sideways (B-04 T18, D-05).
+        width: 400,
+        maxWidth: "calc(100vw - 16px)",
+        maxHeight: "calc(100vh - 16px)",
+        overflowY: "auto",
+        boxSizing: "border-box",
         display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr)",
         gap: 6,
         padding: "8px 10px",
         font: "12px/1.4 monospace",
@@ -87,6 +99,7 @@ export function Panel(props: PanelProps) {
             id={id}
             data-testid="profile-picker"
             disabled={!props.profiles.loaded}
+            style={FIT}
             value={props.profiles.selectedId}
             onChange={(e) => props.onProfile(e.target.value)}
           >
@@ -123,6 +136,7 @@ export function Panel(props: PanelProps) {
           <select
             id={id}
             data-testid="quality-cap"
+            style={FIT}
             value={String(props.cap)}
             onChange={(e) => props.onCap(Number(e.target.value) as RenderScale)}
           >
@@ -150,6 +164,7 @@ export function Panel(props: PanelProps) {
       <div data-testid="panel-camera-state">camera: {capture.camera}</div>
       <div data-testid="panel-audio-state">audio: {capture.audio}</div>
       {capture.reason && <div data-testid="panel-reason">{capture.reason}</div>}
+      <ExternalControl view={props.control} onAction={props.onControl} />
     </section>
   );
 }

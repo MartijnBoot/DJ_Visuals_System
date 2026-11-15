@@ -1,7 +1,7 @@
 // T11 (B-02 spec AC3, AC8, SD11, SD12): the editor's reducer, validation and dirty check, pure.
 import { EFFECT_TYPES, profileSchema, type Profile } from "@djv/shared";
 import { describe, expect, it } from "vitest";
-import { availableTypes, isDirty, reduce, validate, type Action } from "./editor.ts";
+import { availableTypes, isDirty, primaryUnused, reduce, validate, type Action } from "./editor.ts";
 
 const base: Profile = {
   name: "Warm",
@@ -223,5 +223,64 @@ describe("revert and save (T12, AC5, SD10)", () => {
   it("is clean once the saved profile is what the server returned", () => {
     const edited = run(base, { type: "name", name: "Saved" });
     expect(isDirty(edited, { ...edited })).toBe(false);
+  });
+});
+
+describe("the primary colour (B-04 SD10, AC40, AC41)", () => {
+  const marked = (primary: number): Profile => ({ ...base, primary });
+
+  it("primarySet marks a slot inside the palette and ignores one outside", () => {
+    expect(run(base, { type: "primarySet", index: 1 }).primary).toBe(1);
+    expect(run(base, { type: "primarySet", index: 3 })).toBe(base);
+    expect(run(base, { type: "primarySet", index: -1 })).toBe(base);
+    expect(run(base, { type: "primarySet", index: 0.5 })).toBe(base);
+  });
+
+  it("removing a slot before the mark keeps the mark on its colour", () => {
+    const after = run(marked(2), { type: "paletteRemove", index: 0 });
+    expect(after.primary).toBe(1);
+    expect(after.palette[after.primary!]).toBe("#ffffff");
+  });
+
+  it("removing a slot after the mark leaves it where it is", () => {
+    const four = { ...marked(1), palette: [...base.palette, "#00ff00"] };
+    expect(run(four, { type: "paletteRemove", index: 3 }).primary).toBe(1);
+  });
+
+  it("removing the marked slot moves the mark to slot 0", () => {
+    expect(run(marked(1), { type: "paletteRemove", index: 1 }).primary).toBe(0);
+  });
+
+  it("a palette without a mark stays without one when a slot is removed", () => {
+    expect(run(base, { type: "paletteRemove", index: 0 })).not.toHaveProperty("primary");
+  });
+
+  it("a preset too short for the mark moves it to slot 0, so the draft stays valid", () => {
+    const after = run(marked(2), { type: "paletteReplace", palette: ["#111111", "#222222"] });
+    expect(after.primary).toBe(0);
+    expect(validate(after)).toEqual([]);
+    expect(
+      run(marked(1), { type: "paletteReplace", palette: ["#111111", "#222222"] }).primary,
+    ).toBe(1);
+  });
+
+  it("is dirty after primarySet, and revert clears it", () => {
+    const edited = run(base, { type: "primarySet", index: 0 });
+    expect(isDirty(edited, base)).toBe(true);
+    const reverted = reduce(edited, { type: "reset", profile: base });
+    expect(reverted).not.toHaveProperty("primary");
+    expect(isDirty(reverted, base)).toBe(false);
+    expect(isDirty(marked(2), marked(2))).toBe(false);
+    expect(reduce(base, { type: "reset", profile: marked(2) }).primary).toBe(2);
+  });
+
+  it("says when the primary colour is used by no effect and there is no palette map", () => {
+    // base: flash uses slot 2; derived primary 2 is used.
+    expect(primaryUnused(base)).toBe(false);
+    expect(primaryUnused(marked(1))).toBe(true);
+    const mapped: Profile = { ...marked(1), effects: [{ type: "paletteMap", amount: 1 }] };
+    expect(primaryUnused(mapped)).toBe(false);
+    const none: Profile = { ...base, effects: [] }; // derived 0, nothing uses it
+    expect(primaryUnused(none)).toBe(true);
   });
 });

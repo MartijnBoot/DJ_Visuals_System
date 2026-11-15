@@ -58,6 +58,8 @@ export interface Profile {
   dials: Dials;
   /** Draw order: the first is applied to the picture first (SD12). */
   effects: Effect[];
+  /** The primary colour's palette slot (B-04 SD10). The engine never reads it. */
+  primary?: number;
 }
 
 export interface EffectInfo {

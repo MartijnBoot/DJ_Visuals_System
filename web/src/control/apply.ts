@@ -1,0 +1,82 @@
+// Applying External control's controls (B-04 spec SD5, SD17, SD23, AC19 to AC21, AC24 to AC26;
+// plan PD5): a received control is queued, never applied on receipt, and the queue is drained at
+// the start of the next frame (`startFrameFeed`'s `beforeFrame`), before the engine draws, so the
+// engine uses it in the first frame that starts after the page received it. Dials go to the
+// engine directly, not through a React state update whose timing is not the frame's. Every
+// applied control is acknowledged in that frame's one `applied` batch; a pick when it settles,
+// i.e. at the swap, in the batch of the frame after.
+import type { AppliedEntry, Control } from "@djv/shared";
+import type { Dials } from "@djv/engine";
+
+export interface ApplierDeps {
+  /** The dials the engine holds now. */
+  dials(): Dials;
+  /** The engine's dials now, and the panel's display. */
+  setDials(dials: Dials): void;
+  setColour(slot: number, value: string): void;
+  resetColour(slot: number): void;
+  setCamera(deviceId: string): void;
+  /** The panel picker's pick: prepared, hard cut, starting dials, remembered (AC18). */
+  pick(id: string): Promise<void>;
+  /** Lists the profiles again (SD22). */
+  refresh(): void;
+  /** Start has happened: before it no camera is open, so a camera control is a no-op (SD23). */
+  started(): boolean;
+}
+
+export interface Applier {
+  receive(deviceId: string, control: Control): void;
+  /** Applies everything received; returns this frame's acknowledgements. */
+  drain(): AppliedEntry[];
+}
+
+export function createApplier(deps: ApplierDeps): Applier {
+  let queue: { deviceId: string; control: Control }[] = [];
+  let settled: AppliedEntry[] = [];
+
+  const apply = (deviceId: string, control: Control, acks: AppliedEntry[]) => {
+    const ack = { deviceId, seq: control.seq };
+    switch (control.type) {
+      case "dials": {
+        const current = deps.dials();
+        deps.setDials({
+          recognisability: control.recognisability ?? current.recognisability,
+          reactivity: control.reactivity ?? current.reactivity,
+        });
+        break;
+      }
+      case "colour":
+        deps.setColour(control.slot, control.value);
+        break;
+      case "resetColour":
+        deps.resetColour(control.slot);
+        break;
+      case "camera":
+        if (deps.started()) deps.setCamera(control.deviceId);
+        break;
+      case "refresh":
+        deps.refresh();
+        break;
+      case "pick": {
+        const settle = () => void settled.push(ack);
+        deps.pick(control.id).then(settle, settle);
+        return; // acknowledged at the swap
+      }
+    }
+    acks.push(ack);
+  };
+
+  return {
+    receive(deviceId, control) {
+      queue.push({ deviceId, control });
+    },
+    drain() {
+      const acks = settled;
+      settled = [];
+      const due = queue;
+      queue = [];
+      for (const { deviceId, control } of due) apply(deviceId, control, acks);
+      return acks;
+    },
+  };
+}

@@ -83,7 +83,10 @@ export function createSession(deps: SessionDeps): Session {
   const status: Record<Kind, SourceState> = { camera: "idle", audio: "idle" };
   const reasons: Partial<Record<Kind, string>> = {};
   const held: Partial<Record<Kind, Held>> = {};
-  const busy: Record<Kind, boolean> = { camera: false, audio: false };
+  /** The request in flight per kind, if any: one at a time. */
+  const running: Record<Kind, Promise<void> | null> = { camera: null, audio: null };
+  /** The camera asked for while one was opening; the latest wins (B-04 PD7). */
+  let latestCamera: string | null = null;
   const listeners = new Set<(s: SessionState) => void>();
   let started = false;
   let stopped = false;
@@ -278,15 +281,18 @@ export function createSession(deps: SessionDeps): Session {
     setStatus("audio", "ok");
   };
 
-  /** One request per kind at a time. */
-  const attempt = async (kind: Kind, open: () => Promise<void>) => {
-    if (busy[kind] || stopped) return;
-    busy[kind] = true;
-    try {
-      await open();
-    } finally {
-      busy[kind] = false;
-    }
+  /** One request per kind at a time: a second while one runs is dropped. */
+  const attempt = (kind: Kind, open: () => Promise<void>): Promise<void> => {
+    if (running[kind] || stopped) return Promise.resolve();
+    const run = (async () => {
+      try {
+        await open();
+      } finally {
+        running[kind] = null;
+      }
+    })();
+    running[kind] = run;
+    return run;
   };
 
   const needs = (kind: Kind) => status[kind] === "lost" || status[kind] === "none";
@@ -358,8 +364,15 @@ export function createSession(deps: SessionDeps): Session {
       if (context.state === "suspended") onContextState();
     },
     // Before Start the pickers are disabled (PD12), so a choice only ever switches a running source.
+    // A request made while one is opening waits for it; only the latest of those then runs
+    // (B-04 PD7), so the last tap from any surface is the camera that ends up on screen.
     async setCamera(deviceId) {
-      if (started) await attempt("camera", () => openCamera(deviceId));
+      if (!started) return;
+      latestCamera = deviceId;
+      while (running.camera) await running.camera.catch(() => {});
+      if (latestCamera !== deviceId) return; // a later request took over
+      latestCamera = null;
+      await attempt("camera", () => openCamera(deviceId));
     },
     async setAudio(choice) {
       if (started) await attempt("audio", () => openAudio(choice));
