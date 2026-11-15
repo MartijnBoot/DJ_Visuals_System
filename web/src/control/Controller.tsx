@@ -4,7 +4,7 @@
 // asks for a camera or microphone. Every control is disabled while the link is locked (SD12),
 // and the page shows the screen's state, never its own guess (SD5).
 import type { ScreenState } from "@djv/shared";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
 import { VjPanel } from "./VjPanel.tsx";
 import { Wheel } from "./Wheel.tsx";
@@ -48,18 +48,36 @@ export function Controller() {
   const [approvalsOpen, setApprovalsOpen] = useState(false);
   /** The palette slot the wheel is open on, or null. */
   const [wheel, setWheel] = useState<number | null>(null);
-  // A dial's own value while it is being moved, so the thumb follows the finger; the screen's
-  // value otherwise (SD5).
+  // A dial's own value only while a pointer holds it, so the thumb follows the finger; the
+  // screen's value otherwise (SD5): after a key, a release, a cancelled touch, a blur, a lock.
   const [moving, setMoving] = useState<Partial<Record<DialName, number>>>({});
+  const held = useRef<Partial<Record<DialName, boolean>>>({});
   const view = useSyncExternalStore(
     (fn) => link.subscribe(fn),
     () => link.view(),
   );
+  const roundTrip = useCallback(() => link.roundTrip(), [link]);
 
   useEffect(() => {
     link.start();
     return () => link.stop();
   }, [link]);
+
+  const letGo = (dial: DialName) => {
+    held.current[dial] = false;
+    setMoving((m) => ({ ...m, [dial]: undefined }));
+  };
+  const hold = (dial: DialName) => {
+    held.current[dial] = true;
+    // On the window: a release outside the slider, or on a disabled one, still lets go.
+    const up = () => {
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      letGo(dial);
+    };
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
 
   const choose = (next: Mode) => {
     setMode(next);
@@ -68,6 +86,12 @@ export function Controller() {
 
   const state: ScreenState | null = view.state;
   const locked = view.locked;
+
+  useEffect(() => {
+    if (!locked) return;
+    held.current = {};
+    setMoving({});
+  }, [locked]);
   const asking = !locked
     ? false
     : [
@@ -215,13 +239,13 @@ export function Controller() {
                     disabled={locked}
                     value={moving[dial] ?? state.dials[dial]}
                     style={styles.slider}
+                    onPointerDown={() => hold(dial)}
                     onChange={(e) => {
                       const value = Number(e.target.value);
-                      setMoving((m) => ({ ...m, [dial]: value }));
+                      if (held.current[dial]) setMoving((m) => ({ ...m, [dial]: value }));
                       link.send({ type: "dials", [dial]: value });
                     }}
-                    onPointerUp={() => setMoving((m) => ({ ...m, [dial]: undefined }))}
-                    onBlur={() => setMoving((m) => ({ ...m, [dial]: undefined }))}
+                    onBlur={() => letGo(dial)}
                   />
                 </label>
               ))}
@@ -257,7 +281,7 @@ export function Controller() {
                 linkText={view.text}
                 locked={locked}
                 pending={view.pending}
-                roundTrip={() => link.roundTrip()}
+                roundTrip={roundTrip}
                 onSwatch={setWheel}
                 onAccept={(deviceId) => link.send({ type: "accept", deviceId })}
                 onReject={(deviceId) => link.send({ type: "reject", deviceId })}

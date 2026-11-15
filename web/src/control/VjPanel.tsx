@@ -22,12 +22,14 @@ export interface VjPanelProps {
 const ms = (n: number) => `${Math.round(n)} ms`;
 
 export function VjPanel(props: VjPanelProps) {
-  const { state } = props;
-  const [trip, setTrip] = useState(props.roundTrip);
+  const { state, roundTrip } = props;
+  const [trip, setTrip] = useState(roundTrip);
+  // Keyed on `roundTrip` alone: every state re-renders this, and restarting the interval on each
+  // would freeze the readout while states arrive faster than it refreshes.
   useEffect(() => {
-    const id = setInterval(() => setTrip(props.roundTrip()), 500);
+    const id = setInterval(() => setTrip(roundTrip()), 500);
     return () => clearInterval(id);
-  }, [props]);
+  }, [roundTrip]);
 
   return (
     <>

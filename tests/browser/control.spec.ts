@@ -106,6 +106,39 @@ test("a slider moves the screen's dial and the panel's slider (AC19)", async ({
   await expect(phone.getByTestId("dial-recognisability")).toHaveValue("0.2");
 });
 
+test("a dial shows the screen's value whenever no finger holds it: after a fill, a key, a cancelled touch (SD5, AC25)", async ({
+  page,
+  browser,
+}) => {
+  const phone = await paired(page, browser);
+  const dial = phone.getByTestId("dial-recognisability");
+  const panel = page.getByTestId("slider-recognisability");
+
+  // Set without a pointer, and still focused: the panel's later move shows.
+  await dial.fill("0.9");
+  await expect(panel).toHaveValue("0.9");
+  await panel.fill("0.2");
+  await expect(dial).toHaveValue("0.2");
+
+  // A key, still focused.
+  await dial.press("ArrowRight");
+  await expect(panel).toHaveValue("0.21");
+  await panel.fill("0.6");
+  await expect(dial).toHaveValue("0.6");
+
+  // A drag the browser cancels (a touch that became a scroll), the pointer not yet up.
+  const box = (await dial.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await phone.mouse.move(box.x + box.width * 0.5, y);
+  await phone.mouse.down();
+  await phone.mouse.move(box.x + box.width * 0.9, y, { steps: 4 });
+  await expect(panel).not.toHaveValue("0.6");
+  await dial.dispatchEvent("pointercancel");
+  await panel.fill("0.3");
+  await expect(dial).toHaveValue("0.3");
+  await phone.mouse.up();
+});
+
 test("camera tiles are disabled before Start, then switch the screen's camera (AC24, SD23)", async ({
   page,
   browser,
