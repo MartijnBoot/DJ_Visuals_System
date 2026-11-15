@@ -39,6 +39,11 @@ export interface ScaleController {
   scale(): RenderScale;
   /** The refresh period in ms; 0 until the first `ESTIMATE_FRAMES` frames are in. */
   budgetMs(): number;
+  /**
+   * How long, at `timestamp`, the one-second mean has been above budget at the lowest step: the
+   * GPU cannot keep up even at 50% (B-03 SD8). 0 above the lowest step or within budget.
+   */
+  starvedFor(timestamp: number): number;
 }
 
 export function createScaleController(frameStats: FrameStatsRecorder): ScaleController {
@@ -114,6 +119,10 @@ export function createScaleController(frameStats: FrameStatsRecorder): ScaleCont
     },
     budgetMs() {
       return budget;
+    },
+    starvedFor(timestamp) {
+      if (index < SCALES.length - 1 || aboveSince === null) return 0;
+      return Math.max(0, timestamp - aboveSince);
     },
   };
 }

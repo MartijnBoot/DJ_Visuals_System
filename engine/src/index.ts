@@ -69,10 +69,29 @@ export interface Engine {
    * apply on the next frame and this resolves at once. Another list: its program is linked
    * while the old profile keeps drawing, and this resolves at the frame that swaps it in. It
    * rejects when the program does not link (the old profile keeps drawing) or when a later
-   * call supersedes it.
+   * call supersedes it. While the guard has bypassed this profile's custom effects, a call with
+   * the same program key keeps the bypass; `retry` (a pick) or another key ends it (B-03 PD8).
    */
-  setProfile(profile: Profile): Promise<void>;
+  setProfile(profile: Profile, options?: SetProfileOptions): Promise<void>;
+  /** Called when the guard bypasses custom effects (B-03 SD8, PD8); returns an unsubscribe. */
+  onGuard(listener: (event: GuardEvent) => void): () => void;
 }
+
+export interface SetProfileOptions {
+  /** A pick: run custom effects the guard bypassed again (B-03 PD8). */
+  retry?: boolean;
+}
+
+/** What the runtime guard did (B-03 SD8, PD8). */
+export interface GuardEvent {
+  /** `slow`: too heavy for this GPU even at 50%; `contextLost`: the WebGL context came back. */
+  kind: "slow" | "contextLost";
+  /** Whether the profile now draws without its custom effects. */
+  customBypassed: boolean;
+}
+
+/** How long the GPU may stay above budget at 50% before custom effects go off (SD8). */
+export const GUARD_AFTER_MS = 3000;
 
 /** Thrown by `createEngine` when the canvas gives no WebGL2 context. */
 export class WebGL2UnavailableError extends Error {
@@ -286,6 +305,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     pending = null;
     remember(entry);
     active = { profile: next.profile, linked: entry };
+    customSince = null; // a new custom program gets its own 3 s before the guard looks
     swapped = true;
     next.resolve();
   };
@@ -369,6 +389,37 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     }
     frames.record(timestamp);
     scaler.record(timestamp);
+    guardSlow(timestamp);
+  };
+
+  /** The program key whose custom effects the guard turned off, until a retry or another key. */
+  let bypassed: string | null = null;
+  /** When the custom program in use started drawing; null while no custom code runs. */
+  let customSince: number | null = null;
+  const guardListeners = new Set<(event: GuardEvent) => void>();
+  const emitGuard = (event: GuardEvent) => guardListeners.forEach((listener) => listener(event));
+  const withoutCustom = (profile: Profile): Profile => ({
+    ...profile,
+    effects: profile.effects.filter((e) => e.type !== "custom"),
+  });
+
+  /**
+   * SD8: custom code that keeps the GPU above budget at 50% for 3 s, after running for 3 s, is
+   * turned off; built-ins and the camera keep drawing. Never while a switch is pending, so a
+   * guard cannot cancel a pick.
+   */
+  const guardSlow = (timestamp: number) => {
+    if (!active.linked.custom) {
+      customSince = null;
+      return;
+    }
+    customSince ??= timestamp;
+    if (bypassed !== null || pending) return;
+    if (timestamp - customSince < GUARD_AFTER_MS) return;
+    if (scaler.starvedFor(timestamp) < GUARD_AFTER_MS) return;
+    bypassed = active.linked.key;
+    switchTo(withoutCustom(active.profile)).catch(() => {});
+    emitGuard({ kind: "slow", customBypassed: true });
   };
 
   const draw = (timestamp: number, canvasWidth: number, canvasHeight: number) => {
@@ -459,6 +510,40 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     current = 1 - current;
   };
 
+  /** Switches the drawn profile (B-02 SD15, PD4); `setProfile` adds the guard's rules. */
+  const switchTo = (profile: Profile): Promise<void> => {
+    const key = keyOf(profile);
+    if (pending && pending.key === key && pending.linking) {
+      // The same list is already linking: keep the link, take the newer values.
+      const linking = pending.linking;
+      pending.linking = null;
+      supersede();
+      return new Promise((resolve, reject) => {
+        pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile) };
+      });
+    }
+    supersede();
+    if (key === active.linked.key) {
+      active = { ...active, profile };
+      return Promise.resolve();
+    }
+    // Code that did not compile is not compiled again on the next slider move (PD9).
+    const failed = hasCustom(profile) ? failureFor(key, profile) : null;
+    if (failed) return Promise.reject(failed);
+    return new Promise((resolve, reject) => {
+      let linking: Linking | null = null;
+      if (!cache.has(key)) {
+        try {
+          linking = beginProgram(gl, FULLSCREEN_VERTEX, fragmentFor(profile));
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+      }
+      pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile) };
+    });
+  };
+
   return {
     start() {
       if (handle === null) handle = requestAnimationFrame(frame);
@@ -485,37 +570,16 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     setScaleCap(cap) {
       scaler.setCap(cap);
     },
-    setProfile(profile) {
-      const key = keyOf(profile);
-      if (pending && pending.key === key && pending.linking) {
-        // The same list is already linking: keep the link, take the newer values.
-        const linking = pending.linking;
-        pending.linking = null;
-        supersede();
-        return new Promise((resolve, reject) => {
-          pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile) };
-        });
+    setProfile(profile, options = {}) {
+      if (bypassed !== null && !options.retry && keyOf(profile) === bypassed) {
+        return switchTo(withoutCustom(profile)); // a slider or a live colour keeps the bypass
       }
-      supersede();
-      if (key === active.linked.key) {
-        active = { ...active, profile };
-        return Promise.resolve();
-      }
-      // Code that did not compile is not compiled again on the next slider move (PD9).
-      const failed = hasCustom(profile) ? failureFor(key, profile) : null;
-      if (failed) return Promise.reject(failed);
-      return new Promise((resolve, reject) => {
-        let linking: Linking | null = null;
-        if (!cache.has(key)) {
-          try {
-            linking = beginProgram(gl, FULLSCREEN_VERTEX, fragmentFor(profile));
-          } catch (error) {
-            reject(error instanceof Error ? error : new Error(String(error)));
-            return;
-          }
-        }
-        pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile) };
-      });
+      bypassed = null;
+      return switchTo(profile);
+    },
+    onGuard(listener) {
+      guardListeners.add(listener);
+      return () => void guardListeners.delete(listener);
     },
   };
 }

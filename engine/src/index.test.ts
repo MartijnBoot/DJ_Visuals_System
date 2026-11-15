@@ -517,3 +517,98 @@ describe("compile errors (B-03)", () => {
     await expect(switched).rejects.not.toMatchObject({ name: "ProfileCompileError" });
   });
 });
+
+// B-03 T7 (spec AC11, SD8; plan PD8): on a GPU that cannot keep up, the custom effects go off.
+describe("the slow-GPU guard (B-03)", () => {
+  const heavy = (value = 0.5): Profile => ({
+    ...BUILT_IN_PROFILE,
+    name: "Heavy",
+    effects: [
+      { type: "zoom", amount: 0.2 },
+      {
+        type: "custom",
+        label: "Heavy",
+        amount: 1,
+        abstraction: false,
+        params: [{ name: "a", value }],
+        code: "return source(uv);",
+      },
+    ],
+  });
+  const drawsCustom = (frame: Call[]) => uniform(frame, "uCustomStrength") !== undefined;
+
+  /** 60 frames at 60 Hz (the refresh estimate), then frames 100 ms apart for `seconds`. */
+  function load(start: number, seconds: number): number {
+    let t = start;
+    for (let i = 0; i < 60; i++) frameAt((t += 1000 / 60));
+    for (let i = 0; i < seconds * 10; i++) frameAt((t += 100));
+    return t;
+  }
+
+  async function heavyOnSlowGpu() {
+    const rig = started(640, 360, { parallel: false });
+    const events: unknown[] = [];
+    rig.engine.onGuard((event) => events.push(event));
+    frameAt(0);
+    const switched = rig.engine.setProfile(heavy());
+    frameAt(10);
+    await switched;
+    return { ...rig, events };
+  }
+
+  it("goes to the profile without its custom effects 3 s after reaching 50%, once", async () => {
+    const { engine, events } = await heavyOnSlowGpu();
+    let t = load(10, 5);
+    expect(engine.stats().renderScale).toBe(0.5);
+    expect(events).toEqual([]);
+    expect(drawsCustom(frames().at(-1)!)).toBe(true);
+    for (let i = 0; i < 40; i++) frameAt((t += 100));
+    expect(events).toEqual([{ kind: "slow", customBypassed: true }]);
+    expect(drawsCustom(frames().at(-1)!)).toBe(false);
+    for (let i = 0; i < 40; i++) frameAt((t += 100));
+    expect(events).toHaveLength(1);
+  });
+
+  it("keeps the bypass for a same-key call and retries on a pick", async () => {
+    const { engine, events } = await heavyOnSlowGpu();
+    let t = load(10, 9);
+    expect(events).toHaveLength(1);
+    await engine.setProfile(heavy(0.9)); // a slider or a live colour: same program key
+    frameAt((t += 100));
+    expect(drawsCustom(frames().at(-1)!)).toBe(false);
+    const retried = engine.setProfile(heavy(), { retry: true });
+    frameAt((t += 100));
+    await retried;
+    frameAt((t += 100));
+    expect(drawsCustom(frames().at(-1)!)).toBe(true);
+    // Still too slow: it gives up again only after another 3 s of its own.
+    for (let i = 0; i < 20; i++) frameAt((t += 100));
+    expect(events).toHaveLength(1);
+    for (let i = 0; i < 20; i++) frameAt((t += 100));
+    expect(events).toHaveLength(2);
+  });
+
+  it("another program key ends the bypass", async () => {
+    const { engine } = await heavyOnSlowGpu();
+    let t = load(10, 9);
+    const edited: Profile = {
+      ...heavy(),
+      effects: [heavy().effects[1]!, heavy().effects[0]!],
+    };
+    const switched = engine.setProfile(edited);
+    frameAt((t += 100));
+    await switched;
+    frameAt(t + 100);
+    expect(drawsCustom(frames().at(-1)!)).toBe(true);
+  });
+
+  it("never fires for a built-in-only profile under the same load", () => {
+    const { engine } = started(640, 360, { parallel: false });
+    const events: unknown[] = [];
+    engine.onGuard((event) => events.push(event));
+    frameAt(0);
+    load(0, 15);
+    expect(engine.stats().renderScale).toBe(0.5);
+    expect(events).toEqual([]);
+  });
+});
