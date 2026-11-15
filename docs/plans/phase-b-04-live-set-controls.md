@@ -574,6 +574,22 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
 - **Autonomy note:** wording is the builder's; any rule that changes meaning beyond SD28's text
   is a stop.
 
+### T18 — The settings panel never scrolls sideways (D-05)
+*Added by the owner on 2026-11-15 during H3, after the audit; not audited. It goes to the B-04
+review session with the rest.*
+- **Implements:** D-05; SD24 (the panel's External control section)
+- **Expected output:** `tests/browser/control-panel.spec.ts` gains a check that, with External
+  control on, the owner's long adapter names in the address picker
+  (`vEthernet (WSL (Hyper-V firewall))`, …) and a waiting device, the panel's `scrollWidth` is
+  at most its `clientWidth` and the panel is at least 400 px wide. Red first: content 599 px in a
+  340 px panel. Then `web/src/Panel.tsx`: 400 px, at most `100vw - 16px`, one shrinkable column;
+  `web/src/SourcePickers.tsx`: `Row`'s second column shrinkable and a shared `FIT` cap on every
+  select (also the builder preview's pickers); `web/src/control/ExternalControl.tsx`: the
+  section's column shrinkable, the address select capped, device text wraps.
+- **Verification:** `pnpm test:browser tests/browser/control-panel.spec.ts`; `bash scripts/check.sh`.
+- **Depends on:** T17
+- **Autonomy note:** owner-directed outside the audit; layout only, no behaviour change.
+
 ## Task graph
 
 | Group | Tasks | Files they touch |
@@ -589,6 +605,7 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
 | 9 | T15 | `tests/browser/control-e2e.spec.ts` |
 | 10 | T16 | `tests/browser/control-e2e.spec.ts` |
 | 11 | T17 | docs, `CLAUDE.md` |
+| 12 | T18 | `web/src/{Panel,SourcePickers}.tsx`, `web/src/control/ExternalControl.tsx`, `tests/browser/control-panel.spec.ts` |
 
 No two tasks in one group write the same file. `python scripts/check_plans.py --graph <this
 file>` prints the groups the `Depends on` fields actually give; this table matches its output.
@@ -625,6 +642,8 @@ decision (Risks). Browser storage: `djv.controlAddress` (screen machine), `djv.c
 
 - **H1 — after T2, on the owner's machine:** add `CONTROL_PORT=8001` (or any free port other
   than `PORT`) to `.env.local`. `scripts/setup.sh:34` does not refresh an existing file.
+  **Done 2026-11-15:** `pnpm migrate` loaded the config (which rejects a missing `CONTROL_PORT`
+  or one equal to `PORT`) and reported `schemaVersion 2`, "migrations up to date".
 - **H2 — at `/audit`:** answer PD1, PD2, PD3, PD4. **Done 2026-11-14:** PD1 `ws` + `@types/ws`;
   PD2, PD3, PD4 as recommended.
 - **H3 — after T16, on the screen machine and the owner's network:** at the first switch-on,
@@ -635,6 +654,24 @@ decision (Risks). Browser storage: `djv.controlAddress` (screen machine), `djv.c
   approval), reload the screen page (both recover), New code (both "Pairing ended"), overlay
   audio p95 ≤ 50 ms throughout. Proves the Wi-Fi latency (SD17) and the non-functional render
   budget with two controllers; the gate proves AC19 and AC43 structurally only.
+  **In progress 2026-11-15:** screen machine on Ethernet (profile Private), phone an iPhone on
+  the same router's Wi-Fi. Phone paired by QR and accepted on the screen; device `colour`
+  messages answered `applied` + `state` in the server log. Getting there needed an owner-made
+  inbound port rule (TCP `CONTROL_PORT`, Private profile): every existing Node.js program rule
+  was Public-only, and the server ran from fnm's per-shell path
+  (`%LOCALAPPDATA%\fnm_multishells\<id>\node.exe`), which no program rule matches. Until then
+  the phone showed a black page (Safari waiting) and no request reached the server.
+  Follow-ups (not fixed): (1) the runbook's "tick Private at the prompt" fails when Node already
+  has a Public-only rule or runs via fnm — recommend a port rule; (2) the panel's address
+  picker offers Hyper-V/WSL virtual adapters (`vEthernet`) no device can reach.
+  Tablet (iPad) paired and accepted from the phone. DJ mode on phone and tablet: tiles, both
+  dials, primary colour and camera all followed on the screen. Audio p95 20–25 ms (≤ 50) while
+  both dragged. **Round trip failed:** VJ swatch drags p95 130 and 105 ms (> 100), still over
+  with the tablet near the router — registered as D-04 (`docs/specs/defect-register.md`).
+  Profile switches 41 / 41 ms. Lifecycle passed: phone locked a minute and unlocked reconnected
+  without approval; screen reload — both devices recovered with the profile's starting values;
+  New code — both showed "Pairing ended". Audio p95 never above 28 ms throughout.
+  The screen's settings panel scrolled sideways (D-05): fixed in T18 at the owner's direction.
 - **H4 — after H3, from a third device:** the spec's Verification 3 — `http://<address>:<PORT>/api/profiles`
   refused, `http://<address>:<CONTROL_PORT>/api/profiles` 404; switch off, `/control` refused.
   Real private addresses are proven here; the gate binds loopback (SD29).

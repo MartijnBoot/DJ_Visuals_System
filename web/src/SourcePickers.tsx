@@ -39,10 +39,23 @@ function options(
   ));
 }
 
+/**
+ * A select as wide as its cell at most: a long device or adapter name is cut inside the select
+ * instead of widening the panel (B-04 T18, D-05).
+ */
+export const FIT = { minWidth: 0, maxWidth: "100%" } as const;
+
 export function Row({ label, children }: { label: string; children: (id: string) => ReactNode }) {
   const id = useId();
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "9em 1fr", gap: 8, alignItems: "center" }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "9em minmax(0, 1fr)",
+        gap: 8,
+        alignItems: "center",
+      }}
+    >
       <label htmlFor={id}>{label}</label>
       {children(id)}
     </div>
@@ -65,6 +78,7 @@ export function SourcePickers(props: SourcePickersProps) {
             id={id}
             data-testid="camera-picker"
             disabled={!started}
+            style={FIT}
             value={camera}
             onChange={(e) => props.onCamera(e.target.value)}
           >
@@ -78,6 +92,7 @@ export function SourcePickers(props: SourcePickersProps) {
             id={id}
             data-testid="audio-picker"
             disabled={!started}
+            style={FIT}
             value={audio}
             onChange={(e) => {
               const v = e.target.value;

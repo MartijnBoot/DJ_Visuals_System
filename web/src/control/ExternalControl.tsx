@@ -5,6 +5,7 @@
 // output canvas (AC32), and the code is visible only while the panel is open (SD24).
 import type { ControlStatus, DeviceEntry } from "@djv/shared";
 import { useMemo, useState } from "react";
+import { FIT } from "../SourcePickers.tsx";
 import { qrPath } from "./qr.ts";
 import { addressStore } from "./remembered.ts";
 import type { PanelAction, ScreenLinkView } from "./screen-link.ts";
@@ -36,7 +37,7 @@ function Device({
       data-device-id={entry.deviceId}
       style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "space-between" }}
     >
-      <span>
+      <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>
         {entry.hint} · {entry.label}
       </span>
       <span style={{ display: "flex", gap: 4 }}>
@@ -103,6 +104,7 @@ export function ExternalControl({ view, onAction }: ExternalControlProps) {
               address
               <select
                 data-testid="control-address"
+                style={{ ...FIT, flex: 1 }}
                 value={address.address}
                 onChange={(e) => {
                   setChosen(e.target.value);
@@ -206,7 +208,13 @@ export function ExternalControl({ view, onAction }: ExternalControlProps) {
     <section
       data-testid="control-section"
       aria-label="External control"
-      style={{ display: "grid", gap: 6, borderTop: "1px solid #666", paddingTop: 6 }}
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr)",
+        gap: 6,
+        borderTop: "1px solid #666",
+        paddingTop: 6,
+      }}
     >
       {body}
     </section>

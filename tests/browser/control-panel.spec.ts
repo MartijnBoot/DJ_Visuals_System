@@ -165,6 +165,30 @@ test("a reload keeps External control on with the same code (AC30, SD13)", async
   await expect(page.getByTestId("control-code")).toHaveText(code);
 });
 
+// T18 (D-05, owner-added after H3): on the owner's machine the address picker listed Hyper-V and
+// WSL adapters by name, and the 340 px panel scrolled sideways. The panel is wider and nothing in
+// it may be wider than the panel, whatever the adapter names.
+test("the panel is wider and never scrolls sideways, even with long adapter names and a waiting device (T18, D-05)", async ({
+  page,
+}) => {
+  server.setAddresses([
+    { address: "127.0.0.1", name: "vEthernet (WSL (Hyper-V firewall))" },
+    { address: "127.0.0.2", name: "Ethernet 18 (Realtek USB GbE Family Controller #2)" },
+  ]);
+  await screen(page);
+  const code = await switchOn(page);
+  const device = await phone(page);
+  await device.send({ type: "hello", code });
+  await expect(page.getByTestId("control-pending")).toContainText("Safari on iPhone · Device 1");
+  const panel = page.getByTestId("panel");
+  const { scrollWidth, clientWidth } = await panel.evaluate((p) => ({
+    scrollWidth: p.scrollWidth,
+    clientWidth: p.clientWidth,
+  }));
+  expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+  expect((await panel.boundingBox())!.width).toBeGreaterThanOrEqual(400);
+});
+
 test("the QR code is in the panel, never on the output canvas, and gone when the panel closes (AC32, SD24)", async ({
   page,
 }) => {
