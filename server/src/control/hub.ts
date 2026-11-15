@@ -240,6 +240,9 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
       if (target) {
         send(target, { type: "superseded" });
         log.info("screen superseded");
+        // The old page's state is void, and its close may arrive after this (a reload): devices
+        // lock now and unlock on the new page's state (SD12, SD13).
+        toApproved({ type: "screen", connected: false });
       }
       target = socket;
       cached = null; // a new page sends its own state; the old one is no longer true (SD13)

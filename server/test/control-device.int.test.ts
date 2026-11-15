@@ -368,6 +368,22 @@ describe("relaying (SD5, AC19, AC20)", () => {
     screen.send({ type: "state", state });
     expect(await client.find(is("state"))).toEqual({ type: "state", state });
   });
+
+  it("a new screen that connects before the old one closes locks devices until its state (SD13)", async () => {
+    // A reload whose new socket reaches the server before the old one's close does: the old
+    // close is then not the target's, so only the takeover itself can tell devices.
+    screen.send({ type: "state", state });
+    const { client } = await approved();
+    await client.find(is("state"));
+    const from = client.messages.length;
+    screen = await openScreen();
+    await client.next((m) => m.type === "screen" && !m.connected);
+    const fresh: ScreenState = { ...state, dials: { recognisability: 0.2, reactivity: 0.9 } };
+    screen.send({ type: "state", state: fresh });
+    await client.next((m) => m.type === "state");
+    expect(client.messages.slice(from).map((m) => m.type)).toEqual(["screen", "state"]);
+    expect(client.messages.at(-1)).toEqual({ type: "state", state: fresh });
+  });
 });
 
 describe("keys bound to the IP (AC12, SD15)", () => {
