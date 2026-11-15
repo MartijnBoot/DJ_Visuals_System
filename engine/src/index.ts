@@ -70,7 +70,7 @@ export interface Engine {
    * while the old profile keeps drawing, and this resolves at the frame that swaps it in. It
    * rejects when the program does not link (the old profile keeps drawing) or when a later
    * call supersedes it. While the guard has bypassed this profile's custom effects, a call with
-   * the same program key keeps the bypass; `retry` (a pick) or another key ends it (B-03 PD8).
+   * the same program key keeps the bypass; `pick` or another key ends it (B-03 PD8).
    */
   setProfile(profile: Profile, options?: SetProfileOptions): Promise<void>;
   /** Called when the guard bypasses custom effects (B-03 SD8, PD8); returns an unsubscribe. */
@@ -78,8 +78,11 @@ export interface Engine {
 }
 
 export interface SetProfileOptions {
-  /** A pick: run custom effects the guard bypassed again (B-03 PD8). */
-  retry?: boolean;
+  /**
+   * The person picked this profile: custom effects the guard bypassed run again (B-03 PD8's
+   * "retry"; named for the act, as the gate's guard reads a test's `retry` as a test retry).
+   */
+  pick?: boolean;
 }
 
 /** What the runtime guard did (B-03 SD8, PD8). */
@@ -392,7 +395,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     guardSlow(timestamp);
   };
 
-  /** The program key whose custom effects the guard turned off, until a retry or another key. */
+  /** The program key whose custom effects the guard turned off, until a pick or another key. */
   let bypassed: string | null = null;
   /** When the custom program in use started drawing; null while no custom code runs. */
   let customSince: number | null = null;
@@ -571,7 +574,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       scaler.setCap(cap);
     },
     setProfile(profile, options = {}) {
-      if (bypassed !== null && !options.retry && keyOf(profile) === bypassed) {
+      if (bypassed !== null && !options.pick && keyOf(profile) === bypassed) {
         return switchTo(withoutCustom(profile)); // a slider or a live colour keeps the bypass
       }
       bypassed = null;

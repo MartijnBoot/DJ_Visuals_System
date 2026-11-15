@@ -576,7 +576,7 @@ describe("the slow-GPU guard (B-03)", () => {
     await engine.setProfile(heavy(0.9)); // a slider or a live colour: same program key
     frameAt((t += 100));
     expect(drawsCustom(frames().at(-1)!)).toBe(false);
-    const retried = engine.setProfile(heavy(), { retry: true });
+    const retried = engine.setProfile(heavy(), { pick: true });
     frameAt((t += 100));
     await retried;
     frameAt((t += 100));
