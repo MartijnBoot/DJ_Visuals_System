@@ -241,23 +241,46 @@ export function derivePrimary(profile: Pick<Profile, "effects" | "primary">): nu
   return 0;
 }
 
-export const FORMAT_VERSION = 1;
+/**
+ * The file versions import reads (B-03 SD15, PD13): 1 holds no custom effect, so a B-02 instance
+ * reads it; 2 may hold custom effects.
+ */
+export const SUPPORTED_FORMAT_VERSIONS = [1, 2] as const;
+
+/** Whether import reads this `formatVersion`; any other is "unsupported", checked first. */
+export function isSupportedFormatVersion(version: number): boolean {
+  return (SUPPORTED_FORMAT_VERSIONS as readonly number[]).includes(version);
+}
+
+const holdsCustom = (profile: Pick<Profile, "effects">) =>
+  profile.effects.some((e) => e.type === "custom");
 
 /** The export and import file (SD7): one profile or a bundle, one code path. */
-export const profileFileSchema = z.strictObject({
-  formatVersion: z.literal(FORMAT_VERSION),
-  profiles: z.array(profileSchema).min(1),
-});
+export const profileFileSchema = z
+  .strictObject({
+    formatVersion: z.literal(SUPPORTED_FORMAT_VERSIONS),
+    profiles: z.array(profileSchema).min(1),
+  })
+  .superRefine((file, ctx) => {
+    if (file.formatVersion === 1 && file.profiles.some(holdsCustom)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["formatVersion"],
+        message: "a file with a custom effect is formatVersion 2",
+      });
+    }
+  });
 
 export type ProfileFile = z.infer<typeof profileFileSchema>;
 
 /**
  * The file for some profiles: their definitions only, never an id, revision or timestamp (AC9).
- * `primary` only when set, so a file without it stays what B-02 wrote (B-04 AC39).
+ * `primary` only when set, so a file without it stays what B-02 wrote (B-04 AC39). Version 1
+ * unless a profile holds a custom effect (B-03 SD15).
  */
 export function toProfileFile(profiles: readonly Profile[]): ProfileFile {
   return {
-    formatVersion: FORMAT_VERSION,
+    formatVersion: profiles.some(holdsCustom) ? 2 : 1,
     profiles: profiles.map(({ name, palette, dials, effects, primary }) => ({
       name,
       palette,

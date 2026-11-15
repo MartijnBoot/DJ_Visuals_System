@@ -3,7 +3,7 @@
 // construction. No route sets a CORS header. Logs carry the id and revision, never the
 // definition.
 import {
-  FORMAT_VERSION,
+  isSupportedFormatVersion,
   issuesFrom,
   profileFileSchema,
   profileListSchema,
@@ -86,7 +86,7 @@ export function registerProfiles(app: App, store: ProfileStore): void {
     if (
       isRecord(body) &&
       typeof body.formatVersion === "number" &&
-      body.formatVersion !== FORMAT_VERSION
+      !isSupportedFormatVersion(body.formatVersion)
     ) {
       return reply.code(422).send({ error: "unsupported_version" });
     }

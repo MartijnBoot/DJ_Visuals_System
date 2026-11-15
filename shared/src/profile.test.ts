@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   derivePrimary,
   CUSTOM_LIMITS,
+  isSupportedFormatVersion,
   customCodeIssues,
   EFFECT_TYPES,
-  FORMAT_VERSION,
+  SUPPORTED_FORMAT_VERSIONS,
   LIMITS,
   profileFileSchema,
   profileSchema,
@@ -192,7 +193,7 @@ describe("the file format", () => {
 
   it("exports only name, palette, dials and effects, at format version 1", () => {
     const file = toProfileFile([stored]);
-    expect(FORMAT_VERSION).toBe(1);
+    expect(SUPPORTED_FORMAT_VERSIONS).toEqual([1, 2]);
     expect(file.formatVersion).toBe(1);
     const text = JSON.stringify(file);
     for (const key of ["id", "revision", "createdAt", "updatedAt"]) {
@@ -206,9 +207,9 @@ describe("the file format", () => {
     expect(profileFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
   });
 
-  it("rejects format version 2, an empty bundle and a bad profile with its path", () => {
+  it("rejects format version 3, an empty bundle and a bad profile with its path", () => {
     expect(
-      profileFileSchema.safeParse({ formatVersion: 2, profiles: [builtInShaped] }).success,
+      profileFileSchema.safeParse({ formatVersion: 3, profiles: [builtInShaped] }).success,
     ).toBe(false);
     expect(profileFileSchema.safeParse({ formatVersion: 1, profiles: [] }).success).toBe(false);
     const result = profileFileSchema.safeParse({
@@ -217,6 +218,70 @@ describe("the file format", () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) expect(issuesFrom(result.error)[0]?.path).toBe("profiles.1.palette.1");
+  });
+});
+
+// B-03 SD15, AC20 (plan PD13): version 2 holds custom effects; version 1 stays what B-02 reads.
+describe("format version 2 (B-03)", () => {
+  const withCustom: Profile = {
+    ...builtInShaped,
+    name: "Coded",
+    effects: [
+      {
+        type: "custom",
+        label: "Swirl",
+        amount: 0.5,
+        abstraction: false,
+        params: [],
+        code: "return source(uv);",
+      },
+    ],
+  };
+
+  it("writes built-in-only profiles as version 1, byte for byte as B-02 did", () => {
+    const text = JSON.stringify(toProfileFile([builtInShaped, { ...builtInShaped, name: "B" }]));
+    expect(text).toBe(
+      JSON.stringify({
+        formatVersion: 1,
+        profiles: [builtInShaped, { ...builtInShaped, name: "B" }],
+      }),
+    );
+  });
+
+  it("writes version 2 when any profile holds a custom effect", () => {
+    expect(toProfileFile([withCustom]).formatVersion).toBe(2);
+    expect(toProfileFile([builtInShaped, withCustom]).formatVersion).toBe(2);
+    const file = toProfileFile([builtInShaped, withCustom]);
+    expect(profileFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
+  });
+
+  it("accepts version 2 without a custom effect, and refuses version 0", () => {
+    expect(
+      profileFileSchema.safeParse({ formatVersion: 2, profiles: [builtInShaped] }).success,
+    ).toBe(true);
+    expect(
+      profileFileSchema.safeParse({ formatVersion: 0, profiles: [builtInShaped] }).success,
+    ).toBe(false);
+  });
+
+  it("refuses version 1 holding a custom effect, on formatVersion", () => {
+    const result = profileFileSchema.safeParse({ formatVersion: 1, profiles: [withCustom] });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(issuesFrom(result.error)).toEqual([
+        { path: "formatVersion", message: "a file with a custom effect is formatVersion 2" },
+      ]);
+    }
+  });
+
+  it("tells a supported version from any other", () => {
+    expect([0, 1, 2, 3, 1.5].map(isSupportedFormatVersion)).toEqual([
+      false,
+      true,
+      true,
+      false,
+      false,
+    ]);
   });
 });
 

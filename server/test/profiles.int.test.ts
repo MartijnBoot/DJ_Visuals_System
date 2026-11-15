@@ -464,9 +464,39 @@ describe("import (AC10)", () => {
 
   it("answers 422 for another format version, checked before the rest of the file", async () => {
     await boot();
-    const response = await post("/api/profiles/import", { formatVersion: 2, profiles: "nonsense" });
-    expect(response.status).toBe(422);
-    expect(await response.json()).toEqual({ error: "unsupported_version" });
+    for (const formatVersion of [3, 0]) {
+      const response = await post("/api/profiles/import", { formatVersion, profiles: "nonsense" });
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({ error: "unsupported_version" });
+    }
+    expect(await list()).toEqual([]);
+  });
+
+  // B-03 SD15, AC19, AC20 (plan PD13).
+  it("accepts version 2 and refuses version 1 holding a custom effect on formatVersion", async () => {
+    await boot();
+    const v1 = await post("/api/profiles/import", { formatVersion: 1, profiles: [authored] });
+    expect(v1.status).toBe(400);
+    expect(invalidErrorSchema.parse(await v1.json()).issues).toEqual([
+      { path: "formatVersion", message: "a file with a custom effect is formatVersion 2" },
+    ]);
+    expect(await list()).toEqual([]);
+    const v2 = await post("/api/profiles/import", { formatVersion: 2, profiles: [warm, authored] });
+    expect(v2.status).toBe(201);
+    expect((await list()).map((p) => p.name)).toEqual(["Authored", "Warm"]);
+  });
+
+  it("stores nothing from a version-2 bundle with one bad profile (B-03 AC19)", async () => {
+    await boot();
+    const bad = { ...authored, name: "Bad", effects: [customEffect("x", "return source(uv); }")] };
+    const response = await post("/api/profiles/import", {
+      formatVersion: 2,
+      profiles: [authored, bad],
+    });
+    expect(response.status).toBe(400);
+    expect(invalidErrorSchema.parse(await response.json()).issues).toEqual([
+      { path: "profiles.1.effects.0.code", message: expect.any(String), profile: "Bad" },
+    ]);
     expect(await list()).toEqual([]);
   });
 });

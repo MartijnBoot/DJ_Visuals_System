@@ -53,7 +53,7 @@ describe("readImport (AC10)", () => {
   });
 
   it("says unsupported_version for another format version, before looking at the rest", () => {
-    expect(readImport(JSON.stringify({ formatVersion: 2, profiles: "nonsense" }))).toEqual({
+    expect(readImport(JSON.stringify({ formatVersion: 3, profiles: "nonsense" }))).toEqual({
       kind: "unsupported_version",
     });
     expect(readImport(JSON.stringify({ formatVersion: 0, profiles: [] }))).toEqual({
@@ -94,5 +94,30 @@ describe("readImport (AC10)", () => {
     };
     withCode.profiles[0]!.shader = "void main() {}";
     expect(readImport(JSON.stringify(withCode)).kind).toBe("invalid");
+  });
+
+  // B-03 SD15, AC20 (plan PD13).
+  it("accepts version 2 and refuses version 1 holding a custom effect, on formatVersion", () => {
+    const file = JSON.parse(exportFile([stored("Warm")])) as {
+      formatVersion: number;
+      profiles: { effects: unknown[] }[];
+    };
+    expect(readImport(JSON.stringify({ ...file, formatVersion: 2 })).kind).toBe("ok");
+    file.profiles[0]!.effects.push({
+      type: "custom",
+      label: "Swirl",
+      amount: 0.5,
+      abstraction: false,
+      params: [],
+      code: "return source(uv);",
+    });
+    expect(readImport(JSON.stringify({ ...file, formatVersion: 2 })).kind).toBe("ok");
+    const v1 = readImport(JSON.stringify(file));
+    expect(v1).toEqual({
+      kind: "invalid",
+      issues: [
+        { field: "formatVersion", message: "a file with a custom effect is formatVersion 2" },
+      ],
+    });
   });
 });

@@ -686,8 +686,8 @@ test("a file with one broken field, a version 2 file and a text file each store 
 
   await importFile(
     page,
-    "v2.json",
-    JSON.stringify({ ...JSON.parse(bundle.text), formatVersion: 2 }),
+    "v3.json",
+    JSON.stringify({ ...JSON.parse(bundle.text), formatVersion: 3 }),
   );
   await expect(message).toHaveText("unsupported file version");
 
