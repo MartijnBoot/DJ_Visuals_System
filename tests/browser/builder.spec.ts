@@ -339,8 +339,11 @@ test("the add menu never lists a present type and is empty at twelve (AC3)", asy
   await page.goto("/builder");
   await page.getByTestId(`profile-name-${one.id}`).click();
   const add = page.getByTestId("effect-add");
+  // The built-in types; "Custom" (B-03 SD9) is offered beside them and may repeat.
   const offered = async () =>
-    (await add.locator("option").allTextContents()).filter((t) => t !== "choose…");
+    (await add.locator("option").allTextContents()).filter(
+      (t) => t !== "choose…" && t !== "Custom",
+    );
   expect(await offered()).not.toContain("paletteMap");
   expect(await offered()).toHaveLength(11);
 

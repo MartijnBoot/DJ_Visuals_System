@@ -1,7 +1,16 @@
 // T11 (B-02 spec AC3, AC8, SD11, SD12): the editor's reducer, validation and dirty check, pure.
 import { EFFECT_TYPES, profileSchema, type Profile } from "@djv/shared";
 import { describe, expect, it } from "vitest";
-import { availableTypes, isDirty, primaryUnused, reduce, validate, type Action } from "./editor.ts";
+import {
+  availableTypes,
+  canAddCustom,
+  isDirty,
+  primaryUnused,
+  reduce,
+  validate,
+  type Action,
+} from "./editor.ts";
+import { CUSTOM_TEMPLATE } from "./custom-template.ts";
 
 const base: Profile = {
   name: "Warm",
@@ -326,5 +335,112 @@ describe("a custom effect in the draft (B-03)", () => {
     };
     expect(validate(full)).toEqual([]);
     expect(availableTypes(full)).toEqual([]);
+  });
+});
+
+// B-03 T10 (spec AC13, AC15, SD4, SD9; plan PD14): adding and editing custom effects.
+describe("custom effect actions (B-03)", () => {
+  const added = run(base, { type: "customAdd" });
+  const at = added.effects.length - 1;
+  const customAt = (draft: Profile, index = at) => {
+    const effect = draft.effects[index]!;
+    if (effect.type !== "custom") throw new Error("not a custom effect");
+    return effect;
+  };
+
+  it("adds one from the template, with a free label, valid at once", () => {
+    expect(customAt(added)).toEqual({
+      type: "custom",
+      label: CUSTOM_TEMPLATE.label,
+      amount: 0.5,
+      abstraction: false,
+      params: CUSTOM_TEMPLATE.params.map((p) => ({ ...p })),
+      code: CUSTOM_TEMPLATE.code,
+    });
+    expect(validate(added)).toEqual([]);
+    const twice = run(added, { type: "customAdd" });
+    expect(customAt(twice, at + 1).label).toBe(`${CUSTOM_TEMPLATE.label} 2`);
+    expect(validate(twice)).toEqual([]);
+  });
+
+  it("adds none at twelve effects", () => {
+    let draft = base;
+    for (let i = 0; i < 12; i++) draft = reduce(draft, { type: "customAdd" });
+    expect(draft.effects).toHaveLength(12);
+    expect(canAddCustom(draft)).toBe(false);
+    expect(canAddCustom(base)).toBe(true);
+  });
+
+  it("sets the label and the code as typed; validate reports a bad one", () => {
+    const labelled = run(added, { type: "customLabel", index: at, label: "" });
+    expect(customAt(labelled).label).toBe("");
+    expect(validate(labelled).map((i) => i.path)).toEqual([`effects.${at}.label`]);
+    const coded = run(added, {
+      type: "customCode",
+      index: at,
+      code: "#define X\nreturn source(uv);",
+    });
+    expect(customAt(coded).code).toBe("#define X\nreturn source(uv);");
+    expect(validate(coded).map((i) => i.path)).toEqual([`effects.${at}.code`]);
+  });
+
+  it("sets the abstraction flag", () => {
+    expect(
+      customAt(run(added, { type: "customAbstraction", index: at, value: true })).abstraction,
+    ).toBe(true);
+  });
+
+  it("adds parameters with free names up to four, names, sets clamped and removes them", () => {
+    let draft = added;
+    for (let i = 0; i < 5; i++) draft = reduce(draft, { type: "customParamAdd", index: at });
+    expect(customAt(draft).params).toHaveLength(4);
+    expect(new Set(customAt(draft).params.map((p) => p.name)).size).toBe(4);
+    expect(validate(draft)).toEqual([]);
+    draft = run(draft, { type: "customParamValue", index: at, param: 1, value: 7 });
+    expect(customAt(draft).params[1]!.value).toBe(1);
+    draft = run(draft, { type: "customParamName", index: at, param: 1, name: "speed" });
+    expect(customAt(draft).params[1]!.name).toBe("speed");
+    draft = run(draft, { type: "customParamRemove", index: at, param: 0 });
+    expect(customAt(draft).params.map((p) => p.name)[0]).toBe("speed");
+    expect(customAt(draft).params).toHaveLength(3);
+    expect(run(draft, { type: "customParamRemove", index: at, param: 9 })).toBe(draft);
+  });
+
+  it("ignores a custom action on a built-in effect", () => {
+    expect(run(added, { type: "customCode", index: 0, code: "x" })).toBe(added);
+    expect(run(added, { type: "customParamAdd", index: 0 })).toBe(added);
+  });
+
+  it("no action sequence leaves an issue anywhere but a name, label, parameter name or code", () => {
+    let seed = 11;
+    const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const pick = <T>(items: readonly T[]) => items[Math.floor(next() * items.length)]!;
+    const odd = [-5, 0, 0.5, 1, 2.6, Number.NaN, Infinity];
+    const texts = ["", " ", "ok", "Swirl", "x".repeat(50), "#", "return source(uv);"];
+    let draft = base;
+    for (let step = 0; step < 4000; step++) {
+      const index = Math.floor(next() * 14) - 1;
+      const param = Math.floor(next() * 6) - 1;
+      const action = pick<Action>([
+        { type: "customAdd" },
+        { type: "effectAdd", effectType: pick(EFFECT_TYPES) },
+        { type: "effectRemove", index },
+        { type: "effectMove", index, direction: pick([-1, 1] as const) },
+        { type: "amount", index, value: pick(odd) },
+        { type: "bindingSet", index, feature: "beat", amount: pick(odd) },
+        { type: "customLabel", index, label: pick(texts) },
+        { type: "customCode", index, code: pick(texts) },
+        { type: "customAbstraction", index, value: next() > 0.5 },
+        { type: "customParamAdd", index },
+        { type: "customParamRemove", index, param },
+        { type: "customParamName", index, param, name: pick(texts) },
+        { type: "customParamValue", index, param, value: pick(odd) },
+      ]);
+      draft = reduce(draft, action);
+      const allowed = /^(name|effects\.\d+\.(label|code|params\.\d+\.name))$/;
+      const issues = validate(draft).filter((i) => !allowed.test(i.path));
+      expect(issues, `after ${JSON.stringify(action)}`).toEqual([]);
+      expect(draft.effects.length).toBeLessThanOrEqual(12);
+    }
   });
 });

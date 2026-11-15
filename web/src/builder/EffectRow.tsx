@@ -4,7 +4,7 @@
 // effect (B-03 PD14), which shows its label and has no own parameter here.
 import { EFFECTS } from "@djv/engine";
 import { FEATURE_NAMES, LIMITS, type Effect, type FeatureName } from "@djv/shared";
-import type { Dispatch } from "react";
+import type { Dispatch, ReactNode } from "react";
 import type { Action } from "./editor.ts";
 
 export interface EffectRowProps {
@@ -16,6 +16,10 @@ export interface EffectRowProps {
   paletteLength: number;
   disabled: boolean;
   dispatch: Dispatch<Action>;
+  /** Shown under the title line: a custom effect's label field (B-03 T10). */
+  header?: ReactNode;
+  /** Shown after the binding: a custom effect's own fields (B-03 T10). */
+  children?: ReactNode;
 }
 
 export function EffectRow({
@@ -26,6 +30,8 @@ export function EffectRow({
   paletteLength,
   disabled,
   dispatch,
+  header,
+  children,
 }: EffectRowProps) {
   const name = effect.type === "custom" ? effect.label : effect.type;
   const abstraction = effect.type !== "custom" && EFFECTS[effect.type].abstraction;
@@ -73,6 +79,7 @@ export function EffectRow({
           Remove
         </button>
       </div>
+      {header}
       <label style={{ display: "flex", gap: 6 }}>
         <span style={{ width: 120 }}>strength</span>
         <input
@@ -171,6 +178,7 @@ export function EffectRow({
           }
         />
       </div>
+      {children}
     </li>
   );
 }

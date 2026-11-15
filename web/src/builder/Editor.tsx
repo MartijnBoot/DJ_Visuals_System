@@ -7,7 +7,15 @@ import { useEffect, useReducer, useState } from "react";
 import { updateProfile } from "../profiles/api.ts";
 import { Conflict } from "./Conflict.tsx";
 import { EffectRow } from "./EffectRow.tsx";
-import { availableTypes, isDirty, primaryUnused, reduce, validate } from "./editor.ts";
+import { CustomRow } from "./CustomRow.tsx";
+import {
+  availableTypes,
+  canAddCustom,
+  isDirty,
+  primaryUnused,
+  reduce,
+  validate,
+} from "./editor.ts";
 import { describeFailure } from "./failure.ts";
 import { PRESETS } from "./presets.ts";
 
@@ -47,6 +55,9 @@ const fieldsOf = ({ name, palette, dials, effects, primary }: StoredProfile): Pr
   ...(primary === undefined ? {} : { primary }),
 });
 
+/** The "Add an effect" value for a custom effect (B-03 SD9); no built-in type is named so. */
+const CUSTOM = "custom";
+
 /** Each row's key and test-id suffix: its type, or `custom-<n>` among the custom ones (PD14). */
 function rowIds(draft: Profile): string[] {
   let custom = 0;
@@ -73,6 +84,8 @@ export function Editor({
   const nameIssue = issues.find((i) => i.path === "name");
   const canSave = !readOnly && !offline && !saving && !refused && dirty && issues.length === 0;
   const addable = availableTypes(draft);
+  const customAddable = canAddCustom(draft);
+  const anyAddable = addable.length > 0 || customAddable;
 
   // The builder asks before leaving unsaved changes; this editor going away leaves none.
   useEffect(() => {
@@ -225,36 +238,42 @@ export function Editor({
       <fieldset style={{ display: "grid", gap: 4 }}>
         <legend>Effects, applied first to last</legend>
         <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
-          {rowIds(draft).map((id, index) => (
-            <EffectRow
-              key={id}
-              id={id}
-              effect={draft.effects[index]!}
-              index={index}
-              count={draft.effects.length}
-              paletteLength={draft.palette.length}
-              disabled={readOnly}
-              dispatch={dispatch}
-            />
-          ))}
+          {rowIds(draft).map((id, index) => {
+            const effect = draft.effects[index]!;
+            const row = {
+              id,
+              index,
+              count: draft.effects.length,
+              paletteLength: draft.palette.length,
+              disabled: readOnly,
+              dispatch,
+            };
+            return effect.type === "custom" ? (
+              <CustomRow key={id} {...row} effect={effect} />
+            ) : (
+              <EffectRow key={id} {...row} effect={effect} />
+            );
+          })}
         </ol>
         <label>
           Add an effect{" "}
           <select
             data-testid="effect-add"
             value=""
-            disabled={readOnly || addable.length === 0}
+            disabled={readOnly || !anyAddable}
             onChange={(e) => {
+              if (e.target.value === CUSTOM) return dispatch({ type: "customAdd" });
               const effectType = addable.find((t) => t === e.target.value);
               if (effectType) dispatch({ type: "effectAdd", effectType });
             }}
           >
-            <option value="">{addable.length === 0 ? "no effects left" : "choose…"}</option>
+            <option value="">{anyAddable ? "choose…" : "no effects left"}</option>
             {addable.map((t) => (
               <option key={t} value={t}>
                 {t}
               </option>
             ))}
+            {customAddable && <option value={CUSTOM}>Custom</option>}
           </select>
         </label>
       </fieldset>
