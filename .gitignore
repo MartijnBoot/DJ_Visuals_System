@@ -31,3 +31,6 @@ Thumbs.db
 data/
 test-results/
 playwright-report/
+
+# B-03: the stills `pnpm profile:check` writes (PD12)
+profiles/.check/

@@ -23,7 +23,11 @@ export function swirl(name = "Swirl"): Definition {
           "vec2 r = vec2(c.x * cos(a) - c.y * sin(a), c.x * sin(a) + c.y * cos(a));",
           "return source(r + 0.5);",
         ].join("\n"),
-        { params: [{ name: "turn", value: 0.6 }], binding: { feature: "beat", amount: 1 } },
+        {
+          amount: 0.1, // low at rest, so the beat binding shows on a kick
+          params: [{ name: "turn", value: 0.6 }],
+          binding: { feature: "beat", amount: 1 },
+        },
       ),
     ],
   };
@@ -53,6 +57,18 @@ export function builtInShaped(name = "Calm"): Definition {
     effects: [
       { type: "zoom", amount: 0, binding: { feature: "low", amount: 1 } },
       { type: "posterise", amount: 1 },
+    ],
+  };
+}
+
+/** At dials (0, 0) a flagged, unbound custom effect is off: the picture is the camera (SD13). */
+export function cameraThrough(name = "Through"): Definition {
+  return {
+    name,
+    palette: ["#000000", "#ffffff"],
+    dials: { recognisability: 0.5, reactivity: 0.5 },
+    effects: [
+      customEffect("Tint", "return source(uv) * vec3(0.2, 1.0, 0.2);", { abstraction: true }),
     ],
   };
 }

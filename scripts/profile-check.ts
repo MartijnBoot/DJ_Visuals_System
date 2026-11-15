@@ -6,12 +6,12 @@
 // source, type-stripped by Node. Nothing of it ships in the app; no server is started.
 // Exit: 0 valid, 1 a schema or compile failure, 2 usage or no Chromium.
 import { chromium, type Browser, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
-import { relative, resolve, sep } from "node:path";
+import { basename, extname, join, relative, resolve, sep } from "node:path";
 import { SOFTWARE_GL_ARGS } from "../tests/browser/fixtures/launch.ts";
 import { readImport, type ImportIssue } from "../web/src/profiles/file.ts";
-import type { Compiled } from "./profile-check-page.ts";
+import type { Checked } from "./profile-check-page.ts";
 
 const USAGE = "usage: pnpm profile:check <file> [--camera <image>] [--out <dir>]";
 const ROOT = resolve(import.meta.dirname, "..");
@@ -72,9 +72,10 @@ export function compileLine(
 }
 
 /** Serves the page and the engine's source, type-stripped, from this repository only. */
-async function servePage(page: Page): Promise<void> {
+async function servePage(page: Page, camera: Buffer | null): Promise<void> {
   await page.route(`${ORIGIN}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/camera" && camera) return route.fulfill({ body: camera });
     if (path === "/") {
       return route.fulfill({
         contentType: "text/html",
@@ -134,32 +135,76 @@ async function main(argv: readonly string[]): Promise<number> {
     );
   }
 
+  let camera: Buffer | null = null;
+  if (args.camera) {
+    try {
+      camera = readFileSync(args.camera);
+    } catch (error) {
+      console.error(`cannot read ${args.camera}: ${(error as Error).message}\n${USAGE}`);
+      return 2;
+    }
+  }
+  const out = args.out
+    ? resolve(args.out)
+    : resolve(ROOT, "profiles", ".check", basename(args.file, extname(args.file)));
+
   const browser = await launch();
   if (!browser) return 2;
   try {
     const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
-    await servePage(page);
-    const lines: string[] = [];
-    let failed = false;
+    await servePage(page, camera);
+    const checked: { name: string; result: Checked }[] = [];
     for (const profile of read.file.profiles) {
-      const compiled = await page.evaluate(
-        (p) =>
+      const result = await page.evaluate(
+        (input) =>
           (
-            window as unknown as { profileCheck: { compile(p: unknown): Promise<Compiled> } }
-          ).profileCheck.compile(p),
-        profile,
+            window as unknown as {
+              profileCheck: { check(p: unknown, o: { camera: boolean }): Promise<Checked> };
+            }
+          ).profileCheck.check(input.profile, { camera: input.camera }),
+        { profile, camera: camera !== null },
       );
-      if (compiled.ok) {
-        lines.push(`profile "${profile.name}": compiles`);
-      } else {
-        failed = true;
-        lines.push(...compiled.issues.map((issue) => compileLine(profile.name, issue)));
-      }
+      checked.push({ name: profile.name, result });
     }
-    return report(failed ? lines.filter((l) => !l.endsWith(": compiles")) : lines, failed ? 1 : 0);
+    const failures = checked.flatMap(({ name, result }) =>
+      result.ok ? [] : result.issues.map((issue) => compileLine(name, issue)),
+    );
+    if (failures.length > 0) return report(failures, 1);
+
+    const lines: string[] = [];
+    const slugs = new Set<string>();
+    for (const { name, result } of checked) {
+      if (!result.ok) continue;
+      const folder = join(out, freeSlug(name, slugs));
+      mkdirSync(folder, { recursive: true });
+      for (const still of result.stills) {
+        writeFileSync(join(folder, still.name), Buffer.from(still.png, "base64"));
+      }
+      lines.push(`profile "${name}": compiles`);
+      lines.push(
+        result.clipped > 0
+          ? `profile "${name}": flash limiter: clipped in ${result.clipped} of ${result.compared} frames`
+          : `profile "${name}": flash limiter: not clipped`,
+      );
+    }
+    lines.push(`stills: ${out}`);
+    return report(lines, 0);
   } finally {
     await browser.close();
   }
+}
+
+/** A folder name for a profile, as the builder names a file (`file.ts`), unique in this run. */
+function freeSlug(name: string, taken: Set<string>): string {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "profile";
+  let slug = base;
+  for (let n = 2; taken.has(slug); n++) slug = `${base}-${n}`;
+  taken.add(slug);
+  return slug;
 }
 
 function report(lines: readonly string[], code: number): number {
