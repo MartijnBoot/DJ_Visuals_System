@@ -703,7 +703,7 @@ describe("context loss (B-03)", () => {
     await engine.setProfile({ ...coded, palette: ["#111111", "#ffffff"] });
     frameAt(116);
     expect(uniform(frames().at(-1)!, "uCustomStrength")).toBeUndefined();
-    const retried = engine.setProfile(coded, { retry: true });
+    const retried = engine.setProfile(coded, { pick: true });
     frameAt(132);
     await retried;
     frameAt(148);

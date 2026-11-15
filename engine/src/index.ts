@@ -621,7 +621,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     setProfile(profile, options = {}) {
       if (lost) {
         // Nothing links now; the restore draws this one (without custom effects).
-        if (options.retry || keyOf(profile) !== bypassed) bypassed = null;
+        if (options.pick || keyOf(profile) !== bypassed) bypassed = null;
         active = { ...active, profile };
         return Promise.resolve();
       }
