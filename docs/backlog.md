@@ -23,6 +23,9 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 | 3 | B-07 | Scenes | M | idea |
 | 4 | B-09 | Transitions | M | idea |
 | 5 | B-10 | Global colour layer | S | idea |
+| 6 | B-11 | "No camera" as a feed option | S | idea |
+| 7 | B-12 | Hosted home on Oracle Cloud (free tier trial) | L | idea |
+| 8 | B-13 | Selling it | L | idea |
 
 ## Items
 
@@ -416,3 +419,105 @@ the palette edit.
 - Whether B-07 scenes store it.
 
 **Touches.** `engine/` (one stage and uniforms), B-04's controller and messages. Depends on B-04.
+
+### B-11 — "No camera" as a feed option
+
+- **Status:** idea
+- **Added:** 2026-11-15
+- **Size:** S (a guess: one more entry in the existing pickers; the look already exists)
+
+**Problem.** The operator wants the visuals without the camera picture. The camera list offers
+only real cameras, so today the only ways to get the camera-free look are to unplug the camera or
+deny the browser permission.
+
+**Idea.** A "No camera" entry in the camera feed list. Picking it switches the screen to the
+no-camera look B-01 already renders: the active profile over a slow noise field, driven by audio
+only (B-01 SD10, AC13). Picking a camera again switches back. Offered wherever a feed is picked:
+the panel's camera picker and the `/control` camera tiles (a proposal, not asked).
+
+**Why it matters.** Turning the camera off becomes a deliberate one-move choice mid-set, not
+something that only happens when a camera fails. It also gives B-07 Scenes a "no camera" feed to
+store.
+
+**Not this.** A new visualiser or a new look; it reuses the existing one. A screen that reattaches
+a camera on its own while "No camera" is chosen (today a lost camera reattaches without a click,
+AC13).
+
+**Open questions.**
+
+- Whether choosing it releases the camera device, so the webcam light goes off.
+- Whether the choice is remembered across a reload or restart, as the chosen camera is (B-01
+  PD12).
+- How the panel, overlay and controller tell "off" (chosen) apart from `none` and `lost`
+  (failures).
+- Whether it can be picked before Start, when the camera controls are disabled (B-04 AC24).
+
+**Touches.** A guess: `web/src/SourcePickers.tsx`, the capture session
+(`web/src/capture/session.ts`) and the remembered choice, the `camera` control message in
+`shared/src/control.ts`, the `/control` camera tiles. Builds on B-01 SD10/AC13 and B-04 AC24.
+Depends on B-04.
+
+### B-12 — Hosted home on Oracle Cloud (free tier trial)
+
+- **Status:** idea
+- **Added:** 2026-11-15
+- **Size:** L
+
+**Problem.** The app and its profiles live on one machine. Playing at another location, or on a
+different screen machine, means carrying that machine or moving profiles by export and import;
+if the machine fails, the profiles go with it (ADR 0001 §8).
+
+**Idea.** The app is reachable at a URL on Oracle Cloud, and the profiles live there. Whatever
+device is the screen machine connects to it, gets the app and the profiles, and runs the engine
+locally: audio, camera, rendering and External control stay on the local network. Every change
+merged to `main` on GitHub deploys to Oracle automatically. Free tier first, to see how it
+works there.
+
+**Why it matters.** A stable home, reachable from any location and any screen machine, with
+profiles no longer tied to one machine. It is also the first step towards selling the app
+(B-13).
+
+**Not this.** A set that stops when venue internet drops. Rendering or media on the server.
+Accounts for other people or payments (B-13). Deploying by hand. Paid Oracle resources the
+owner has not decided on.
+
+**Open questions.**
+
+- A new ADR: ADR 0001 defers hosting (§7) and names Azure.
+- What a screen machine needs: only a browser (the app kept for offline after the first load),
+  or a local install that syncs with the cloud. This decides where B-04's LAN pairing runs.
+- Behaviour without internet: at start-up, mid-set, and profiles edited offline then synced.
+- Login for the hosted URL: bought, not built (ADR 0001 Q3), and able to grow into customer
+  accounts (B-13).
+- HTTPS and a domain name.
+- Free-tier limits: idle instances can be reclaimed, ARM or x86, region, and what "stable"
+  means in numbers.
+- The GitHub to Oracle deploy: how GitHub gets access, how a failed deploy is undone,
+  migrations on deploy.
+- Backups of the cloud database, and logs (ADR 0001 expected Application Insights at hosting).
+
+**Touches.** A guess: a new ADR, the `127.0.0.1` row in `docs/invariants.md`,
+`server/src/config.ts`, server bind address and TLS, B-04 External control, profile storage, a
+GitHub Actions workflow, a new infrastructure folder. Oracle credentials are the owner's (a hard
+stop). Depends on B-04.
+
+### B-13 — Selling it
+
+- **Status:** idea
+- **Added:** 2026-11-15
+- **Size:** L
+
+**Problem.** Other DJs and VJs could pay for the app, but today it is a single-owner tool.
+
+**Idea.** A placeholder (wording proposed, not yet the owner's): the hosted app serves paying
+customers, each with their own profiles.
+
+**Why it matters.** It is the owner's stated long-term goal, and it keeps B-12 from making
+choices that block it.
+
+**Not this.** Something B-12 builds now; B-12 only must not block it.
+
+**Open questions.** Who the buyers are, pricing model, keeping each customer's data separate,
+payments, terms and privacy, support.
+
+**Touches.** A guess: auth, profile storage, ADR 0001 (Q3, §7). Depends on B-12.

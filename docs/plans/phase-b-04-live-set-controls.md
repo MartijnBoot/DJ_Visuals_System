@@ -654,7 +654,8 @@ decision (Risks). Browser storage: `djv.controlAddress` (screen machine), `djv.c
   approval), reload the screen page (both recover), New code (both "Pairing ended"), overlay
   audio p95 ≤ 50 ms throughout. Proves the Wi-Fi latency (SD17) and the non-functional render
   budget with two controllers; the gate proves AC19 and AC43 structurally only.
-  **In progress 2026-11-15:** screen machine on Ethernet (profile Private), phone an iPhone on
+  **Done 2026-11-15, with D-04 accepted as known by the owner** (round-trip p95 over 100 ms on
+  VJ drags; profile switches within it). Screen machine on Ethernet (profile Private), phone an iPhone on
   the same router's Wi-Fi. Phone paired by QR and accepted on the screen; device `colour`
   messages answered `applied` + `state` in the server log. Getting there needed an owner-made
   inbound port rule (TCP `CONTROL_PORT`, Private profile): every existing Node.js program rule
@@ -675,6 +676,10 @@ decision (Risks). Browser storage: `djv.controlAddress` (screen machine), `djv.c
 - **H4 — after H3, from a third device:** the spec's Verification 3 — `http://<address>:<PORT>/api/profiles`
   refused, `http://<address>:<CONTROL_PORT>/api/profiles` 404; switch off, `/control` refused.
   Real private addresses are proven here; the gate binds loopback (SD29).
+  **Done 2026-11-15:** from the phone on the same Wi-Fi, all three as expected — `:PORT` on the
+  LAN address refused, `:CONTROL_PORT/api/profiles` 404, `/control` refused after switching
+  off. On the T18 build, the settings panel fits without sideways scrolling (D-05 confirmed
+  fixed on the owner's machine).
 - **H5 — push, CI, PR, merge:** the owner's.
 
 ## Out of scope for this plan
