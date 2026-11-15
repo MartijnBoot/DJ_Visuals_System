@@ -246,6 +246,9 @@ export function Builder() {
             readOnly={readOnly}
             storedCount={stored.length}
             onImported={(profiles) => setStored((list) => [...list, ...profiles].sort(byName))}
+            onStored={add}
+            // Replace rewrites the open profile: its unsaved changes would go (B-03 PD11).
+            confirmReplace={(id) => id !== selectedId || confirmDiscard()}
           />
         </div>
         {selected && (
