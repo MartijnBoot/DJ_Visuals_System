@@ -59,11 +59,11 @@ browser check runs only against `pnpm start`.
 
 | Module | Owns | Public surface | Must not |
 |---|---|---|---|
-| `engine/` | The WebGL2 context, the animation loop, the look (one shader pass composed from a profile, `shader.ts`; its constants and B-01's reference mapping in `look.ts`), the profile model, strength formula and built-in profile (`profile.ts`), render scaling (`scale.ts`), the latency record (`latency.ts`), frame statistics; its own `AudioFeatures`, `Dials` (`features.ts`) and `Profile` | `createEngine(canvas)` returning `{ start, stop, stats, latency, setFeatures, setDials, setSource, setScaleCap, setProfile }`, `BUILT_IN_PROFILE`, `EFFECTS`, `effectStrength`, `DEFAULT_DIALS`, `ZERO_FEATURES`, `WebGL2UnavailableError`, `ProfileSupersededError` (`engine/src/index.ts`) | Declare or import any package, including `audio/` and `shared/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
+| `engine/` | The WebGL2 context, the animation loop, the look (one shader pass composed from a profile, `shader.ts`; its constants and B-01's reference mapping in `look.ts`), the profile model, strength formula and built-in profile (`profile.ts`), render scaling (`scale.ts`), the latency record (`latency.ts`), frame statistics; custom effects wrapped into the pass, the flash limiter, the runtime guard and context-loss recovery (B-03), compile errors located to effect and line (`compile-error.ts`); its own `AudioFeatures`, `Dials` (`features.ts`) and `Profile` | `createEngine(canvas)` returning `{ start, stop, stats, latency, setFeatures, setDials, setSource, setScaleCap, setProfile(profile, { retry }), onGuard }`, `BUILT_IN_PROFILE`, `EFFECTS`, `effectStrength`, `DEFAULT_DIALS`, `ZERO_FEATURES`, `WebGL2UnavailableError`, `ProfileSupersededError`, `ProfileCompileError`, `locateErrors` (`engine/src/index.ts`) | Declare or import any package, including `audio/` and `shared/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
 | `audio/` | The `AudioWorklet` processor (`djv-features`, `audio/src/processor.ts`), the analysis maths as pure functions (`analysis.ts`; every number in `constants.ts`), the `AudioFeatures` contract (`features.ts`), the main-thread source that maps the worklet's clock and decays stale features (`source.ts`, `clock.ts`), the synthetic feature loop for the builder's preview (`synthetic.ts`) | `createFeatureSource(context, stream, moduleUrl)` resolving to `{ read(now), stop, lastBlockAt }`, `createAnalyser`, `windowFrames`, `createClockMap`, `decayFeatures`, `syntheticFeatures`, `AudioFeatures`, `ZERO_FEATURES` (`audio/src/index.ts`); the worklet file as `@djv/audio/processor` | Declare or import any package, including `engine/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
-| `web/` | The screen page at `/`, the builder at `/builder` and the External control page at `/control` (`web/src/main.tsx` reads `location.pathname`; no router), the screen's control client and the controller (`web/src/control/`), the capture session (`web/src/capture/`), the panel and its profile picker (`profiles/active.ts`), the overlay, the wake lock, the health and profile clients (`profiles/api.ts`), the builder (`web/src/builder/`: list, editor reducer, preview, conflict, export and import); wiring `audio/` and `shared/` to `engine/` (`features-compat.ts`, `profile-compat.ts`, checked both ways by `tests/meta/features-compat.test.ts` and `tests/meta/profile-compat.test.ts`) | The built app in `web/dist` | Import from `server/`; read the environment |
+| `web/` | The screen page at `/`, the builder at `/builder` and the External control page at `/control` (`web/src/main.tsx` reads `location.pathname`; no router), the screen's control client and the controller (`web/src/control/`), the capture session (`web/src/capture/`), the panel and its profile picker (`profiles/active.ts`), the overlay, the wake lock, the health and profile clients (`profiles/api.ts`), the builder (`web/src/builder/`: list, editor reducer, custom effect row, preview with live compile and frame time, conflict, export, import and Replace); wiring `audio/` and `shared/` to `engine/` (`features-compat.ts`, `profile-compat.ts`, checked both ways by `tests/meta/features-compat.test.ts` and `tests/meta/profile-compat.test.ts`) | The built app in `web/dist` | Import from `server/`; read the environment |
 | `server/` | Configuration, logging, the database and migrations, the profile store (`server/src/profiles/store.ts`, the only SQL for profiles) and routes (`routes.ts`), HTTP, External control (`server/src/control/`: pairing, the LAN listener, the sockets, relaying) | `GET /api/health`, the profile endpoints below, `GET /builder`, static `web/dist`, the screen socket `/api/control/screen`; on the LAN listener while switched on `GET /control`, `GET /assets/*`, the device socket `/api/control/device`; `pnpm migrate` | Listen on anything but `127.0.0.1`, except the External control listener on private IPv4 addresses while switched on; read the environment outside `config.ts` |
-| `shared/` | The schemas both sides validate against: health, the profile and its file format (`profile.ts`, with the optional `primary` and `derivePrimary`), the endpoint bodies and error shapes (`profile-api.ts`), the "Name (n)" rule (`names.ts`), every External control message both ways and its limits (`control.ts`) | `healthResponseSchema`, `profileSchema`, `profileFileSchema`, `toProfileFile`, `derivePrimary`, `storedProfileSchema`, `updateProfileSchema`, `issuesFrom`, `nextFreeName`, `LIMITS`, the control schemas and constants (`shared/src/index.ts`) | — |
+| `shared/` | The schemas both sides validate against: health, the profile and its file format (`profile.ts`, with the optional `primary` and `derivePrimary`, the custom effect and its code checks), the endpoint bodies and error shapes (`profile-api.ts`), the "Name (n)" rule (`names.ts`), every External control message both ways and its limits (`control.ts`) | `healthResponseSchema`, `profileSchema`, `profileFileSchema`, `toProfileFile`, `SUPPORTED_FORMAT_VERSIONS`, `isSupportedFormatVersion`, `derivePrimary`, `customCodeIssues`, `storedProfileSchema`, `updateProfileSchema`, `issuesFrom`, `nextFreeName`, `LIMITS`, `CUSTOM_LIMITS`, the control schemas and constants (`shared/src/index.ts`) | — |
 
 `shared/`, `engine/` and `audio/` export their `src/index.ts`; there is no build step for the
 server or those packages. Only `web/` is built, by Vite, into `web/dist`; the worklet reaches
@@ -103,36 +103,70 @@ handed to `audioWorklet.addModule`.
 
 ## Profiles
 
-- **What a profile is.** Plain data, never code (B-02 SD1): a name (1 to 60 characters, unique
-  case-insensitively), a palette of 2 to 6 `#rrggbb` colours, the two dials' starting values,
-  and an ordered list of up to 12 effects, each type at most once. The twelve types are
-  pixelate, posterise, smear, zoom, displace, flash, grain, edges, brightness, paletteMap,
-  mirror and rgbSplit; each has a strength, at most one audio binding (feature and amount) and,
-  where it has one, an own parameter (a palette slot for flash, grain and edges; segments 2 to 8
-  for mirror). `shared/src/profile.ts` defines it once; `engine/src/profile.ts` declares the same
-  shape without importing `shared/`, and `web/src/profile-compat.ts` makes the type check fail if
-  they drift.
-- **One shader pass.** `buildFragment(types)` (`engine/src/shader.ts`) emits `fx0`, the source
+- **What a profile is.** Data, whose only code is GLSL (B-02 SD1, amended by B-03 SD1): a name
+  (1 to 60 characters, unique case-insensitively), a palette of 2 to 6 `#rrggbb` colours, the
+  two dials' starting values, and an ordered list of up to 12 effects, each built-in type at most
+  once. The twelve built-in types are pixelate, posterise, smear, zoom, displace, flash, grain,
+  edges, brightness, paletteMap, mirror and rgbSplit; each has a strength, at most one audio
+  binding (feature and amount) and, where it has one, an own parameter (a palette slot for flash,
+  grain and edges; segments 2 to 8 for mirror). A `custom` effect (B-03 SD4) may appear any
+  number of times within the 12: a label unique in the profile, a strength, a binding, an
+  abstraction flag (recognisability scales it when set), 0 to 4 named parameters and its `code`,
+  the body of a GLSL function of at most 8 KB written against the contract in
+  [`docs/custom-effects.md`](../custom-effects.md). The schema refuses code with `#`, the word
+  `uniform`, an `in`/`out` declaration or unbalanced braces (`customCodeIssues`); the compiler is
+  the real check, and the server never compiles. The code is never evaluated as JavaScript: it
+  reaches the browser only through `shaderSource` (`docs/invariants.md`). `shared/src/profile.ts`
+  defines the profile once; `engine/src/profile.ts` declares the same shape without importing
+  `shared/`, and `web/src/profile-compat.ts` makes the type check fail if they drift.
+- **One shader pass.** `buildFragment(entries)` (`engine/src/shader.ts`) emits `fx0`, the source
   (camera or noise, tint included), and one `fxN` per effect in stack order, each calling the
   one before: a warp calls it at a moved coordinate, a colour effect changes its result, edges
   and rgbSplit sample it three times. The first effect in the list is therefore applied first,
   as separate passes would, at one pass's cost. Strengths, colours and segments are uniforms,
-  so a value edit costs nothing; only a change to the list needs a new program.
-- **Switching** (B-02 SD15). `Engine.setProfile` with the same effect list applies the values on
-  the next frame. Another list is compiled and linked while the old profile keeps drawing, read
-  without blocking where `KHR_parallel_shader_compile` exists, and swapped in at the start of a
-  frame; the promise resolves at the swap, rejects if the link fails (the old profile keeps
-  drawing) or a later call supersedes it. Programs are cached by their list. The first frame
-  after a swap, and after the render targets are recreated by a scale step or a resize, draws no
-  smear, because the previous frame is black or from the old look.
+  so a value edit costs nothing; only a change to the list, or to a custom effect's code, needs a
+  new program. A custom effect's body becomes its own function between engine-written `#define`s
+  that map the contract's names (`source`, `strength`, `param`, `audio`, …) onto its uniforms,
+  undefined after it; a wrapper `fxN` passes the picture through without running the body under
+  strength 0.001. A fragment without a custom effect is byte for byte what B-02 built
+  (`tests/meta/fragment-golden.test.ts`).
+- **The flash limiter** (B-03 SD5). `main()` of a fragment with a custom effect ends with engine
+  code no body can skip: a colour that is not finite becomes the previous output, and a luma step
+  above 0.35 from the previous output at that pixel is moved back along the line to it. In such a
+  profile both render targets start from the last output, at a swap and when a scale step or a
+  resize recreates them, so the limiter always compares with a real frame.
+- **Switching** (B-02 SD15). `Engine.setProfile` with the same program key (the effect list and
+  every custom body's code) applies the values on the next frame. Another key is compiled and
+  linked while the old profile keeps drawing, read without blocking where
+  `KHR_parallel_shader_compile` exists, and swapped in at the start of a frame; the promise
+  resolves at the swap, rejects if the link fails (the old profile keeps drawing) or a later call
+  supersedes it. Programs are cached by their key. Custom code that does not compile rejects with
+  `ProfileCompileError`, its issues mapped from the compiler's lines onto the effect and the line
+  in its own body (`locateErrors`); the failed key is remembered (16 at most) and not compiled
+  again on the next slider move. The first frame after a swap, and after the render targets are
+  recreated by a scale step or a resize, draws no smear, because the previous frame is black or
+  from the old look.
+- **The guard** (B-03 SD8, PD8). When the render scale is at 50% and the one-second mean frame
+  time has stayed above budget for 3 s (and the custom program has drawn for 3 s), the engine
+  switches to the same profile without its custom effects (built-ins and camera keep drawing) and
+  emits `onGuard({ kind: "slow", customBypassed: true })`. When the WebGL context is lost the
+  engine prevents the default, draws nothing until it is restored, then remakes its texture,
+  targets and programs and draws the active profile again at once, without its custom effects,
+  emitting `onGuard({ kind: "contextLost", customBypassed })`. Either bypass lasts until
+  `setProfile(profile, { retry: true })` (a pick) or a call with another program key (an edit in
+  the builder); a same-key call (a slider, a live colour) keeps it.
 - **The screen page** (`web/src/profiles/active.ts`). Nothing is fetched on load. Start and each
   opening of the panel list the profiles; the first successful list also picks the remembered
   id (`localStorage` key `djv.profile`), else the built-in. Picking re-fetches the profile,
   validates it, awaits the swap, applies its starting dials and logs `profile { id }`. The page
   keeps the copy it loaded: an edit or delete elsewhere changes nothing until a profile is picked
   (SD9). Any failure (API down, 404, 422, invalid body, a program that does not link) keeps the
-  current look and shows one reason in the panel; the output never carries text. The overlay
-  names the active profile.
+  current look and shows one reason in the panel; custom code that does not compile is named by
+  its effect's label, never by the compiler's text. The guard's reason is kept apart: opening the
+  panel does not clear it, a successful pick does, and a pick asks the engine to retry. Every
+  reason reaches paired controllers through the existing state; the output never carries text.
+  The browser logs each guard event at `warn` with the profile id. The overlay names the active
+  profile.
 - **The builder** (`/builder`). The list (built-in first, then names case-insensitively) with
   create (from the built-in or a preset palette), duplicate, rename (a save: same id, revision
   + 1), delete behind a confirm and export; an editor over a draft reducer
@@ -141,12 +175,33 @@ handed to `audioWorklet.addModule`.
   noise field until Start, then by the real camera and audio through the same capture session as
   the screen page; Save with the revision the edit started from. A refused save (409 stale
   revision, or the profile deleted elsewhere) keeps the draft and offers "Reload theirs" or "Save
-  mine as a copy"; unsaved changes are marked and leaving them asks first.
-- **Files.** Export is built in the browser: `{ formatVersion: 1, profiles: [ { name, palette,
-  dials, effects } ] }`, never an id, revision or timestamp (`toProfileFile`). Import checks the
+  mine as a copy"; unsaved changes are marked and leaving them asks first. "Add an effect"
+  offers "Custom" (from `custom-template.ts`); a custom row shows the label, strength, binding,
+  an "Abstraction" checkbox, parameter sliders and the code in a plain monospace text box. The
+  preview compiles each edit to the code after 150 ms and reports the result with the program key
+  it belongs to; the row shows "ok" or `line <n>: <message>`, the preview keeps the last version
+  that compiled, and Save stays off with its reason until a draft with code compiles. The
+  preview shows its frame time and the guard's reason.
+- **Files.** Export is built in the browser: `{ formatVersion, profiles: [ { name, palette,
+  dials, effects } ] }`, never an id, revision or timestamp (`toProfileFile`); `formatVersion` is
+  1 when no profile holds a custom effect, so a B-02 build can read it, and 2 otherwise (B-03
+  SD15). Import accepts 1 and 2 (a version 1 holding a custom effect is refused) and checks the
   JSON, then the version, then the shared schema before anything is sent, and the server checks
   again; a bundle is stored all or nothing, every profile with a new id and revision 1, a taken
-  name becoming "Name (2)" (`nextFreeName`).
+  name becoming "Name (2)" (`nextFreeName`). A file of exactly one profile whose name is stored
+  (trimmed, any case, never the built-in) asks "Replace *Name*" or "Add as a copy" (B-03 SD10):
+  Replace is `PUT /api/profiles/:id` with the revision just read, so the id stays and the screen
+  and controllers keep it; a save elsewhere in between gets the conflict choice above.
+- **Authoring** (B-03 SD6, SD7, SD14). The `/profile` command (`.claude/commands/profile.md`)
+  guides a Claude Code session from an inspiration (kept in `inspiration/<slug>/`, ignored by
+  git) to `profiles/<slug>.json` and `profiles/<slug>.md`, committed; the owner imports the file.
+  The agent never writes to the database or calls the server. `pnpm profile:check <file>
+  [--camera <image>] [--out <dir>]` (`scripts/profile-check.ts`) checks the file with the
+  builder's import check, compiles each profile in the real engine in headless Chromium with the
+  gate's software WebGL on a page it serves itself (`scripts/profile-check-page.ts`), and writes
+  nine stills per profile (quiet, kick, hi-hat at dials (0, 0), the starting dials and (1, 1))
+  under `profiles/.check/` (ignored by git), reporting whether the flash limiter clipped. Exit 0
+  valid, 1 a schema or compile failure naming the profile, effect and field or line, 2 usage.
 
 ### Endpoints
 
@@ -263,7 +318,8 @@ the pairing and relays.
   scale steps 100 -> 75 -> 50% after 2 s with the one-second mean frame time above 1.1 x the
   refresh period, and back up one step after 10 s not above it; a step up undone within 10 s
   doubles the next wait (to 80 s at most). The panel's quality cap bounds the maximum; the
-  overlay shows the current scale.
+  overlay shows the current scale. At 50% the controller also reports how long the mean has been
+  above budget, for the guard (Profiles, above).
 
 ## Data
 
@@ -285,7 +341,9 @@ the pairing and relays.
   `djv.controlKey` (the session key) and `djv.controlMode` (`dj` or `vj`) on a controller's LAN
   origin.
 - **Profile definition.** `definition` may carry `primary` (B-04 SD10), written only when set;
-  rows and version-1 files without it stay valid and `formatVersion` stays 1.
+  rows and version-1 files without it stay valid and `formatVersion` stays 1. It may carry
+  custom effects with their code (B-03), with no migration; a B-02-era build would read such a
+  row as unusable.
 - **Migrations.** Files `server/migrations/NNNN_<slug>.sql`, applied in name order by
   `server/src/migrate.ts`, each in its own transaction together with its `schema_migrations`
   row. The runner takes `BEGIN IMMEDIATE` on every run, so a file locked by another process
@@ -323,7 +381,8 @@ is reported the same way. `scripts/dev.ts` learns `PORT` for the Vite proxy by i
 - **Writes** (B-02 SD18). No response carries a CORS header. A `POST` or `PUT` without
   `Content-Type: application/json` is 415, answered before the body is read, and `text/plain` is
   not a parser, so a page on another origin cannot write with a simple request. The body limit
-  is 64 KB, 1 MB for an import (413). `server/src/app.ts` sets all three.
+  is 128 KB (B-03 SD16: twelve custom effects fit one save), 1 MB for an import (413).
+  `server/src/app.ts` sets all three.
 - **Requests a running set makes.** `GET /`, `/assets/*`, `/api/health`, the screen socket
   (`/api/control/screen`, one WebSocket from load), and `/api/profiles` and `/api/profiles/:id`
   only on a user action in the panel or on a paired controller (Start, opening the panel,
@@ -336,7 +395,8 @@ is reported the same way. `scripts/dev.ts` learns `PORT` for the Vite proxy by i
   code (never the code), screens connecting and superseded, and each device step by its sequence
   label ("Device 3"); control messages at `debug`, type only. Never a code, a session key, a
   User-Agent, a device hint, a camera label or a colour. The browser logs capture state changes
-  and profile switches at info level, without device labels or media data.
+  and profile switches at info level, and guard events at warn with the profile id, without
+  device labels, media data or profile code.
 - **Errors.** Every boot failure goes through `fatal` in `server/src/log.ts`: one `fatal` line,
   exit 1, nothing listening. In the browser, a failed or invalid health answer reads
   `server: unreachable` and never stops the engine; no WebGL2 context shows one line of text

@@ -27,6 +27,9 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
   migration is a new file `server/migrations/NNNN_<slug>.sql` with the next number.
 - `pnpm run test --project unit` (`*.test.ts`), `pnpm run test --project integration`
   (`*.int.test.ts`), `pnpm test:browser` (Playwright, `tests/browser/`).
+- `pnpm profile:check <file> [--camera <image>] [--out <dir>]` — checks a profile file against
+  the schema, compiles it in headless Chromium and writes stills under `profiles/.check/`; exit 1
+  names the profile, effect and field or line (`scripts/profile-check.ts`).
 
 ## Workflow
 
@@ -35,6 +38,9 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
   `/adopt` once.
 - Work from an audited plan in `docs/plans/phase-<id>-*.md`. No task without a signed audit —
   not yours to waive.
+- `/profile <slug>` authors one visual profile from an inspiration: `profiles/<slug>.json` and
+  `.md`, checked with `pnpm profile:check`; the owner imports it. Never the database or the
+  server ([.claude/commands/profile.md](.claude/commands/profile.md)).
 - One task per branch (`feature/phase-<id>-t<n>-<slug>`), conventional commits
   (`feat(phase-<id>): T<n> — ...`).
 - Bug fixes start with a failing test; a feature's acceptance criteria become its test cases.
@@ -60,7 +66,10 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
   `shared/` — zod schemas both sides validate against, including the profile and every control
   message (`shared/src/control.ts`).
   Profile data lives in the `profiles` table (`server/src/profiles/store.ts` is the only SQL for
-  it); the built-in profile is code (`engine/src/profile.ts`). `tests/meta/` — tests about
+  it); the built-in profile is code (`engine/src/profile.ts`). A profile's own code is a GLSL
+  `custom` effect, never JavaScript, written against [docs/custom-effects.md](docs/custom-effects.md).
+  `profiles/` — authored profile files and their notes, committed (`profiles/.check/` ignored);
+  `inspiration/` — their sources, ignored by git, never committed. `tests/meta/` — tests about
   the codebase's own boundaries. `tests/browser/` — Playwright against `pnpm start`.
 - Types at the boundary: every external input is validated before use.
 - A new dependency needs justification (what, why not the standard library, licence,

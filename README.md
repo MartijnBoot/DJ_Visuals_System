@@ -24,6 +24,7 @@ checker, Node 24 (`.nvmrc`; pnpm refuses another major) and pnpm 9 (`packageMana
 ```bash
 pnpm start                # build the app and serve it on http://127.0.0.1:8000 (PORT)
 pnpm dev                  # hot reload on http://localhost:5173, /api proxied to the server
+pnpm profile:check <file> # check, compile and render stills of a profile file (below)
 ```
 
 The output screen is `/`; the profile builder is `/builder` (also linked from the screen's
@@ -56,6 +57,17 @@ every device; **Disconnect** removes one; switching off, or restarting the serve
 pairing ("Pairing ended — scan the code again"). The first time you switch on, Windows asks
 whether Node.js may use the network: allow it on private networks, or no device can reach it
 (see [docs/runbooks/README.md](docs/runbooks/README.md)).
+
+## Author a profile with Claude Code
+
+A profile can carry its own look as GLSL code (a `custom` effect,
+[docs/custom-effects.md](docs/custom-effects.md)). In a Claude Code session, put your inspiration
+(a painting, photos) in `inspiration/<slug>/` (never committed) and run `/profile <slug>`. The agent
+writes `profiles/<slug>.json` and `profiles/<slug>.md`, checks the file with `pnpm profile:check
+profiles/<slug>.json` (stills under `profiles/.check/`) and iterates. Then open `/builder`,
+**Import a file** and choose it; importing a newer version of a profile you already have offers
+**Replace**, which keeps it picked on the screen and on controllers. In the builder the code is
+editable, compiles as you type, and Save waits until it compiles.
 
 ## How work is done here
 
