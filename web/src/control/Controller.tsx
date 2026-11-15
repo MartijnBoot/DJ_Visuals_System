@@ -6,6 +6,8 @@
 import type { ScreenState } from "@djv/shared";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
+import { VjPanel } from "./VjPanel.tsx";
+import { Wheel } from "./Wheel.tsx";
 import { createDeviceLink, openSocket, type DeviceLink } from "./device-link.ts";
 import { keyStore, modeStore, type Mode } from "./remembered.ts";
 import { styles } from "./styles.ts";
@@ -44,6 +46,8 @@ export function Controller() {
   const [mode, setMode] = useState<Mode>(() => modes.initial(window.innerWidth));
   const [code, setCode] = useState("");
   const [approvalsOpen, setApprovalsOpen] = useState(false);
+  /** The palette slot the wheel is open on, or null. */
+  const [wheel, setWheel] = useState<number | null>(null);
   // A dial's own value while it is being moved, so the thumb follows the finger; the screen's
   // value otherwise (SD5).
   const [moving, setMoving] = useState<Partial<Record<DialName, number>>>({});
@@ -227,9 +231,9 @@ export function Controller() {
               <button
                 type="button"
                 data-testid="primary-colour"
-                disabled
-                title="The colour wheel arrives with VJ mode"
+                disabled={locked}
                 style={{ ...styles.button, display: "flex", gap: 8, alignItems: "center" }}
+                onClick={() => setWheel(state.primary)}
               >
                 <span
                   aria-hidden
@@ -246,6 +250,32 @@ export function Controller() {
                 Primary colour
               </button>
             </section>
+
+            {mode === "vj" && (
+              <VjPanel
+                state={state}
+                linkText={view.text}
+                locked={locked}
+                pending={view.pending}
+                roundTrip={() => link.roundTrip()}
+                onSwatch={setWheel}
+                onAccept={(deviceId) => link.send({ type: "accept", deviceId })}
+                onReject={(deviceId) => link.send({ type: "reject", deviceId })}
+              />
+            )}
+
+            {wheel !== null && wheel < state.palette.length && (
+              <Wheel
+                key={wheel}
+                slot={wheel}
+                current={state.palette[wheel]!}
+                stored={state.storedPalette[wheel] ?? state.palette[wheel]!}
+                disabled={locked}
+                onColour={(value) => link.send({ type: "colour", slot: wheel, value })}
+                onReset={() => link.send({ type: "resetColour", slot: wheel })}
+                onDone={() => setWheel(null)}
+              />
+            )}
           </>
         )}
       </div>
