@@ -64,6 +64,13 @@ export interface SocketLike {
   onerror: (() => void) | null;
 }
 
+/**
+ * The browser's WebSocket as a `SocketLike`. Its handler properties take `Event`/`MessageEvent`,
+ * so the types do not line up, but every member `SocketLike` names behaves as described: text
+ * frames arrive as `MessageEvent`s whose `data` is a string.
+ */
+export const openSocket = (url: string): SocketLike => new WebSocket(url) as unknown as SocketLike;
+
 export interface DeviceLinkDeps {
   url: string;
   connect(url: string): SocketLike;

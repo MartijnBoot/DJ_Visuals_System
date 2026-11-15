@@ -83,3 +83,21 @@ describe("startFrameFeed (B-08 AC4)", () => {
     expect(drawn).toEqual([1, 1]);
   });
 });
+
+describe("startFrameFeed's beforeFrame (B-04 PD5, AC19)", () => {
+  it("runs first in each frame, before the features are read and before the engine draws", () => {
+    const events: string[] = [];
+    const { engine } = standInEngine(events);
+    startFrameFeed(
+      engine,
+      () => {
+        events.push("read");
+        return windowNo(1);
+      },
+      (t) => events.push(`before ${t}`),
+    );
+    runFrame(16);
+    runFrame(32);
+    expect(events).toEqual(["before 16", "read", "draw 1", "before 32", "read", "draw 1"]);
+  });
+});

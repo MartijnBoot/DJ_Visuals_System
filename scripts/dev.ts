@@ -23,7 +23,9 @@ async function main(): Promise<void> {
   const vite = await createServer({
     root: resolve(root, "web"),
     configFile: resolve(root, "web/vite.config.ts"),
-    server: { proxy: { "/api": `http://127.0.0.1:${config.PORT}` } },
+    // `ws: true` carries the screen page's External control socket too (B-04 T9); the proxy
+    // forwards the page's own Origin, http://localhost:5173, which the screen socket accepts.
+    server: { proxy: { "/api": { target: `http://127.0.0.1:${config.PORT}`, ws: true } } },
   });
   await vite.listen();
   vite.printUrls();
