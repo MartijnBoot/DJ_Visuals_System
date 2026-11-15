@@ -45,16 +45,20 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
 ## Conventions
 
 - The environment is read only in `server/src/config.ts` (`APP_ENV`, `LOG_LEVEL`, `PORT`,
-  `DATA_DIR`, validated with zod at boot, no defaults in code). ESLint's
+  `CONTROL_PORT`, `DATA_DIR`, validated with zod at boot, no defaults in code; `CONTROL_PORT` must
+  differ from `PORT` and nothing listens on it until External control is switched on). ESLint's
   `no-restricted-properties` and `tests/meta/config-boundary.test.ts` fail any other
   `process.env`. Root scripts that need a value import `config.ts` (`scripts/dev.ts` does).
 - `engine/` — the framework-free WebGL2 renderer; `audio/` — the framework-free AudioWorklet
   analysis; neither has a dependency of any kind and neither imports the other
   (`tests/meta/engine-boundary.test.ts`); `engine/` declares its own `Profile` and never
-  imports `shared/`. `web/` — the React + Vite app, two routes in one page: the screen at `/` and
-  the profile builder at `/builder` (`web/src/main.tsx`, no router); imports `engine/`, `audio/`
-  and `shared/`, never `server/`. `server/` — Fastify, SQLite, migrations, static serving, the
-  profile endpoints. `shared/` — zod schemas both sides validate against, including the profile.
+  imports `shared/`. `web/` — the React + Vite app, three routes in one page: the screen at `/`,
+  the profile builder at `/builder` and the External control page at `/control`
+  (`web/src/main.tsx`, no router); imports `engine/`, `audio/` and `shared/`, never `server/`.
+  `server/` — Fastify, SQLite, migrations, static serving, the profile endpoints, External
+  control (`server/src/control/`: the screen socket, the LAN listener while switched on, pairing).
+  `shared/` — zod schemas both sides validate against, including the profile and every control
+  message (`shared/src/control.ts`).
   Profile data lives in the `profiles` table (`server/src/profiles/store.ts` is the only SQL for
   it); the built-in profile is code (`engine/src/profile.ts`). `tests/meta/` — tests about
   the codebase's own boundaries. `tests/browser/` — Playwright against `pnpm start`.
