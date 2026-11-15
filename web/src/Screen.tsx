@@ -103,6 +103,8 @@ export function Screen() {
     control.link.start();
     return () => control.link.stop();
   }, [control]);
+  const [controlView, setControlView] = useState(() => control.link.view());
+  useEffect(() => control.link.subscribe(() => setControlView(control.link.view())), [control]);
   // Mirrors `panel` so a key handler can tell an opening from a closing without an updater side effect.
   const panelRef = useRef(true);
   const showPanel = useCallback((next: boolean) => {
@@ -257,6 +259,8 @@ export function Screen() {
           read={read}
           profiles={profiles}
           onProfile={(id) => void active.pick(id)}
+          control={controlView}
+          onControl={(action) => void control.link.send(action)}
         />
       )}
     </>

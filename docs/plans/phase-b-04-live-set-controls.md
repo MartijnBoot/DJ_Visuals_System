@@ -82,6 +82,10 @@ The spec says a failed condition "is a stop for the owner, not a swap": PD1. **O
 MIT, last modified 2026-10-04, `dependencies` `@types/node` only. Both pass; installed exactly
 those versions in `server/` (`ws` a dependency, `@types/ws` a dev dependency).
 
+**Re-checked at T10, 2026-11-15** (`pnpm view`): `qrcode-generator` 2.0.4, MIT, released
+2025-08-07 (15 months), no `dependencies`, ships `dist/qrcode.d.ts`. Passes; installed exactly
+that version in `web/`.
+
 ## Decisions this plan makes
 
 Readings of the spec the planner had to choose. **Confirm** rows are for the audit to confirm or

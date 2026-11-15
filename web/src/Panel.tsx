@@ -2,13 +2,16 @@
 // two device pickers, the profile picker with its reason line and a link to the builder, the
 // two dials, the quality cap, the feature meters, the source states and one reason line. It is
 // scaffolding over the canvas that B-04's control surface replaces. Keyboard-operable: native
-// controls in tab order, each labelled.
+// controls in tab order, each labelled. B-04 (SD24): an External control section at the end; the
+// panel scrolls when it is taller than the window.
 import type { AudioFeatures } from "@djv/audio";
 import type { Dials, RenderScale } from "@djv/engine";
 import { useEffect, useState } from "react";
 import type { DeviceOption } from "./capture/devices.ts";
 import type { AudioChoice } from "./capture/remembered.ts";
 import type { SessionState } from "./capture/session.ts";
+import { ExternalControl } from "./control/ExternalControl.tsx";
+import type { PanelAction, ScreenLinkView } from "./control/screen-link.ts";
 import type { ActiveState } from "./profiles/active.ts";
 import { Row, SourcePickers } from "./SourcePickers.tsx";
 
@@ -32,6 +35,8 @@ export interface PanelProps {
   read(now: number): AudioFeatures;
   profiles: ActiveState;
   onProfile(id: string): void;
+  control: ScreenLinkView;
+  onControl(action: PanelAction): void;
 }
 
 export function Panel(props: PanelProps) {
@@ -57,6 +62,9 @@ export function Panel(props: PanelProps) {
         top: 8,
         right: 8,
         width: 340,
+        maxHeight: "calc(100vh - 16px)",
+        overflowY: "auto",
+        boxSizing: "border-box",
         display: "grid",
         gap: 6,
         padding: "8px 10px",
@@ -150,6 +158,7 @@ export function Panel(props: PanelProps) {
       <div data-testid="panel-camera-state">camera: {capture.camera}</div>
       <div data-testid="panel-audio-state">audio: {capture.audio}</div>
       {capture.reason && <div data-testid="panel-reason">{capture.reason}</div>}
+      <ExternalControl view={props.control} onAction={props.onControl} />
     </section>
   );
 }
