@@ -669,3 +669,29 @@ controller side in T12; AC8 VJ side in T13; AC7 in T15; Windows Firewall in H3 a
 PD11 slot bound from `LIMITS.paletteMax`; T17's evidence section defined.
 
 Audited by: Martijn Boot  Date: 2026-11-14
+
+## Evidence
+
+Built 2026-11-15 in whole-plan mode, one stacked branch per task (`feature/phase-b-04-t<n>-*`).
+Each task ran its named verification; the gate ran on the tip of the stack only, so the
+intermediate commits were not gated one by one.
+
+**Gate on the tip, `74119ba`** (`bash scripts/check.sh`, Windows 11, Node 24): all 9 steps passed
+— plans, workflow tests, format, lint, types, build; unit 53 files / 556 tests; integration 8
+files / 110 tests; browser 133 passed (4.9 min). `scripts/check.sh: all 9 step(s) passed`.
+
+**`pnpm check:load` on `74119ba`** (not the gate, B-08): exit 0, all 9 steps passed under load;
+browser 133 passed (20.7 min).
+
+**What the gate found on the way to that tip, each fixed on the responsible task's branch as a
+new commit and the later branches rebased:**
+
+- The first tip, `58f580f`, was green in the gate, but `pnpm check:load` failed T16's scenario at
+  "the screen turns greener": `expect.poll`'s five seconds ran out while the loaded screen drew a
+  few frames a second. The colour had reached the screen; the canvas reads were slow. Fixed on
+  T16 (`496ad58` after rebase): that wait gets a minute, the threshold unchanged.
+- The gate on the next tip, `b77e705`, failed T15's reload test: it moved a dial before the pick
+  it had just made landed, and the pick's starting dials overwrote it. Fixed on T15 (`349b5df`):
+  the tests that pick and then move a dial wait for the pick first. No source change in either.
+
+T15 and T16's own `bash scripts/check.sh` is this tip gate. H1, H3, H4 and H5 remain the owner's.
