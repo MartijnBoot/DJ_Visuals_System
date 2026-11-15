@@ -53,6 +53,8 @@ export interface ScreenLink {
 }
 
 const OPEN = 1;
+/** `applied.entries.max(1000)` in `shared/src/control.ts`. */
+const APPLIED_MAX = 1000;
 
 /** What the screen page knows, for `toScreenState`. */
 export interface ScreenFacts {
@@ -162,7 +164,10 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
     },
     flush(applied) {
       if (!isOpen()) return;
-      if (applied.length > 0) write({ type: "applied", entries: applied });
+      // A frame can acknowledge more than one message holds (after a paused tab, say).
+      for (let i = 0; i < applied.length; i += APPLIED_MAX) {
+        write({ type: "applied", entries: applied.slice(i, i + APPLIED_MAX) });
+      }
       if (!dirty) return;
       dirty = false;
       write({ type: "state", state: deps.buildState() });

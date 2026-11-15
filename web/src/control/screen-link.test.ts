@@ -1,6 +1,7 @@
 // T9 (B-04 spec SD5, SD13, SD22, SD25, AC26, AC29 to AC31; plan PD3, PD12, PD17): the screen
 // page's socket with a fake socket and fake timers.
 import {
+  screenMessageSchema,
   screenStateSchema,
   type Control,
   type ControlStatus,
@@ -141,6 +142,16 @@ describe("state (SD5, PD3)", () => {
       },
       { type: "state", state },
     ]);
+  });
+
+  it("splits a frame's acknowledgements into batches the schema accepts", () => {
+    latest().open();
+    const entries = Array.from({ length: 2500 }, (_, i) => ({ deviceId: "d1", seq: i + 1 }));
+    link.flush(entries);
+    const sent = latest().sent.filter((m) => m.type === "applied");
+    expect(sent.map((m) => (m.entries as unknown[]).length)).toEqual([1000, 1000, 500]);
+    for (const m of sent) expect(screenMessageSchema.safeParse(m).success).toBe(true);
+    expect(sent.flatMap((m) => m.entries)).toEqual(entries);
   });
 });
 
