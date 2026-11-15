@@ -132,7 +132,11 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     const url = await screen(page);
     const code = (await page.getByTestId("control-code").textContent())!;
     const phone = await paired(page, browser, url);
-    await phone.locator(`[data-testid=profile-tile][data-profile-id="${warm.id}"]`).click();
+    const tile = phone.locator(`[data-testid=profile-tile][data-profile-id="${warm.id}"]`);
+    await tile.click();
+    // The pick lands at its swap and applies the profile's starting dials (B-02 SD15, B-04
+    // SD6); a dial moved before then is overwritten by them, on every surface alike (AC25).
+    await expect(tile).toHaveAttribute("aria-pressed", "true");
     await phone.getByTestId("dial-recognisability").fill("0.66");
     await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.66");
 
@@ -255,7 +259,9 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     page.on("websocket", (ws) => requests.push(`WS ${new URL(ws.url()).pathname}`));
     const url = await screen(page);
     const phone = await paired(page, browser, url, { viewport: TABLET });
-    await phone.locator(`[data-testid=profile-tile][data-profile-id="${twelve.id}"]`).click();
+    const tile = phone.locator(`[data-testid=profile-tile][data-profile-id="${twelve.id}"]`);
+    await tile.click();
+    await expect(tile).toHaveAttribute("aria-pressed", "true"); // the pick has landed
     await phone.getByTestId("dial-reactivity").fill("0.8");
     await phone.locator('[data-testid=swatch][data-slot="1"]').click();
     await phone.getByTestId("wheel-disc").focus();
