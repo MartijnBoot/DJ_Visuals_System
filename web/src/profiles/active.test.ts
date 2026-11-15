@@ -37,7 +37,7 @@ function setup(
       async (id) => options.get ?? { kind: "ok", profile: id === "w1" ? warm : cool },
     ),
   };
-  const setProfile = vi.fn<(profile: Profile, options?: { retry?: boolean }) => Promise<void>>(
+  const setProfile = vi.fn<(profile: Profile, options?: { pick?: boolean }) => Promise<void>>(
     async () => {},
   );
   const setDials = vi.fn();
@@ -186,7 +186,7 @@ describe("pick (AC11, AC13, AC14)", () => {
     await active.pick(BUILTIN_ID);
     expect(api.get).not.toHaveBeenCalled();
     expect(setProfile).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Built-in" }), {
-      retry: true, // B-03 PD8: a pick retries custom effects the guard turned off
+      pick: true, // B-03 PD8: a pick retries custom effects the guard turned off
     });
     expect(setDials).toHaveBeenLastCalledWith({ recognisability: 0.3, reactivity: 0.7 });
     expect(save).toHaveBeenLastCalledWith(BUILTIN_ID);
@@ -435,7 +435,7 @@ describe("the guard's reason (B-03)", () => {
     const { active, setProfile } = setup();
     await active.open();
     await active.pick("w1");
-    expect(setProfile.mock.calls.at(-1)![1]).toEqual({ retry: true });
+    expect(setProfile.mock.calls.at(-1)![1]).toEqual({ pick: true });
     active.setColour(0, "#123456");
     expect(setProfile.mock.calls.at(-1)![0].palette[0]).toBe("#123456");
     expect(setProfile.mock.calls.at(-1)![1]).toBeUndefined();

@@ -47,9 +47,9 @@ export interface ActiveDeps {
   storage: { load(): string | null; save(id: string): void };
   /**
    * Hands the profile to the engine; resolves at the swap, rejects when it cannot be prepared.
-   * `retry` on a pick: custom effects the guard turned off run again (B-03 PD8).
+   * `pick`: the person picked it, so custom effects the guard turned off run again (B-03 PD8).
    */
-  setProfile(profile: Profile, options?: { retry?: boolean }): Promise<void>;
+  setProfile(profile: Profile, options?: { pick?: boolean }): Promise<void>;
   setDials(dials: Profile["dials"]): void;
   log(id: string): void;
 }
@@ -150,7 +150,7 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   /** Switches to `profile` in the engine, then its dials; `false` when the engine refuses. */
   const apply = async (id: string, profile: Profile, mine: number): Promise<boolean> => {
     try {
-      await deps.setProfile(profile, { retry: true });
+      await deps.setProfile(profile, { pick: true });
     } catch (error) {
       if (mine === token) {
         reason = engineReason(error);
