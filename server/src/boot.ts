@@ -4,6 +4,7 @@
 import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { MAX_SCREEN_MESSAGE } from "@djv/shared";
+import type { WebSocket } from "ws";
 import { createApp, registerStatic } from "./app.ts";
 import { ConfigError, type Config } from "./config.ts";
 import { defaultControlAddresses, type ControlAddress } from "./control/addresses.ts";
@@ -128,16 +129,28 @@ export async function boot(
       port: config.CONTROL_PORT,
       ...(paths.staticDir === undefined ? {} : { staticDir: resolve(paths.staticDir) }),
       addresses: paths.controlAddresses ?? defaultControlAddresses,
-      prepare: (lanApp, { address }) =>
+      prepare: (lanApp, { address }) => {
+        // Closing this listener waits for every connection, upgraded ones included. The hub ends
+        // the sockets it knows (a hello was sent); one still open here never said hello, and
+        // would hold switching off open for good (AC6), so it is cut.
+        const sockets = new Set<WebSocket>();
+        lanApp.addHook("preClose", async () => {
+          for (const socket of sockets) if (socket.readyState === socket.OPEN) socket.terminate();
+        });
         routeUpgrades(lanApp.server, [
           {
             path: DEVICE_SOCKET,
             // Its own listener's origin only (SD25): the page it served on this address.
             origins: () => [`http://${address}:${config.CONTROL_PORT}`],
             wss: deviceSockets,
-            onConnection: (socket, request) => attachDevice(socket, request, { hub, log, now }),
+            onConnection: (socket, request) => {
+              sockets.add(socket);
+              socket.on("close", () => sockets.delete(socket));
+              attachDevice(socket, request, { hub, log, now });
+            },
           },
-        ]),
+        ]);
+      },
     }),
   });
   const screenSockets = socketServer(4 * MAX_SCREEN_MESSAGE);

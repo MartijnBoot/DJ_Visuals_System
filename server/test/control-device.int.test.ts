@@ -16,7 +16,14 @@ import { pino } from "pino";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boot, type Booted } from "../src/boot.ts";
 import { loadConfig } from "../src/config.ts";
-import { closeAll, connect, type Client, type ConnectOptions } from "./control-client.ts";
+import {
+  closeAll,
+  connect,
+  rawUpgrade,
+  refused,
+  type Client,
+  type ConnectOptions,
+} from "./control-client.ts";
 import { freePort, repoRoot } from "./spawn-server.ts";
 
 const UA =
@@ -431,6 +438,24 @@ describe("ending pairings (AC6, AC13, AC14, AC17)", () => {
     expect(await b.client.find(is("ended"))).toEqual({ type: "ended" });
     await a.client.closed;
     await b.client.closed;
+  });
+
+  it("switching off also closes a socket that never said hello, and the switch completes", async () => {
+    const silent = await device();
+    const off = await act({ type: "disable" });
+    expect(off.on).toBe(false);
+    await silent.closed;
+    expect(await refused("127.0.0.1", controlPort)).toBe(true);
+    // The panel's action queue is not stuck behind the switch-off.
+    expect((await act({ type: "enable" })).on).toBe(true);
+  });
+
+  it("answers 404 to an upgrade whose request target is not a URL, and keeps running (AC5)", async () => {
+    expect(await rawUpgrade("127.0.0.1", controlPort, "http://[", deviceOrigin())).toMatch(
+      /^HTTP\/1\.1 404 /,
+    );
+    const a = await waiting();
+    expect(a.client.ws.readyState).toBe(a.client.ws.OPEN);
   });
 
   it("refuses newCode and disconnect from a controller (AC17)", async () => {

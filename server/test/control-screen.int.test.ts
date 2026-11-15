@@ -9,7 +9,7 @@ import WebSocket from "ws";
 import { pino } from "pino";
 import { boot } from "../src/boot.ts";
 import { loadConfig } from "../src/config.ts";
-import { closeAll, connect as connectClient, type Client } from "./control-client.ts";
+import { closeAll, connect as connectClient, rawUpgrade, type Client } from "./control-client.ts";
 import { baseEnv, freePort, repoRoot, spawnServer, type SpawnedServer } from "./spawn-server.ts";
 
 let tmp: string;
@@ -113,6 +113,12 @@ describe("the screen socket's Origin (AC16, SD25, PD2)", () => {
     await expect(
       connectClient(`ws://127.0.0.1:${port}/api/health`, toScreenSchema, { origin: own() }),
     ).rejects.toThrow("HTTP 404");
+  });
+
+  it("answers 404 to an upgrade whose request target is not a URL, and keeps running", async () => {
+    expect(await rawUpgrade("127.0.0.1", port, "http://[", own())).toMatch(/^HTTP\/1\.1 404 /);
+    const health = await fetch(`http://127.0.0.1:${port}/api/health`);
+    expect(health.status).toBe(200);
   });
 });
 

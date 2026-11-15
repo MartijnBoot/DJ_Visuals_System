@@ -85,6 +85,36 @@ export function connect<T>(
   });
 }
 
+/**
+ * Sends a WebSocket upgrade with a raw request target over TCP, bypassing every client's URL
+ * handling, and resolves with the first line of the answer ("" if the socket closes first).
+ */
+export function rawUpgrade(
+  host: string,
+  port: number,
+  target: string,
+  origin: string,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = tcpConnect({ host, port });
+    let answer = "";
+    socket.setTimeout(5000, () => {
+      socket.destroy();
+      reject(new Error("no answer within 5000 ms"));
+    });
+    socket.once("connect", () =>
+      socket.write(
+        `GET ${target} HTTP/1.1\r\nHost: ${host}:${port}\r\nOrigin: ${origin}\r\n` +
+          "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+      ),
+    );
+    socket.on("data", (chunk) => (answer += String(chunk)));
+    socket.once("error", () => {});
+    socket.once("close", () => resolve(answer.split("\r\n")[0] ?? ""));
+  });
+}
+
 /** True when nothing accepts a TCP connection on `host:port`. */
 export function refused(host: string, port: number): Promise<boolean> {
   return new Promise((resolve) => {

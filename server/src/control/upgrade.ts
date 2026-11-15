@@ -29,7 +29,9 @@ export const socketServer = (maxPayload: number) =>
 export function routeUpgrades(server: Server, routes: readonly UpgradeRoute[]): void {
   server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on("error", () => socket.destroy());
-    const path = new URL(request.url ?? "/", "http://upgrade.invalid").pathname;
+    // A request target Node's parser accepts can still fail URL parsing; thrown here it would
+    // escape the listener and end the process, so it is a path no route names.
+    const path = URL.parse(request.url ?? "/", "http://upgrade.invalid")?.pathname;
     const route = routes.find((r) => r.path === path);
     if (!route) return refuse(socket, 404);
     const origin = request.headers.origin;
