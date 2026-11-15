@@ -8,16 +8,23 @@ import { EffectRow, type EffectRowProps } from "./EffectRow.tsx";
 
 export interface CustomRowProps extends EffectRowProps {
   effect: CustomEffect;
+  /** Under the code: "ok", `line <n>: <message>` per error, or a check still running (T11). */
+  compile: string;
 }
 
 const LINE = { display: "flex", gap: 6, alignItems: "center" } as const;
 
 export function CustomRow(props: CustomRowProps) {
-  const { effect, id, index, disabled, dispatch } = props;
+  const { effect, id, index, disabled, dispatch, compile, ...row } = props;
   const of = (what: string) => `${what} of ${effect.label || "custom effect"}`;
   return (
     <EffectRow
-      {...props}
+      {...row}
+      effect={effect}
+      id={id}
+      index={index}
+      disabled={disabled}
+      dispatch={dispatch}
       header={
         <label style={LINE}>
           <span style={{ width: 120 }}>label</span>
@@ -101,6 +108,12 @@ export function CustomRow(props: CustomRowProps) {
           onChange={(e) => dispatch({ type: "customCode", index, code: e.target.value })}
         />
       </label>
+      <output
+        data-testid={`custom-compile-${id}`}
+        style={{ whiteSpace: "pre-wrap", color: compile === "ok" ? "#8f8" : "#fc8" }}
+      >
+        {compile}
+      </output>
     </EffectRow>
   );
 }

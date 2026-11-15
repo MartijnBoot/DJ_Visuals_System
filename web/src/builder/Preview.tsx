@@ -7,7 +7,14 @@
 // The preview exists only in the builder tree.
 import { createFeatureSource, syntheticFeatures } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
-import { createEngine, ProfileSupersededError, type Engine } from "@djv/engine";
+import {
+  createEngine,
+  ProfileCompileError,
+  ProfileSupersededError,
+  type CompileIssue,
+  type Engine,
+  type GuardEvent,
+} from "@djv/engine";
 import type { Profile } from "@djv/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "../capture/devices.ts";
@@ -20,12 +27,49 @@ import { SourcePickers } from "../SourcePickers.tsx";
 
 const IDLE: SessionState = { camera: "idle", audio: "idle", video: null, contextState: "none" };
 
-export function Preview({ draft }: { draft: Profile }) {
+/** What one compile of the preview gave (B-03 PD10); "checking" is a draft with no report yet. */
+export type CompileState =
+  | { kind: "ok" }
+  | { kind: "failed"; issues: readonly CompileIssue[] }
+  /** The preview has no WebGL2: nothing can be checked. */
+  | { kind: "unavailable" };
+
+/** A compile result and the program key it belongs to; `null` belongs to every draft. */
+export interface CompileReport {
+  key: string | null;
+  state: CompileState;
+}
+
+/**
+ * What a compile depends on: the effect list and every custom body's code. A slider or a colour
+ * keeps it, so only an edit to the code or the stack waits for a new compile.
+ */
+export function programKey(draft: Profile): string {
+  return JSON.stringify(draft.effects.map((e) => (e.type === "custom" ? [e.code] : e.type)));
+}
+
+/** Code edits reach the engine after this pause, so typing does not compile every key (PD10). */
+const CODE_DEBOUNCE_MS = 150;
+
+const GUARD_TEXT = {
+  slow: "custom effects are off: this look is too heavy for this GPU; edit the code to retry",
+  lost: "the graphics context was lost and restored",
+} as const;
+
+export interface PreviewProps {
+  draft: Profile;
+  /** Every compile result of the preview's engine (B-03 PD10). */
+  onCompile(report: CompileReport): void;
+}
+
+export function Preview({ draft, onCompile }: PreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const sessionRef = useRef<Session | null>(null);
   const startedRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [guard, setGuard] = useState<string | null>(null);
+  const [frameMs, setFrameMs] = useState(0);
   const [started, setStarted] = useState(false);
   const [capture, setCapture] = useState<SessionState>(IDLE);
   const [devices, setDevices] = useState<{ cameras: DeviceOption[]; audioInputs: DeviceOption[] }>({
@@ -46,6 +90,11 @@ export function Preview({ draft }: { draft: Profile }) {
       return;
     }
     engineRef.current = engine;
+    // B-03 SD8, AC16: why custom effects are off, and the frame time about four times a second.
+    const stopGuard = engine.onGuard((event: GuardEvent) =>
+      setGuard(event.kind === "slow" ? GUARD_TEXT.slow : GUARD_TEXT.lost),
+    );
+    const frameTimer = setInterval(() => setFrameMs(engine.stats().frameTimeMs), 250);
     // The same session the output screen creates (`Screen.tsx`): nothing is requested until Start.
     const session = createSession({
       mediaDevices: navigator.mediaDevices,
@@ -76,6 +125,8 @@ export function Preview({ draft }: { draft: Profile }) {
     return () => {
       cancelAnimationFrame(feed);
       unsubscribe();
+      stopGuard();
+      clearInterval(frameTimer);
       session.stop();
       engine.stop();
       engineRef.current = null;
@@ -83,15 +134,37 @@ export function Preview({ draft }: { draft: Profile }) {
     };
   }, []);
 
+  // Without WebGL2 no code can be checked, so a draft with code cannot be saved (PD10).
+  useEffect(() => {
+    if (error) onCompile({ key: null, state: { kind: "unavailable" } });
+  }, [error, onCompile]);
+
   // Every edit goes to the engine: a value edit on the next frame, a stack edit at the swap (AD3).
+  // A new program key (code or stack) waits a moment first, and each result is reported with
+  // the key it belongs to (B-03 PD10).
+  const sentKey = useRef<string | null>(null);
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
     engine.setDials(draft.dials);
-    engine.setProfile(sharedToEngine(draft)).catch((e: unknown) => {
-      if (!(e instanceof ProfileSupersededError)) console.warn("preview profile not applied", e);
-    });
-  }, [draft]);
+    const key = programKey(draft);
+    const send = () => {
+      engine.setProfile(sharedToEngine(draft)).then(
+        () => onCompile({ key, state: { kind: "ok" } }),
+        (e: unknown) => {
+          if (e instanceof ProfileSupersededError) return;
+          if (!(e instanceof ProfileCompileError)) console.warn("preview profile not applied", e);
+          const issues = e instanceof ProfileCompileError ? e.issues : [];
+          onCompile({ key, state: { kind: "failed", issues } });
+        },
+      );
+    };
+    if (key === sentKey.current) return send();
+    sentKey.current = key;
+    setGuard(null); // a code or stack edit retries custom effects the guard turned off (PD8)
+    const timer = setTimeout(send, CODE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [draft, onCompile]);
 
   const refreshDevices = useCallback(() => {
     void listDevices(navigator.mediaDevices).then(setDevices);
@@ -128,6 +201,16 @@ export function Preview({ draft }: { draft: Profile }) {
             background: "#000",
           }}
         />
+      )}
+      {!error && (
+        <span data-testid="preview-frame-time" title="this GPU's time per frame for this look">
+          frame {frameMs.toFixed(1)} ms
+        </span>
+      )}
+      {guard && (
+        <span data-testid="preview-guard" role="status" style={{ color: "#fc8" }}>
+          {guard}
+        </span>
       )}
       {!started ? (
         <button type="button" data-testid="preview-start" onClick={() => void start()}>

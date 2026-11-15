@@ -8,6 +8,7 @@ import { updateProfile } from "../profiles/api.ts";
 import { Conflict } from "./Conflict.tsx";
 import { EffectRow } from "./EffectRow.tsx";
 import { CustomRow } from "./CustomRow.tsx";
+import { programKey, type CompileReport, type CompileState } from "./Preview.tsx";
 import {
   availableTypes,
   canAddCustom,
@@ -39,6 +40,40 @@ export interface EditorProps {
     draft: Profile,
     original: { id: string; current: StoredProfile | null },
   ): Promise<string | null>;
+  /** The preview's last compile result (B-03 PD10): a draft with code saves only once it is ok. */
+  compile: CompileReport | null;
+}
+
+/** The draft's compile state: a report for another program key is a check still running. */
+function compileOf(
+  draft: Profile,
+  compile: CompileReport | null,
+): CompileState | { kind: "pending" } {
+  if (compile && (compile.key === null || compile.key === programKey(draft))) return compile.state;
+  return { kind: "pending" };
+}
+
+/** Why Save is off for a draft with custom code, or null (PD10). */
+function codeReason(draft: Profile, state: ReturnType<typeof compileOf>): string | null {
+  if (!draft.effects.some((e) => e.type === "custom")) return null; // never waits without code
+  if (state.kind === "ok") return null;
+  if (state.kind === "pending") return "checking the code…";
+  if (state.kind === "unavailable")
+    return "custom effects cannot be checked: the preview has no WebGL2";
+  const located = state.issues.find((i) => i.effectIndex >= 0);
+  const effect = located ? draft.effects[located.effectIndex] : undefined;
+  return effect?.type === "custom"
+    ? `custom effect "${effect.label}" does not compile`
+    : "the custom code does not compile";
+}
+
+/** The line under one custom effect's code: ok, its errors, or a check still running. */
+function rowCompile(state: ReturnType<typeof compileOf>, index: number): string {
+  if (state.kind === "pending") return "checking…";
+  if (state.kind === "unavailable") return "not checked: the preview has no WebGL2";
+  if (state.kind === "ok") return "ok";
+  const mine = state.issues.filter((i) => i.effectIndex === index);
+  return mine.length === 0 ? "ok" : mine.map((i) => `line ${i.line}: ${i.message}`).join("\n");
 }
 
 interface Refused {
@@ -72,6 +107,7 @@ export function Editor({
   onDirtyChange,
   onDraftChange,
   onSaveCopy,
+  compile,
 }: EditorProps) {
   const [draft, dispatch] = useReducer(reduce, saved, fieldsOf);
   const [saving, setSaving] = useState(false);
@@ -82,7 +118,16 @@ export function Editor({
   const issues = validate(draft);
   const dirty = isDirty(draft, saved);
   const nameIssue = issues.find((i) => i.path === "name");
-  const canSave = !readOnly && !offline && !saving && !refused && dirty && issues.length === 0;
+  const compiled = compileOf(draft, compile);
+  const blockedByCode = codeReason(draft, compiled);
+  const canSave =
+    !readOnly &&
+    !offline &&
+    !saving &&
+    !refused &&
+    dirty &&
+    issues.length === 0 &&
+    blockedByCode === null;
   const addable = availableTypes(draft);
   const customAddable = canAddCustom(draft);
   const anyAddable = addable.length > 0 || customAddable;
@@ -249,7 +294,7 @@ export function Editor({
               dispatch,
             };
             return effect.type === "custom" ? (
-              <CustomRow key={id} {...row} effect={effect} />
+              <CustomRow key={id} {...row} effect={effect} compile={rowCompile(compiled, index)} />
             ) : (
               <EffectRow key={id} {...row} effect={effect} />
             );
@@ -312,6 +357,11 @@ export function Editor({
             </button>
             {dirty && <span data-testid="editor-dirty">unsaved changes</span>}
           </div>
+          {blockedByCode && (
+            <span data-testid="editor-save-reason" role="status">
+              {blockedByCode}
+            </span>
+          )}
           {issues.length > 0 && (
             <ul role="alert" data-testid="editor-issues" style={{ margin: 0, color: "#f88" }}>
               {issues.map((issue) => (
