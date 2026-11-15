@@ -2,7 +2,8 @@
 // compiled by Chromium's WebGL2 (ANGLE on SwiftShader) in a context the test creates.
 import { expect, test } from "@playwright/test";
 import type { CustomEntry, FragmentEntry } from "../../engine/src/shader.ts";
-import { buildFragment } from "../../engine/src/shader.ts";
+import { buildFragment, fragmentLayout } from "../../engine/src/shader.ts";
+import { locateErrors } from "../../engine/src/compile-error.ts";
 import { linkAll, px, render, SIZE, type Rgb } from "./fragment.ts";
 
 const RED: Rgb = [255, 0, 0];
@@ -98,4 +99,21 @@ test("a body using every contract name links, as do twelve custom effects (PD7)"
   results.forEach((result, i) => {
     expect(result, `list ${i}`).toEqual({ compiled: true, linked: true, log: "" });
   });
+});
+
+// B-03 T6 (plan PD9): Chromium's own log, mapped back to the body and its line.
+test("a compile error in the second of two bodies is located to that body and its line (PD9)", async ({
+  page,
+}) => {
+  const entries: FragmentEntry[] = [
+    custom("return source(uv);"),
+    "zoom",
+    custom("vec3 c = source(uv);\nc *= 0.5;\nreturn c * undeclaredName;"),
+  ];
+  const [result] = await linkAll(page, [buildFragment(entries)]);
+  expect(result!.compiled).toBe(false);
+  const bodies = fragmentLayout(entries).map((b) => ({ ...b, label: `fx ${b.effectIndex}` }));
+  expect(locateErrors(result!.log, bodies)).toEqual([
+    { effectIndex: 2, label: "fx 2", line: 3, message: expect.stringContaining("undeclaredName") },
+  ]);
 });

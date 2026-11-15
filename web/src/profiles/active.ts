@@ -9,6 +9,7 @@
 // controller edits in memory and never saves; a pick, the same profile included, starts again
 // from the stored palette. While a pick is pending a colour change is dropped: handing the engine
 // a profile then would cancel the pick, and the swap would discard the colour anyway.
+import { ProfileCompileError } from "@djv/engine";
 import { derivePrimary, type Profile } from "@djv/shared";
 import type { ListResult, ProfileResult } from "./api.ts";
 import { BUILTIN_ID, builtinEntry } from "./builtin.ts";
@@ -72,6 +73,17 @@ const REASONS = {
   engine: "that profile could not be prepared; keeping the current look",
 } as const;
 
+/**
+ * Why the engine refused a profile (B-03 AC21, PD9): the custom effect whose code does not
+ * compile, by its label, never the compiler's text (the reason reaches controllers too).
+ */
+function engineReason(error: unknown): string {
+  const located =
+    error instanceof ProfileCompileError ? error.issues.find((i) => i.effectIndex >= 0) : undefined;
+  if (!located) return REASONS.engine;
+  return `that profile could not be prepared: custom effect "${located.label}" does not compile; keeping the current look`;
+}
+
 export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   const builtin = builtinEntry();
   const remembered = (): string | null => {
@@ -119,9 +131,9 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   const apply = async (id: string, profile: Profile, mine: number): Promise<boolean> => {
     try {
       await deps.setProfile(profile);
-    } catch {
+    } catch (error) {
       if (mine === token) {
-        reason = REASONS.engine;
+        reason = engineReason(error);
         emit();
       }
       return false;

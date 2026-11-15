@@ -214,14 +214,15 @@ const contractDefines = (previous: string, slot: number): string[] => [
  * `fxN`, which passes the picture through without running the body under strength 0.001
  * (SD13). The body ends on its own line so a closing `//` comment cannot reach the brace.
  */
-function customLink(code: string, index: number, slot: number): string {
+function customLink(code: string, index: number, slot: number): { text: string; codeAt: number } {
   const previous = `fx${index - 1}`;
   const undefs = CUSTOM_CONTRACT.defines.map((name) => `#undef ${name}`);
-  return [
+  const before = [
     `// custom ${slot}`,
     ...contractDefines(previous, slot),
     `vec3 fx${index}Custom(vec2 uv) {`,
-    code,
+  ].join("\n");
+  const after = [
     "}",
     ...undefs,
     `vec3 fx${index}(vec2 uv) {`,
@@ -230,16 +231,30 @@ function customLink(code: string, index: number, slot: number): string {
     "}",
     "",
   ].join("\n");
+  return { text: `${before}\n${code}\n${after}`, codeAt: before.length + 1 };
 }
 
-/** The fragment shader for an ordered effect list (PD3), custom code included (B-03 SD3). */
-export function buildFragment(entries: readonly FragmentEntry[]): string {
+/** Where a custom body sits in its fragment, 1-based (B-03 PD9). */
+export interface BodyLayout {
+  /** Index in the entry list, which is the profile's effect list. */
+  effectIndex: number;
+  firstLine: number;
+  lineCount: number;
+}
+
+/** The fragment and the lines each custom body occupies in it: built together, never apart. */
+function assemble(entries: readonly FragmentEntry[]): { source: string; bodies: BodyLayout[] } {
   let slot = 0;
-  const functions = entries.map((entry, i) => {
-    if (typeof entry !== "string") return customLink(entry.code, i + 1, slot++);
-    const snippet = SNIPPETS[entry] ?? passThrough;
-    return `// ${entry}\nvec3 fx${i + 1}(vec2 uv) {${snippet(`fx${i}`)}\n}\n`;
-  });
+  const placed: { text: string; code?: { at: number; effectIndex: number; lineCount: number } }[] =
+    entries.map((entry, i) => {
+      if (typeof entry !== "string") {
+        const link = customLink(entry.code, i + 1, slot++);
+        const lineCount = entry.code.split("\n").length;
+        return { text: link.text, code: { at: link.codeAt, effectIndex: i, lineCount } };
+      }
+      const snippet = SNIPPETS[entry] ?? passThrough;
+      return { text: `// ${entry}\nvec3 fx${i + 1}(vec2 uv) {${snippet(`fx${i}`)}\n}\n` };
+    });
   const last = `fx${entries.length}(gl_FragCoord.xy / uResolution)`;
   const main =
     slot > 0
@@ -247,10 +262,35 @@ export function buildFragment(entries: readonly FragmentEntry[]): string {
       : `void main() {
   outColour = vec4(clamp(${last}, 0.0, 1.0), 1.0);
 }`;
-  return `${HEADER}${slot > 0 ? CUSTOM_HEADER : ""}
-${functions.join("\n")}
+  const prefix = `${HEADER}${slot > 0 ? CUSTOM_HEADER : ""}\n`;
+  const bodies: BodyLayout[] = [];
+  // The prefix's newlines, then each piece's own plus the one that joins it to the next.
+  let linesBefore = prefix.split("\n").length - 1;
+  for (const piece of placed) {
+    if (piece.code) {
+      const firstLine = linesBefore + piece.text.slice(0, piece.code.at).split("\n").length;
+      bodies.push({
+        effectIndex: piece.code.effectIndex,
+        firstLine,
+        lineCount: piece.code.lineCount,
+      });
+    }
+    linesBefore += piece.text.split("\n").length;
+  }
+  const source = `${prefix}${placed.map((p) => p.text).join("\n")}
 ${main}
 `;
+  return { source, bodies };
+}
+
+/** The fragment shader for an ordered effect list (PD3), custom code included (B-03 SD3). */
+export function buildFragment(entries: readonly FragmentEntry[]): string {
+  return assemble(entries).source;
+}
+
+/** The lines each custom body occupies in `buildFragment(entries)`, for compile errors (PD9). */
+export function fragmentLayout(entries: readonly FragmentEntry[]): BodyLayout[] {
+  return assemble(entries).bodies;
 }
 
 /**

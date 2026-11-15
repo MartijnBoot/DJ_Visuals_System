@@ -26,7 +26,8 @@ import {
   type Profile,
 } from "./profile.ts";
 import { createScaleController, type RenderScale } from "./scale.ts";
-import { buildFragment, type FragmentEntry } from "./shader.ts";
+import { buildFragment, fragmentLayout, type FragmentEntry } from "./shader.ts";
+import { locateErrors, ProfileCompileError, type BodyLines } from "./compile-error.ts";
 import { createFrameStats, type EngineStats } from "./stats.ts";
 
 export type { EngineStats, FrameStats } from "./stats.ts";
@@ -46,6 +47,8 @@ export type {
   Profile,
 } from "./profile.ts";
 export { BUILT_IN_PROFILE, EFFECTS, effectStrength } from "./profile.ts";
+export { locateErrors, ProfileCompileError } from "./compile-error.ts";
+export type { CompileIssue } from "./compile-error.ts";
 
 export interface Engine {
   start(): void;
@@ -92,6 +95,9 @@ const HAVE_CURRENT_DATA = 2;
 
 /** Linked programs kept for a quick switch back; the built-in's and the active one stay. */
 const PROGRAM_CACHE = 8;
+
+/** Failed keys remembered: each holds up to twelve bodies of code, so only a few (PD9). */
+const FAILURE_CACHE = 16;
 
 const UNIFORMS = [
   "uSource",
@@ -150,6 +156,8 @@ interface PendingSwitch {
   key: string;
   /** Null when the program is already linked (in the cache). */
   linking: Linking | null;
+  /** Where each custom body sits in the fragment, to locate a compile error (PD9). */
+  bodies: BodyLines[];
   resolve(): void;
   reject(error: Error): void;
 }
@@ -191,6 +199,11 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   });
   const hasCustom = (profile: Profile) => profile.effects.some((e) => e.type === "custom");
   const fragmentFor = (profile: Profile) => buildFragment(entriesOf(profile));
+  const bodiesOf = (profile: Profile): BodyLines[] =>
+    fragmentLayout(entriesOf(profile)).map((body) => {
+      const effect = profile.effects[body.effectIndex];
+      return { ...body, label: effect?.type === "custom" ? effect.label : "" };
+    });
 
   const builtInKey = keyOf(BUILT_IN_PROFILE);
   const cache = new Map<string, Linked>();
@@ -206,7 +219,26 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   let pending: PendingSwitch | null = null;
   /** The first frame after a swap mixes nothing of the old look into the new one (PD4). */
   let swapped = false;
-  const failedKeys = new Set<string>();
+  /** Keys that did not link, with why: logged once; custom code is not compiled again (PD9). */
+  const failures = new Map<string, Error>();
+  const noteFailure = (key: string, error: Error) => {
+    failures.set(key, error);
+    for (const old of failures.keys()) {
+      if (failures.size <= FAILURE_CACHE) break;
+      failures.delete(old);
+    }
+  };
+  /** A remembered failure, with the labels the profile has now (a rename keeps the key). */
+  const failureFor = (key: string, profile: Profile): Error | null => {
+    const error = failures.get(key);
+    if (!error || !(error instanceof ProfileCompileError)) return error ?? null;
+    return new ProfileCompileError(
+      error.issues.map((issue) => {
+        const effect = profile.effects[issue.effectIndex];
+        return effect?.type === "custom" ? { ...issue, label: effect.label } : issue;
+      }),
+    );
+  };
 
   const remember = (entry: Linked) => {
     cache.delete(entry.key);
@@ -236,14 +268,17 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       if (state.state === "pending") return;
       pending = null;
       if (state.state === "failed") {
-        if (!failedKeys.has(next.key)) {
-          failedKeys.add(next.key);
+        const issues = locateErrors(state.message, next.bodies);
+        const error =
+          issues.length > 0 ? new ProfileCompileError(issues) : new Error(state.message);
+        if (!failures.has(next.key)) {
+          noteFailure(next.key, error);
           console.warn("profile program did not link; keeping the current profile", {
             effects: typesOf(next.profile),
             reason: state.message,
           });
         }
-        next.reject(new Error(state.message));
+        next.reject(error);
         return;
       }
       entry = linked(next.key, state.program, hasCustom(next.profile));
@@ -458,7 +493,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
         pending.linking = null;
         supersede();
         return new Promise((resolve, reject) => {
-          pending = { profile, key, linking, resolve, reject };
+          pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile) };
         });
       }
       supersede();
@@ -466,6 +501,9 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
         active = { ...active, profile };
         return Promise.resolve();
       }
+      // Code that did not compile is not compiled again on the next slider move (PD9).
+      const failed = hasCustom(profile) ? failureFor(key, profile) : null;
+      if (failed) return Promise.reject(failed);
       return new Promise((resolve, reject) => {
         let linking: Linking | null = null;
         if (!cache.has(key)) {
@@ -476,7 +514,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
             return;
           }
         }
-        pending = { profile, key, linking, resolve, reject };
+        pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile) };
       });
     },
   };

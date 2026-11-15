@@ -4,6 +4,7 @@
 // call is recorded; programs link when the test says so.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILT_IN_PROFILE, createEngine, ZERO_FEATURES, type Profile } from "./index.ts";
+import { fragmentLayout } from "./shader.ts";
 
 interface Call {
   name: string;
@@ -25,7 +26,7 @@ interface FakeOptions {
 function fakeCanvas(width: number, height: number, { parallel = true }: FakeOptions = {}) {
   const calls: Call[] = [];
   const programs: FakeProgram[] = [];
-  const control = { failLinks: false };
+  const control = { failLinks: false, shaderLog: "" };
   const special: Record<string, (...args: unknown[]) => unknown> = {
     getExtension: (name) =>
       name === "KHR_parallel_shader_compile" && parallel
@@ -47,6 +48,7 @@ function fakeCanvas(width: number, height: number, { parallel = true }: FakeOpti
       return true;
     },
     getProgramInfoLog: () => "fake link failure",
+    getShaderInfoLog: () => control.shaderLog,
     getUniformLocation: (program, name) => ({ program: (program as FakeProgram).id, name }),
   };
   const gl = new Proxy({} as Record<string, unknown>, {
@@ -456,5 +458,62 @@ describe("the limiter's previous frame (B-03)", () => {
     frameAt(16);
     await switched;
     expect(frames().map(blits)).toEqual([1, 1]);
+  });
+});
+
+// B-03 T6 (spec AC21; plan PD9): a custom body that does not compile rejects with the effect and
+// the line in its own text; the same code is not compiled again on every slider move.
+describe("compile errors (B-03)", () => {
+  const BROKEN = "float b = nope;\nreturn source(uv);";
+  const broken = (value = 0.5): Profile => ({
+    ...BUILT_IN_PROFILE,
+    name: "Broken",
+    effects: [
+      { type: "zoom", amount: 0.2 },
+      {
+        type: "custom",
+        label: "Swirl",
+        amount: 1,
+        abstraction: false,
+        params: [{ name: "a", value }],
+        code: BROKEN,
+      },
+    ],
+  });
+
+  it("rejects with the effect, its label and the body's own line, and keeps drawing", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { engine, fake, calls } = started(640, 360, { parallel: false });
+    frameAt(0);
+    const [body] = fragmentLayout(["zoom", { type: "custom", code: BROKEN }]);
+    fake.control.failLinks = true;
+    fake.control.shaderLog = `ERROR: 0:${body!.firstLine}: 'nope' : undeclared identifier\n`;
+    const first = engine.setProfile(broken());
+    frameAt(16);
+    await expect(first).rejects.toMatchObject({
+      name: "ProfileCompileError",
+      issues: [
+        { effectIndex: 1, label: "Swirl", line: 1, message: "'nope' : undeclared identifier" },
+      ],
+    });
+    const compiled = calls.filter((c) => c.name === "createShader").length;
+    // The same code with another parameter value: rejected from the cache, nothing compiled.
+    await expect(engine.setProfile(broken(0.9))).rejects.toMatchObject({
+      name: "ProfileCompileError",
+    });
+    expect(calls.filter((c) => c.name === "createShader").length).toBe(compiled);
+    frameAt(32);
+    expect(frames().map(usedProgram)).toEqual([0, 0, 0]);
+  });
+
+  it("rejects with a plain error when the log names no line", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { engine, fake } = started(640, 360, { parallel: false });
+    frameAt(0);
+    fake.control.failLinks = true;
+    const switched = engine.setProfile(broken());
+    frameAt(16);
+    await expect(switched).rejects.toThrow(/link/);
+    await expect(switched).rejects.not.toMatchObject({ name: "ProfileCompileError" });
   });
 });

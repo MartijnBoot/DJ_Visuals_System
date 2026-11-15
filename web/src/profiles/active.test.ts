@@ -1,5 +1,6 @@
 // T9 (B-02 spec AC11 to AC14; plan PD1, PD16, AD2): the screen page's profile controller with
 // fakes, so its rules are tested without a browser.
+import { ProfileCompileError } from "@djv/engine";
 import type { Profile, StoredProfile } from "@djv/shared";
 import { describe, expect, it, vi } from "vitest";
 import type { ListResult, ProfileResult } from "./api.ts";
@@ -222,6 +223,37 @@ describe("pick (AC11, AC13, AC14)", () => {
     expect(active.state()).toMatchObject({ activeId: BUILTIN_ID, selectedId: BUILTIN_ID });
     expect(active.state().reason).toMatch(/prepare/i);
     expect(setDials).not.toHaveBeenCalled();
+  });
+
+  // B-03 AC21 (plan PD9): the reason names the custom effect, never the compiler's text.
+  it("names the custom effect whose code does not compile, and keeps the look", async () => {
+    const { active, setProfile, setDials } = setup();
+    await active.open();
+    setProfile.mockRejectedValueOnce(
+      new ProfileCompileError([
+        { effectIndex: -1, label: "", line: 40, message: "'x' : syntax error" },
+        { effectIndex: 2, label: "Swirl", line: 3, message: "'nope' : undeclared identifier" },
+      ]),
+    );
+    await active.pick("w1");
+    expect(active.state()).toMatchObject({ activeId: BUILTIN_ID });
+    expect(active.state().reason).toBe(
+      'that profile could not be prepared: custom effect "Swirl" does not compile; keeping the current look',
+    );
+    expect(active.state().reason).not.toContain("nope");
+    expect(setDials).not.toHaveBeenCalled();
+  });
+
+  it("keeps the plain reason when no compile issue names an effect", async () => {
+    const { active, setProfile } = setup();
+    await active.open();
+    setProfile.mockRejectedValueOnce(
+      new ProfileCompileError([{ effectIndex: -1, label: "", line: 40, message: "x" }]),
+    );
+    await active.pick("w1");
+    expect(active.state().reason).toBe(
+      "that profile could not be prepared; keeping the current look",
+    );
   });
 
   it("leaves what it shows alone when the profile is edited or deleted elsewhere (AC14)", async () => {
