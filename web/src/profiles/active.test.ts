@@ -37,7 +37,9 @@ function setup(
       async (id) => options.get ?? { kind: "ok", profile: id === "w1" ? warm : cool },
     ),
   };
-  const setProfile = vi.fn<(profile: Profile) => Promise<void>>(async () => {});
+  const setProfile = vi.fn<(profile: Profile, options?: { retry?: boolean }) => Promise<void>>(
+    async () => {},
+  );
   const setDials = vi.fn();
   const log = vi.fn();
   const save = vi.fn((id: string) => void (memory.id = id));
@@ -183,7 +185,9 @@ describe("pick (AC11, AC13, AC14)", () => {
     api.get.mockClear();
     await active.pick(BUILTIN_ID);
     expect(api.get).not.toHaveBeenCalled();
-    expect(setProfile).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Built-in" }));
+    expect(setProfile).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Built-in" }), {
+      retry: true, // B-03 PD8: a pick retries custom effects the guard turned off
+    });
     expect(setDials).toHaveBeenLastCalledWith({ recognisability: 0.3, reactivity: 0.7 });
     expect(save).toHaveBeenLastCalledWith(BUILTIN_ID);
     expect(active.state().activeId).toBe(BUILTIN_ID);
@@ -386,5 +390,54 @@ describe("live colours (B-04 SD7, AC20, AC21, PD6)", () => {
     active.subscribe(listener);
     active.setColour(0, "#111111");
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+// B-03 T9 (spec AC11, AC12, SD8; plan PD8): the guard's reason, kept apart from the list and
+// pick reasons; a pick retries custom effects the guard turned off.
+describe("the guard's reason (B-03)", () => {
+  const SLOW =
+    "custom effects are off: this look is too heavy for this GPU; pick the profile again to retry";
+  const LOST_CUSTOM =
+    "the graphics context was lost and restored; custom effects are off; pick the profile again to retry";
+  const LOST = "the graphics context was lost and restored";
+
+  it("names each guard event", () => {
+    const { active } = setup();
+    active.guard({ kind: "slow", customBypassed: true });
+    expect(active.state().reason).toBe(SLOW);
+    active.guard({ kind: "contextLost", customBypassed: true });
+    expect(active.state().reason).toBe(LOST_CUSTOM);
+    active.guard({ kind: "contextLost", customBypassed: false });
+    expect(active.state().reason).toBe(LOST);
+  });
+
+  it("survives opening the panel", async () => {
+    const { active } = setup();
+    await active.open();
+    active.guard({ kind: "slow", customBypassed: true });
+    await active.open();
+    expect(active.state().reason).toBe(SLOW);
+  });
+
+  it("gives way to a pick's own reason, and clears on a successful pick", async () => {
+    const { active, setProfile } = setup();
+    await active.open();
+    active.guard({ kind: "slow", customBypassed: true });
+    setProfile.mockRejectedValueOnce(new Error("did not link"));
+    await active.pick("w1");
+    expect(active.state().reason).toMatch(/could not be prepared/);
+    await active.pick("c1");
+    expect(active.state().reason).toBeNull();
+  });
+
+  it("asks the engine to retry on a pick, never on a live colour", async () => {
+    const { active, setProfile } = setup();
+    await active.open();
+    await active.pick("w1");
+    expect(setProfile.mock.calls.at(-1)![1]).toEqual({ retry: true });
+    active.setColour(0, "#123456");
+    expect(setProfile.mock.calls.at(-1)![0].palette[0]).toBe("#123456");
+    expect(setProfile.mock.calls.at(-1)![1]).toBeUndefined();
   });
 });

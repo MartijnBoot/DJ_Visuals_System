@@ -69,8 +69,8 @@ export function Screen() {
     createActiveProfile({
       api: { list: () => listProfiles(), get: (id) => getProfile(id) },
       storage: { load: () => loadProfileId(), save: (id) => saveProfileId(id) },
-      setProfile: (profile) =>
-        engineRef.current?.setProfile(sharedToEngine(profile)) ?? Promise.resolve(),
+      setProfile: (profile, options) =>
+        engineRef.current?.setProfile(sharedToEngine(profile), options) ?? Promise.resolve(),
       setDials: (next) => applyDials(next),
       log: (id) => console.info("profile", { id }),
     }),
@@ -124,6 +124,12 @@ export function Screen() {
       return;
     }
     engineRef.current = engine;
+    // The guard's reason reaches the panel and every controller through the profile reason
+    // (B-03 SD8, PD8); each is logged with the profile on screen.
+    const stopGuard = engine.onGuard((event) => {
+      active.guard(event);
+      console.warn("profile guard", { id: active.state().activeId, ...event });
+    });
     const session = createSession({
       mediaDevices: navigator.mediaDevices,
       createContext: () => new AudioContext(),
@@ -149,12 +155,13 @@ export function Screen() {
     return () => {
       stopFeed();
       unsubscribe();
+      stopGuard();
       session.stop();
       engine.stop();
       engineRef.current = null;
       sessionRef.current = null;
     };
-  }, [control]);
+  }, [control, active]);
 
   // Every change a controller mirrors marks the state for the next frame (B-04 SD5).
   useEffect(() => {
