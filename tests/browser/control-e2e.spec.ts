@@ -423,7 +423,10 @@ test.describe("part 2: the spec's scenario (T16, Verification 1)", () => {
         value,
       );
       await vj.getByTestId("wheel-done").click();
-      await expect.poll(() => greenness(page)).toBeGreaterThan(before + 10);
+      // The swatch above shows the screen applied the colour. How soon the canvas reads show it
+      // depends on the frame rate, which a loaded machine slows to a few frames a second: the
+      // wait gets a minute, not `expect.poll`'s five seconds (B-08: no wall-clock assertion).
+      await expect.poll(() => greenness(page), { timeout: 60_000 }).toBeGreaterThan(before + 10);
       await expect(page.getByTestId("overlay-profile")).toHaveText("profile: Twelve effects");
     });
 
