@@ -6,7 +6,11 @@
 // and segments are uniforms (`profileUniforms`), so only a change to the list needs a new
 // program. A custom effect (B-03 SD1, SD3) is the one exception: its GLSL body becomes one
 // link of the chain, wrapped by the engine (`customLink`).
+import { FLASH_MAX } from "./look.ts";
 import { CUSTOM_SLOTS, type EffectType } from "./profile.ts";
+
+/** `FLASH_MAX` as a GLSL float literal. */
+const FLASH_LIMIT = Number.isInteger(FLASH_MAX) ? `${FLASH_MAX}.0` : `${FLASH_MAX}`;
 
 const HEADER = `#version 300 es
 precision highp float;
@@ -236,11 +240,34 @@ export function buildFragment(entries: readonly FragmentEntry[]): string {
     const snippet = SNIPPETS[entry] ?? passThrough;
     return `// ${entry}\nvec3 fx${i + 1}(vec2 uv) {${snippet(`fx${i}`)}\n}\n`;
   });
-  const custom = slot > 0 ? CUSTOM_HEADER : "";
-  return `${HEADER}${custom}
+  const last = `fx${entries.length}(gl_FragCoord.xy / uResolution)`;
+  const main =
+    slot > 0
+      ? limitedMain(last)
+      : `void main() {
+  outColour = vec4(clamp(${last}, 0.0, 1.0), 1.0);
+}`;
+  return `${HEADER}${slot > 0 ? CUSTOM_HEADER : ""}
 ${functions.join("\n")}
-void main() {
-  outColour = vec4(clamp(fx${entries.length}(gl_FragCoord.xy / uResolution), 0.0, 1.0), 1.0);
-}
+${main}
 `;
+}
+
+/**
+ * The flash limiter (B-03 SD5, PD3), engine code after the chain, so no body can skip it: a
+ * colour that is not finite becomes the previous output (read by exponent bits, which no fast
+ * math folds away), and a luma step above `FLASH_MAX` from the previous output at this pixel is
+ * moved back along the line to it, so the step is exactly `FLASH_MAX`.
+ */
+function limitedMain(last: string): string {
+  return `void main() {
+  vec3 previous = texelFetch(uPrevious, ivec2(gl_FragCoord.xy), 0).rgb;
+  vec3 colour = ${last};
+  uvec3 exponent = floatBitsToUint(colour) & uvec3(0x7f800000u);
+  if (any(equal(exponent, uvec3(0x7f800000u)))) colour = previous;
+  colour = clamp(colour, 0.0, 1.0);
+  float delta = dot(colour - previous, vec3(0.299, 0.587, 0.114));
+  if (abs(delta) > ${FLASH_LIMIT}) colour = previous + (colour - previous) * (${FLASH_LIMIT} / abs(delta));
+  outColour = vec4(colour, 1.0);
+}`;
 }

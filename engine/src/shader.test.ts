@@ -174,3 +174,35 @@ describe("custom entries (B-03)", () => {
     expect(CUSTOM_CONTRACT.audio).toEqual(["level", "low", "mid", "high", "beat"]);
   });
 });
+
+// B-03 T5 (spec AC7, AC8, SD5; plan PD2, PD3): the flash limiter ends main() of a fragment that
+// holds custom code, and only of such a fragment.
+describe("the flash limiter (B-03)", () => {
+  const coded = buildFragment(["zoom", { type: "custom", code: "return source(uv);" }]);
+
+  it("is absent from a fragment without a custom entry", () => {
+    for (const list of [[], ["zoom", "flash"]] as EffectType[][]) {
+      expect(mainOf(buildFragment(list))).not.toContain("texelFetch");
+      expect(mainOf(buildFragment(list))).not.toContain("0.35");
+    }
+  });
+
+  it("reads the previous output at this pixel and limits the luma step to 0.35", () => {
+    const main = mainOf(coded);
+    expect(main).toContain("texelFetch(uPrevious, ivec2(gl_FragCoord.xy), 0)");
+    expect(main).toContain("vec3(0.299, 0.587, 0.114)");
+    expect(main).toMatch(/abs\(\w+\) > 0\.35/);
+  });
+
+  it("replaces a NaN or infinite colour by the previous one before clamping", () => {
+    const main = mainOf(coded);
+    expect(main).toContain("floatBitsToUint");
+    expect(main.indexOf("floatBitsToUint")).toBeLessThan(main.indexOf("clamp("));
+  });
+
+  it("assigns the output once, last", () => {
+    const main = mainOf(coded);
+    expect(main.match(/outColour =/g)).toHaveLength(1);
+    expect(main.trimEnd().split("\n").at(-1)).toMatch(/^\s*outColour = /);
+  });
+});

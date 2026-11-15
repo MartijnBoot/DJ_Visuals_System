@@ -402,3 +402,59 @@ describe("custom effects in the engine (B-03)", () => {
     expect(uniform(last, "uAudio.level")).toBe(0.5);
   });
 });
+
+// B-03 T5 (plan PD4): in a profile with a custom effect both targets start from the last output,
+// at a swap and when they are recreated, so the limiter always has a real previous frame.
+describe("the limiter's previous frame (B-03)", () => {
+  const coded: Profile = {
+    ...BUILT_IN_PROFILE,
+    name: "Coded",
+    effects: [
+      {
+        type: "custom",
+        label: "Pass",
+        amount: 1,
+        abstraction: false,
+        params: [],
+        code: "return source(uv);",
+      },
+    ],
+  };
+  const blits = (frame: Call[]) => frame.filter((c) => c.name === "blitFramebuffer").length;
+
+  it("copies the last output into both recreated targets, only in a custom profile", async () => {
+    const builtIn = started();
+    frameAt(0);
+    frameAt(16);
+    builtIn.engine.setScaleCap(0.75);
+    frameAt(32);
+    expect(frames().map(blits)).toEqual([1, 1, 1]);
+
+    const custom = started();
+    frameAt(0);
+    const switched = custom.engine.setProfile(coded);
+    custom.fake.completeLinks();
+    frameAt(16);
+    await switched;
+    frameAt(32);
+    custom.engine.setScaleCap(0.75);
+    frameAt(48);
+    frameAt(64);
+    // The swap frame seeds the target it draws into; the recreate frame copies the old output
+    // into the new previous target, then seeds the one it draws into.
+    expect(frames().map(blits)).toEqual([1, 2, 1, 3, 1]);
+  });
+
+  it("copies nothing at a swap into a built-in-only profile", async () => {
+    const { engine, fake } = started();
+    frameAt(0);
+    const switched = engine.setProfile({
+      ...BUILT_IN_PROFILE,
+      effects: [{ type: "zoom", amount: 1 }],
+    });
+    fake.completeLinks();
+    frameAt(16);
+    await switched;
+    expect(frames().map(blits)).toEqual([1, 1]);
+  });
+});

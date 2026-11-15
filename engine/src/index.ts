@@ -269,13 +269,37 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 
   const targetsFor = (width: number, height: number): [Target, Target] => {
     if (targets && targets[0].width === width && targets[0].height === height) return targets;
-    if (targets) {
-      for (const t of targets) deleteTarget(gl, t);
+    const old = targets;
+    targets = [createTarget(gl, width, height), createTarget(gl, width, height)];
+    if (old) {
+      // In a profile with code the limiter needs the real previous frame (B-03 PD4): the last
+      // output, scaled into the new previous target. Built-in profiles start from black.
+      if (active.linked.custom) copy(old[1 - current]!, targets[1 - current]!);
+      for (const t of old) deleteTarget(gl, t);
       // Recreated targets are cleared black: no smear on the next frame, or it mixes that in.
       swapped = true;
     }
-    targets = [createTarget(gl, width, height), createTarget(gl, width, height)];
     return targets;
+  };
+
+  /** Scales one target's picture into another. */
+  const copy = (from: Target, to: Target) => {
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, to.framebuffer);
+    gl.blitFramebuffer(
+      0,
+      0,
+      from.width,
+      from.height,
+      0,
+      0,
+      to.width,
+      to.height,
+      gl.COLOR_BUFFER_BIT,
+      gl.LINEAR,
+    );
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
   };
 
   /** Uploads the camera's current frame; returns its size, or null to draw the noise field. */
@@ -322,6 +346,9 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     const previous = pair[1 - current]!;
     const size = uploadSource();
     const u = profileUniforms(active.profile, features, dials, timestamp, size !== null, width);
+    // A profile with code starts with both targets holding the last output, so a body that
+    // discards a pixel leaves a picture at most one limited step old (B-03 PD3, PD4).
+    if (swapped && active.linked.custom) copy(previous, target);
     if (swapped) u.feedback = 0;
     swapped = false;
     const loc = active.linked.loc;
