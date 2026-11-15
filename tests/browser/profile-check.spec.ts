@@ -13,6 +13,7 @@ import {
   strobe,
   swirl,
 } from "./fixtures/custom-profiles.ts";
+import type { Definition } from "./fixtures/profiles.ts";
 
 const SCRIPT = resolve(import.meta.dirname, "../../scripts/profile-check.ts");
 /** As `pnpm profile:check` runs it (package.json): `stripTypeScriptTypes` is experimental. */
@@ -169,6 +170,17 @@ test("a strobe reports the limiter clipping it; a built-in-only profile does not
     /^profile "Strobe": flash limiter: clipped in [1-9]\d* of \d+ frames$/,
   );
   expect(run.lines).toContain('profile "Calm": flash limiter: not clipped');
+});
+
+test("a steady custom profile is not clipped: the cut into it from the engine's start is not counted (PD12)", async () => {
+  // The negative: steady, and as far from the built-in look as a picture can be.
+  const steady: Definition = {
+    ...cameraThrough("Steady"),
+    effects: [customEffect("Negative", "return vec3(1.0) - source(uv);")],
+  };
+  const run = await check(write("steady.json", fileOf(steady)), "--out", join(dir, "t"));
+  expect(run.code).toBe(0);
+  expect(run.lines).toContain('profile "Steady": flash limiter: not clipped');
 });
 
 test("--camera puts the image in front of the profile: its colour shows at dials (0, 0) (AC9)", async ({
