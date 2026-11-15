@@ -60,15 +60,27 @@ function fakeCanvas(width: number, height: number, { parallel = true }: FakeOpti
       };
     },
   });
+  const listeners = new Map<string, ((event: Event) => void)[]>();
   const canvas = {
     clientWidth: width,
     clientHeight: height,
     width: 0,
     height: 0,
     getContext: () => gl,
+    addEventListener: (type: string, listener: (event: Event) => void) => {
+      listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+    },
   } as unknown as HTMLCanvasElement;
+  /** Dispatches a canvas event as Chromium does; says whether its default was prevented. */
+  const fire = (type: string): boolean => {
+    let prevented = false;
+    const event = { type, preventDefault: () => (prevented = true) } as unknown as Event;
+    for (const listener of listeners.get(type) ?? []) listener(event);
+    return prevented;
+  };
   return {
     canvas,
+    fire,
     calls,
     programs,
     control,
@@ -610,5 +622,115 @@ describe("the slow-GPU guard (B-03)", () => {
     load(0, 15);
     expect(engine.stats().renderScale).toBe(0.5);
     expect(events).toEqual([]);
+  });
+});
+
+// B-03 T8 (spec AC12, SD8; plan PD8): a lost WebGL context is restored and the active profile
+// drawn again, without its custom effects when it holds any.
+describe("context loss (B-03)", () => {
+  const coded: Profile = {
+    ...BUILT_IN_PROFILE,
+    name: "Coded",
+    effects: [
+      { type: "zoom", amount: 0.2 },
+      {
+        type: "custom",
+        label: "Pass",
+        amount: 1,
+        abstraction: false,
+        params: [],
+        code: "return source(uv);",
+      },
+    ],
+  };
+  const draws = (frame: Call[]) => frame.filter((c) => c.name === "drawArrays").length;
+  const created = (frame: Call[], name: string) => frame.filter((c) => c.name === name).length;
+
+  async function playing(profile: Profile) {
+    const rig = started(640, 360, { parallel: false });
+    const events: unknown[] = [];
+    rig.engine.onGuard((event) => events.push(event));
+    frameAt(0);
+    if (profile !== BUILT_IN_PROFILE) {
+      const switched = rig.engine.setProfile(profile);
+      frameAt(16);
+      await switched;
+    }
+    return { ...rig, events };
+  }
+
+  it("prevents the default, draws nothing while lost, and draws again after the restore", async () => {
+    const { fake } = await playing(BUILT_IN_PROFILE);
+    expect(fake.fire("webglcontextlost")).toBe(true);
+    frameAt(100);
+    frameAt(116);
+    expect(frames().slice(-2).map(draws)).toEqual([0, 0]);
+    fake.fire("webglcontextrestored");
+    frameAt(132);
+    const first = log.slice(log.findIndex((c) => c.name === "@frame" && c.args[0] === 116));
+    expect(created(first, "createProgram")).toBeGreaterThan(0);
+    expect(created(first, "createFramebuffer")).toBe(2);
+    expect(draws(frames().at(-1)!)).toBe(1);
+  });
+
+  it("brings a custom profile back without its custom effects and says so", async () => {
+    const { fake, events } = await playing(coded);
+    expect(uniform(frames().at(-1)!, "uCustomStrength")).toBeDefined();
+    fake.fire("webglcontextlost");
+    frameAt(100);
+    fake.fire("webglcontextrestored");
+    frameAt(116);
+    const after = frames().at(-1)!;
+    expect(draws(after)).toBe(1);
+    expect(uniform(after, "uCustomStrength")).toBeUndefined();
+    expect(uniform(after, "uZoom")).toBeGreaterThan(1); // the built-in effects still draw
+    expect(events).toEqual([{ kind: "contextLost", customBypassed: true }]);
+  });
+
+  it("says nothing was bypassed for a built-in-only profile", async () => {
+    const { fake, events } = await playing(BUILT_IN_PROFILE);
+    fake.fire("webglcontextlost");
+    fake.fire("webglcontextrestored");
+    frameAt(100);
+    expect(events).toEqual([{ kind: "contextLost", customBypassed: false }]);
+  });
+
+  it("keeps the bypass for a same-key call after the restore, and a pick retries", async () => {
+    const { engine, fake } = await playing(coded);
+    fake.fire("webglcontextlost");
+    fake.fire("webglcontextrestored");
+    frameAt(100);
+    await engine.setProfile({ ...coded, palette: ["#111111", "#ffffff"] });
+    frameAt(116);
+    expect(uniform(frames().at(-1)!, "uCustomStrength")).toBeUndefined();
+    const retried = engine.setProfile(coded, { retry: true });
+    frameAt(132);
+    await retried;
+    frameAt(148);
+    expect(uniform(frames().at(-1)!, "uCustomStrength")).toBeDefined();
+  });
+
+  it("rejects a switch that was linking when the context went, and links anew after", async () => {
+    const { engine, fake } = await playing(BUILT_IN_PROFILE);
+    const linking = engine.setProfile(coded);
+    fake.fire("webglcontextlost");
+    await expect(linking).rejects.toThrow(/lost/);
+    fake.fire("webglcontextrestored");
+    frameAt(100);
+    const again = engine.setProfile(coded);
+    frameAt(116);
+    await again;
+    frameAt(132);
+    expect(uniform(frames().at(-1)!, "uCustomStrength")).toBeDefined();
+  });
+
+  it("takes a profile handed over while lost, and restores that one", async () => {
+    const { engine, fake, events } = await playing(BUILT_IN_PROFILE);
+    fake.fire("webglcontextlost");
+    await engine.setProfile(coded);
+    fake.fire("webglcontextrestored");
+    frameAt(100);
+    expect(uniform(frames().at(-1)!, "uZoom")).toBeGreaterThan(1);
+    expect(events).toEqual([{ kind: "contextLost", customBypassed: true }]);
   });
 });

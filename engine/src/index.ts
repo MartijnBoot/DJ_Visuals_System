@@ -204,7 +204,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   // No multisampling: `blitFramebuffer` may not write to a multisampled default framebuffer.
   const gl = canvas.getContext("webgl2", { antialias: false });
   if (!gl) throw new WebGL2UnavailableError();
-  const parallel = gl.getExtension(
+  let parallel = gl.getExtension(
     "KHR_parallel_shader_compile",
   ) as unknown as ParallelCompile | null;
 
@@ -313,7 +313,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     next.resolve();
   };
 
-  const sourceTexture = createTexture(gl);
+  let sourceTexture = createTexture(gl);
 
   const frames = createFrameStats();
   const scaler = createScaleController(frames);
@@ -378,6 +378,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 
   const frame = (timestamp: number) => {
     handle = requestAnimationFrame(frame);
+    if (lost) return; // nothing can draw until the context is restored (B-03 AC12)
     advance();
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
@@ -394,6 +395,50 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     scaler.record(timestamp);
     guardSlow(timestamp);
   };
+
+  /** The WebGL context is lost: every GL object is gone and nothing draws (B-03 AC12). */
+  let lost = false;
+
+  // Preventing the default asks the browser to restore the context (B-03 SD8).
+  canvas.addEventListener("webglcontextlost", (event) => {
+    event.preventDefault();
+    lost = true;
+    if (pending) {
+      pending.reject(new Error("the WebGL context was lost"));
+      pending = null;
+    }
+  });
+
+  /**
+   * Everything is made again: texture, targets (on the next frame) and the active profile's
+   * program, linked at once and without custom effects, so the picture returns on the next
+   * frame. A profile with custom effects keeps them off until it is picked again (PD8).
+   */
+  canvas.addEventListener("webglcontextrestored", () => {
+    lost = false;
+    parallel = gl.getExtension("KHR_parallel_shader_compile") as unknown as ParallelCompile | null;
+    cache.clear();
+    failures.clear();
+    targets = null;
+    current = 0;
+    sourceTexture = createTexture(gl);
+    const wanted = active.profile;
+    const hadCustom = bypassed !== null || hasCustom(wanted);
+    if (bypassed === null && hasCustom(wanted)) bypassed = keyOf(wanted);
+    let drawn = withoutCustom(wanted);
+    let program: WebGLProgram;
+    try {
+      program = createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(drawn));
+    } catch {
+      drawn = BUILT_IN_PROFILE; // built-ins only always link; this is a last resort
+      program = createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(drawn));
+    }
+    active = { profile: drawn, linked: linked(keyOf(drawn), program, false) };
+    cache.set(active.linked.key, active.linked);
+    customSince = null;
+    swapped = true;
+    emitGuard({ kind: "contextLost", customBypassed: hadCustom });
+  });
 
   /** The program key whose custom effects the guard turned off, until a pick or another key. */
   let bypassed: string | null = null;
@@ -574,6 +619,12 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       scaler.setCap(cap);
     },
     setProfile(profile, options = {}) {
+      if (lost) {
+        // Nothing links now; the restore draws this one (without custom effects).
+        if (options.retry || keyOf(profile) !== bypassed) bypassed = null;
+        active = { ...active, profile };
+        return Promise.resolve();
+      }
       if (bypassed !== null && !options.pick && keyOf(profile) === bypassed) {
         return switchTo(withoutCustom(profile)); // a slider or a live colour keeps the bypass
       }
