@@ -314,3 +314,41 @@ describe("profileUniforms", () => {
     }
   });
 });
+
+// B-03 (spec AC6, SD12; plan PD5): a custom effect carries its own abstraction flag.
+describe("a custom effect's strength (B-03 SD12)", () => {
+  const custom = (abstraction: boolean, binding?: Effect["binding"]): Effect => ({
+    type: "custom",
+    label: abstraction ? "flagged" : "plain",
+    amount: 0.8,
+    ...(binding ? { binding } : {}),
+    abstraction,
+    params: [],
+    code: "return source(uv);",
+  });
+  const features: AudioFeatures = { level: 0, low: 0, mid: 0, high: 0.6, beat: 0.2, capturedAt: 0 };
+
+  it("halves only the flagged one at recognisability 0.5", () => {
+    const dials = { recognisability: 0.5, reactivity: 0.5 };
+    expect(effectStrength(custom(true), features, dials)).toBeCloseTo(0.4, 12);
+    expect(effectStrength(custom(false), features, dials)).toBeCloseTo(0.8, 12);
+  });
+
+  it("adds its binding scaled by reactivity, as every other effect's (SD4)", () => {
+    const bound = custom(false, { feature: "high", amount: 0.5 });
+    const at = (reactivity: number) =>
+      effectStrength({ ...bound, amount: 0 }, features, { recognisability: 1, reactivity });
+    expect(at(1)).toBeCloseTo(0.3, 12);
+    expect(at(0)).toBe(0);
+  });
+
+  it("leaves every built-in uniform as if the effect were absent", () => {
+    const base = twelve();
+    const withCustom: Profile = { ...base, effects: [...base.effects.slice(0, 11), custom(true)] };
+    const without: Profile = { ...base, effects: base.effects.slice(0, 11) };
+    const dials = { recognisability: 0.7, reactivity: 0.4 };
+    expect(profileUniforms(withCustom, features, dials, 500, true, WIDTH)).toEqual(
+      profileUniforms(without, features, dials, 500, true, WIDTH),
+    );
+  });
+});

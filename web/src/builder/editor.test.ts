@@ -284,3 +284,47 @@ describe("the primary colour (B-04 SD10, AC40, AC41)", () => {
     expect(primaryUnused(none)).toBe(true);
   });
 });
+
+// B-03 T1 (spec AC3, SD4; plan PD5): a stored custom effect is one more row the existing
+// actions handle; it does not use up a built-in type.
+describe("a custom effect in the draft (B-03)", () => {
+  const custom = (label: string): Profile["effects"][number] => ({
+    type: "custom",
+    label,
+    amount: 0.4,
+    abstraction: true,
+    params: [{ name: "speed", value: 0.5 }],
+    code: "return source(uv);",
+  });
+  const withCustom: Profile = { ...base, effects: [...base.effects, custom("Swirl")] };
+
+  it("takes strength, binding, move and remove, and has no own parameter", () => {
+    expect(validate(withCustom)).toEqual([]);
+    const at = withCustom.effects.length - 1;
+    expect(run(withCustom, { type: "amount", index: at, value: 0.9 }).effects[at]).toMatchObject({
+      type: "custom",
+      amount: 0.9,
+    });
+    const bound = run(withCustom, { type: "bindingSet", index: at, feature: "low", amount: 0.3 });
+    expect(bound.effects[at]).toMatchObject({ binding: { feature: "low", amount: 0.3 } });
+    expect(run(bound, { type: "bindingClear", index: at }).effects[at]).toEqual(custom("Swirl"));
+    expect(run(withCustom, { type: "parameter", index: at, value: 1 })).toBe(withCustom);
+    expect(types(run(withCustom, { type: "effectMove", index: at, direction: -1 }))).toEqual([
+      "zoom",
+      "flash",
+      "custom",
+      "pixelate",
+    ]);
+    expect(types(run(withCustom, { type: "effectRemove", index: at }))).toEqual(types(base));
+  });
+
+  it("counts toward twelve but takes no built-in type away", () => {
+    expect(availableTypes(withCustom)).toEqual(availableTypes(base));
+    const full: Profile = {
+      ...base,
+      effects: [...base.effects, ...Array.from({ length: 9 }, (_, i) => custom(`fx ${i}`))],
+    };
+    expect(validate(full)).toEqual([]);
+    expect(availableTypes(full)).toEqual([]);
+  });
+});

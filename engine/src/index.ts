@@ -28,7 +28,17 @@ export type { LatencyReading } from "./latency.ts";
 export type { RenderScale } from "./scale.ts";
 export type { AudioFeatures, Dials } from "./features.ts";
 export { DEFAULT_DIALS, ZERO_FEATURES } from "./features.ts";
-export type { Binding, Effect, EffectInfo, EffectType, FeatureName, Profile } from "./profile.ts";
+export type {
+  Binding,
+  BuiltInEffect,
+  CustomEffect,
+  CustomParam,
+  Effect,
+  EffectInfo,
+  EffectType,
+  FeatureName,
+  Profile,
+} from "./profile.ts";
 export { BUILT_IN_PROFILE, EFFECTS, effectStrength } from "./profile.ts";
 
 export interface Engine {
@@ -141,11 +151,13 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)]),
     ) as Locations,
   });
-  const fragmentFor = (profile: Profile) => buildFragment(profile.effects.map((e) => e.type));
+  // A custom entry passes the picture through until its code is compiled in (B-03 T1).
+  const fragmentFor = (profile: Profile) =>
+    buildFragment(profile.effects.flatMap((e) => (e.type === "custom" ? [] : [e.type])));
 
   const builtInKey = keyOf(BUILT_IN_PROFILE);
   const cache = new Map<string, Linked>();
-  let active = {
+  let active: { profile: Profile; linked: Linked } = {
     profile: BUILT_IN_PROFILE,
     linked: linked(builtInKey, createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(BUILT_IN_PROFILE))),
   };

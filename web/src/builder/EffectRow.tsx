@@ -1,6 +1,7 @@
 // One effect in the stack (B-02 spec SD4, SD12, AC3; plan T11): move up and down, remove, the base
 // strength, the effect's own parameter, and one audio binding. Native controls, each labelled.
-// Test ids carry the effect type, which is unique in a profile.
+// Test ids carry `id`: the effect type, unique in a profile, or `custom-<n>` for the n-th custom
+// effect (B-03 PD14), which shows its label and has no own parameter here.
 import { EFFECTS } from "@djv/engine";
 import { FEATURE_NAMES, LIMITS, type Effect, type FeatureName } from "@djv/shared";
 import type { Dispatch } from "react";
@@ -8,6 +9,8 @@ import type { Action } from "./editor.ts";
 
 export interface EffectRowProps {
   effect: Effect;
+  /** The test-id suffix and React key (B-03 PD14). */
+  id: string;
   index: number;
   count: number;
   paletteLength: number;
@@ -17,24 +20,26 @@ export interface EffectRowProps {
 
 export function EffectRow({
   effect,
+  id,
   index,
   count,
   paletteLength,
   disabled,
   dispatch,
 }: EffectRowProps) {
-  const { type } = effect;
-  const label = (what: string) => `${what} of ${type}`;
+  const name = effect.type === "custom" ? effect.label : effect.type;
+  const abstraction = effect.type !== "custom" && EFFECTS[effect.type].abstraction;
+  const label = (what: string) => `${what} of ${name}`;
   return (
     <li
-      data-testid={`effect-row-${type}`}
+      data-testid={`effect-row-${id}`}
       style={{ display: "grid", gap: 4, padding: 6, border: "1px solid #444", marginBottom: 6 }}
     >
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <strong style={{ flex: 1 }}>
-          {index + 1}. {type}
-          {EFFECTS[type].abstraction && (
-            <span data-testid={`effect-abstraction-${type}`} title="scaled by recognisability">
+          {index + 1}. {name}
+          {abstraction && (
+            <span data-testid={`effect-abstraction-${id}`} title="scaled by recognisability">
               {" "}
               (abstraction)
             </span>
@@ -42,8 +47,8 @@ export function EffectRow({
         </strong>
         <button
           type="button"
-          data-testid={`effect-up-${type}`}
-          aria-label={`Move ${type} up`}
+          data-testid={`effect-up-${id}`}
+          aria-label={`Move ${name} up`}
           disabled={disabled || index === 0}
           onClick={() => dispatch({ type: "effectMove", index, direction: -1 })}
         >
@@ -51,8 +56,8 @@ export function EffectRow({
         </button>
         <button
           type="button"
-          data-testid={`effect-down-${type}`}
-          aria-label={`Move ${type} down`}
+          data-testid={`effect-down-${id}`}
+          aria-label={`Move ${name} down`}
           disabled={disabled || index === count - 1}
           onClick={() => dispatch({ type: "effectMove", index, direction: 1 })}
         >
@@ -60,8 +65,8 @@ export function EffectRow({
         </button>
         <button
           type="button"
-          data-testid={`effect-remove-${type}`}
-          aria-label={`Remove ${type}`}
+          data-testid={`effect-remove-${id}`}
+          aria-label={`Remove ${name}`}
           disabled={disabled}
           onClick={() => dispatch({ type: "effectRemove", index })}
         >
@@ -72,7 +77,7 @@ export function EffectRow({
         <span style={{ width: 120 }}>strength</span>
         <input
           type="range"
-          data-testid={`effect-amount-${type}`}
+          data-testid={`effect-amount-${id}`}
           aria-label={label("Strength")}
           min={0}
           max={1}
@@ -87,7 +92,7 @@ export function EffectRow({
         <label style={{ display: "flex", gap: 6 }}>
           <span style={{ width: 120 }}>colour slot</span>
           <select
-            data-testid={`effect-slot-${type}`}
+            data-testid={`effect-slot-${id}`}
             aria-label={label("Colour slot")}
             value={effect.colourSlot}
             disabled={disabled}
@@ -121,7 +126,7 @@ export function EffectRow({
         <label style={{ display: "flex", gap: 6 }}>
           <span style={{ width: 120 }}>follows audio</span>
           <select
-            data-testid={`effect-feature-${type}`}
+            data-testid={`effect-feature-${id}`}
             aria-label={label("Audio feature")}
             value={effect.binding?.feature ?? ""}
             disabled={disabled}
@@ -148,7 +153,7 @@ export function EffectRow({
         </label>
         <input
           type="range"
-          data-testid={`effect-binding-amount-${type}`}
+          data-testid={`effect-binding-amount-${id}`}
           aria-label={label("Audio amount")}
           min={0}
           max={1}

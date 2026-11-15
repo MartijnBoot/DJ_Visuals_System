@@ -34,6 +34,14 @@ export const LIMITS = {
   segmentsMax: 8,
 } as const;
 
+/** A custom effect's limits (B-03 SD16). Apart from `LIMITS`, which B-02 fixed. */
+export const CUSTOM_LIMITS = {
+  labelLength: 40,
+  params: 4,
+  paramNameLength: 24,
+  codeBytes: 8192,
+} as const;
+
 /** Effects whose own parameter is a palette slot for their colour (SD11). */
 export const COLOUR_SLOT_TYPES = ["flash", "grain", "edges"] as const;
 
@@ -48,6 +56,82 @@ const plain = <T extends EffectType>(type: T) =>
   z.strictObject({ type: z.literal(type), ...common });
 const slotted = <T extends EffectType>(type: T) =>
   z.strictObject({ type: z.literal(type), ...common, colourSlot });
+
+/** Text without a non-space character is empty for a label or a parameter name. */
+const named = (max: number, what: string) =>
+  z
+    .string()
+    .max(max, `${what} is 1 to ${max} characters`)
+    .regex(/\S/, `${what} is 1 to ${max} characters`);
+
+/**
+ * The code checks of B-03 SD16 (plan PD6): one message per rule the code breaks. They keep a
+ * body inside its function; the compiler is the real check. A backslash-newline is joined
+ * first, as the GLSL compiler joins it, so a continued line cannot hide anything from them.
+ */
+export function customCodeIssues(code: string): string[] {
+  const issues: string[] = [];
+  if (utf8Bytes(code) > CUSTOM_LIMITS.codeBytes) {
+    issues.push(`code is at most ${CUSTOM_LIMITS.codeBytes} bytes`);
+  }
+  if (code.includes("#")) issues.push("code may not contain # (no preprocessor)");
+  const joined = code.replace(/\\\r?\n/g, "");
+  if (/\buniform\b/.test(joined)) issues.push("code may not use the word uniform");
+  if (/^[ \t]*(?:in|out|inout)\s/m.test(joined)) {
+    issues.push("code may not declare in, out or inout at the start of a line");
+  }
+  const braces = braceProblem(joined);
+  if (braces) issues.push(braces);
+  return issues;
+}
+
+/** The UTF-8 length, as `TextEncoder` gives it (a lone surrogate is U+FFFD, 3 bytes). */
+function utf8Bytes(text: string): number {
+  let bytes = 0;
+  for (const char of text) {
+    const point = char.codePointAt(0)!;
+    bytes += point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4;
+  }
+  return bytes;
+}
+
+/** Braces counted outside comments must never close the function and must end balanced. */
+function braceProblem(code: string): string | null {
+  let depth = 0;
+  for (let i = 0; i < code.length; i++) {
+    const pair = code.slice(i, i + 2);
+    if (pair === "//") {
+      const end = code.indexOf("\n", i);
+      if (end < 0) break;
+      i = end;
+    } else if (pair === "/*") {
+      const end = code.indexOf("*/", i + 2);
+      if (end < 0) return "code has a /* comment that is never closed";
+      i = end + 1;
+    } else if (code[i] === "{") depth++;
+    else if (code[i] === "}" && --depth < 0) return "code has a closing brace with no opening one";
+  }
+  return depth === 0 ? null : "code has an opening brace that is never closed";
+}
+
+/** A custom effect (B-03 SD1, SD4, SD12, SD16): GLSL code as one more link in the chain. */
+const customEffectSchema = z.strictObject({
+  type: z.literal("custom"),
+  label: named(CUSTOM_LIMITS.labelLength, "a label"),
+  ...common,
+  abstraction: z.boolean(),
+  params: z
+    .array(
+      z.strictObject({
+        name: named(CUSTOM_LIMITS.paramNameLength, "a parameter name"),
+        value: unit,
+      }),
+    )
+    .max(CUSTOM_LIMITS.params),
+  code: z.string().superRefine((code, ctx) => {
+    for (const message of customCodeIssues(code)) ctx.addIssue({ code: "custom", message });
+  }),
+});
 
 export const effectSchema = z.discriminatedUnion("type", [
   plain("pixelate"),
@@ -66,6 +150,7 @@ export const effectSchema = z.discriminatedUnion("type", [
     segments: z.number().int().min(LIMITS.segmentsMin).max(LIMITS.segmentsMax),
   }),
   plain("rgbSplit"),
+  customEffectSchema,
 ]);
 
 /** The profile's fields, for the shapes that add to them (`profile-api.ts`). */
@@ -81,12 +166,38 @@ export const profileFields = {
 type ProfileShape = z.infer<z.ZodObject<typeof profileFields>>;
 
 /**
- * The cross-field rules: each type at most once (SD12), every slot inside the palette (SD11),
- * and the primary slot inside the palette (B-04 SD10).
+ * The cross-field rules: each built-in type at most once (SD12), every slot inside the palette
+ * (SD11), and the primary slot inside the palette (B-04 SD10). A custom effect may repeat, with
+ * a label unique in the profile (trimmed, case-sensitive) and parameter names unique in the
+ * effect (B-03 SD4, PD5).
  */
 export function checkProfileRules(profile: ProfileShape, ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
+  const labels = new Set<string>();
   profile.effects.forEach((effect, i) => {
+    if (effect.type === "custom") {
+      const label = effect.label.trim();
+      if (labels.has(label)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["effects", i, "label"],
+          message: `the label "${label}" appears more than once`,
+        });
+      }
+      labels.add(label);
+      const names = new Set<string>();
+      effect.params.forEach((param, j) => {
+        if (names.has(param.name)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["effects", i, "params", j, "name"],
+            message: `the parameter "${param.name}" appears more than once`,
+          });
+        }
+        names.add(param.name);
+      });
+      return;
+    }
     if (seen.has(effect.type)) {
       ctx.addIssue({
         code: "custom",
@@ -116,6 +227,7 @@ export const profileSchema = z.strictObject(profileFields).superRefine(checkProf
 
 export type Profile = z.infer<typeof profileSchema>;
 export type Effect = Profile["effects"][number];
+export type CustomEffect = Extract<Effect, { type: "custom" }>;
 
 /**
  * The primary colour's slot (B-04 SD10, AC38): the stored `primary`, else the `colourSlot` of

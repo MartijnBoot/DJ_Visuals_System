@@ -47,6 +47,12 @@ const fieldsOf = ({ name, palette, dials, effects, primary }: StoredProfile): Pr
   ...(primary === undefined ? {} : { primary }),
 });
 
+/** Each row's key and test-id suffix: its type, or `custom-<n>` among the custom ones (PD14). */
+function rowIds(draft: Profile): string[] {
+  let custom = 0;
+  return draft.effects.map((e) => (e.type === "custom" ? `custom-${custom++}` : e.type));
+}
+
 export function Editor({
   saved,
   readOnly,
@@ -219,10 +225,11 @@ export function Editor({
       <fieldset style={{ display: "grid", gap: 4 }}>
         <legend>Effects, applied first to last</legend>
         <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
-          {draft.effects.map((effect, index) => (
+          {rowIds(draft).map((id, index) => (
             <EffectRow
-              key={effect.type}
-              effect={effect}
+              key={id}
+              id={id}
+              effect={draft.effects[index]!}
               index={index}
               count={draft.effects.length}
               paletteLength={draft.palette.length}
