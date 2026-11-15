@@ -2,12 +2,12 @@
 // starting dials, the palette, the effect stack, and Save. The draft lives here in a reducer
 // (`editor.ts`); Save sends it with the revision it started from and adopts the answer. A save
 // that fails keeps the draft. The built-in is shown read-only.
-import { LIMITS, type Profile, type StoredProfile } from "@djv/shared";
+import { derivePrimary, LIMITS, type Profile, type StoredProfile } from "@djv/shared";
 import { useEffect, useReducer, useState } from "react";
 import { updateProfile } from "../profiles/api.ts";
 import { Conflict } from "./Conflict.tsx";
 import { EffectRow } from "./EffectRow.tsx";
-import { availableTypes, isDirty, reduce, validate } from "./editor.ts";
+import { availableTypes, isDirty, primaryUnused, reduce, validate } from "./editor.ts";
 import { describeFailure } from "./failure.ts";
 import { PRESETS } from "./presets.ts";
 
@@ -39,11 +39,12 @@ interface Refused {
   current: StoredProfile | null;
 }
 
-const fieldsOf = ({ name, palette, dials, effects }: StoredProfile): Profile => ({
+const fieldsOf = ({ name, palette, dials, effects, primary }: StoredProfile): Profile => ({
   name,
   palette,
   dials,
   effects,
+  ...(primary === undefined ? {} : { primary }),
 });
 
 export function Editor({
@@ -168,7 +169,7 @@ export function Editor({
         </label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {draft.palette.map((colour, index) => (
-            <span key={index} style={{ display: "inline-flex", gap: 2 }}>
+            <span key={index} style={{ display: "inline-flex", gap: 2, alignItems: "center" }}>
               <input
                 type="color"
                 data-testid={`palette-colour-${index}`}
@@ -186,6 +187,19 @@ export function Editor({
               >
                 ×
               </button>
+              {/* One radio group: the primary colour (B-04 SD10), stored or derived. */}
+              <label style={{ display: "inline-flex", gap: 2, alignItems: "center" }}>
+                <input
+                  type="radio"
+                  name="primary"
+                  data-testid={`palette-primary-${index}`}
+                  aria-label={`Colour ${index + 1} is the primary colour`}
+                  checked={derivePrimary(draft) === index}
+                  disabled={readOnly}
+                  onChange={() => dispatch({ type: "primarySet", index })}
+                />
+                Primary
+              </label>
             </span>
           ))}
           <button
@@ -197,6 +211,9 @@ export function Editor({
             Add colour
           </button>
         </div>
+        {primaryUnused(draft) && (
+          <div data-testid="primary-unused">this colour is not used by any effect</div>
+        )}
       </fieldset>
 
       <fieldset style={{ display: "grid", gap: 4 }}>

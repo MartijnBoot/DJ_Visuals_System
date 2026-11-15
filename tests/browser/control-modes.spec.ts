@@ -135,7 +135,7 @@ test("DJ's Primary colour opens the wheel on slot 1 for the built-in and on a st
     ...flat("Marked", "#336699"),
     palette: ["#000000", "#336699", "#ffcc00"],
   };
-  const stored = await createProfile(api, { ...marked, primary: 2 } as Definition);
+  const stored = await createProfile(api, { ...marked, primary: 2 });
   const url = await screen(page);
   const phone = await paired(page, browser, url, PHONE);
   await expect(phone.getByTestId("mode-dj")).toHaveAttribute("aria-pressed", "true");

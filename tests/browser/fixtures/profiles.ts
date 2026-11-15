@@ -8,6 +8,8 @@ export interface Definition {
   palette: string[];
   dials: { recognisability: number; reactivity: number };
   effects: Record<string, unknown>[];
+  /** The primary colour's slot (B-04 SD10); absent means derived. */
+  primary?: number;
 }
 
 export interface Stored extends Definition {
