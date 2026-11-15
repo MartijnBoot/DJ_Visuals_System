@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:browser": "playwright test",
     "check:load": "node scripts/check-under-load.ts",
+    "profile:check": "node --disable-warning=ExperimentalWarning scripts/profile-check.ts",
     "dev": "node --env-file-if-exists=.env.local scripts/dev.ts",
     "start": "pnpm build && node --env-file-if-exists=.env.local server/src/main.ts",
     "migrate": "node --env-file-if-exists=.env.local server/src/migrate-cli.ts",

@@ -18,6 +18,11 @@ export default defineConfig(
     languageOptions: { globals: globals.browser },
   },
   {
+    // The page `pnpm profile:check` drives runs in the browser it launches (B-03 PD12).
+    files: ["scripts/profile-check-page.ts"],
+    languageOptions: { globals: globals.browser },
+  },
+  {
     // The AudioWorklet processor runs in AudioWorkletGlobalScope, not a window (B-01 PD18).
     files: ["audio/src/processor.ts"],
     languageOptions: { globals: globals.audioWorklet },
