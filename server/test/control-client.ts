@@ -1,5 +1,6 @@
 // A `ws` client for the External control tests (B-04 T5 to T7): keeps every message it receives,
 // parsed with the shared schema it is given, and waits on them.
+import { randomBytes } from "node:crypto";
 import { connect as tcpConnect } from "node:net";
 import type { z } from "zod";
 import WebSocket from "ws";
@@ -106,7 +107,7 @@ export function rawUpgrade(
       socket.write(
         `GET ${target} HTTP/1.1\r\nHost: ${host}:${port}\r\nOrigin: ${origin}\r\n` +
           "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +
-          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+          `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}\r\n\r\n`,
       ),
     );
     socket.on("data", (chunk) => (answer += String(chunk)));
