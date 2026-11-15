@@ -86,6 +86,87 @@ async function controller(
   return phone;
 }
 
+/** What the controller showed at one moment: its link line, and whether its dial was locked. */
+interface Shown {
+  text: string;
+  disabled: boolean | null;
+}
+
+type ShownWindow = { __shown: Shown[] };
+
+/**
+ * Records every change of the controller's link line and dial lock from now on, and returns a
+ * reader. A screen reload locks the controller only until the new page's first state, often for
+ * under 100 ms: polling can step over that, the record cannot (D-10).
+ */
+async function watchLink(phone: Page): Promise<() => Promise<Shown[]>> {
+  await phone.evaluate(() => {
+    const shown: Shown[] = [];
+    (window as unknown as ShownWindow).__shown = shown;
+    const look = () => {
+      const text = document.querySelector("[data-testid=link-line]")?.textContent ?? "";
+      const dial = document.querySelector<HTMLInputElement>("[data-testid=dial-recognisability]");
+      const now = { text, disabled: dial ? dial.disabled : null };
+      const last = shown.at(-1);
+      if (last?.text !== now.text || last.disabled !== now.disabled) shown.push(now);
+    };
+    look();
+    new MutationObserver(look).observe(document, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["disabled"],
+    });
+  });
+  return () => phone.evaluate(() => (window as unknown as ShownWindow).__shown);
+}
+
+/** Through a reload: live on the old page's state, locked, live on the new page's (SD12, SD13). */
+const LOCKED_THROUGH_RELOAD: Shown[] = [
+  { text: "Connected", disabled: false },
+  { text: "Screen not connected", disabled: true },
+  { text: "Connected", disabled: false },
+];
+
+/**
+ * Node's own WebSocket, which takes request headers: the screen socket accepts only the screen
+ * page's `Origin`. The DOM type this project compiles against does not declare the option.
+ */
+const NodeWebSocket = WebSocket as unknown as new (
+  url: string,
+  init: { headers: Record<string, string> },
+) => WebSocket;
+
+/**
+ * Carries the screen page's socket through this process, so the server sees a reload in the
+ * order D-06 needs: the reloaded page's socket opens before the old page's closes. The old one
+ * closes only once the new one is open; messages the new page sends before then wait for it.
+ */
+async function newScreenFirst(page: Page): Promise<void> {
+  let previous: WebSocket | null = null;
+  await page.routeWebSocket(/\/api\/control\/screen$/, (route) => {
+    const upstream = new NodeWebSocket(route.url(), { headers: { origin: server.origin } });
+    const waiting: string[] = [];
+    route.onMessage((message) => {
+      const text = String(message); // the screen socket carries JSON text
+      if (upstream.readyState === WebSocket.OPEN) upstream.send(text);
+      else waiting.push(text);
+    });
+    // The page's own close is not passed on: the next page's socket ends this one.
+    route.onClose(() => {});
+    upstream.onmessage = (event) => route.send(String(event.data));
+    upstream.onopen = () => {
+      if (previous) {
+        previous.onmessage = null; // its page is gone
+        previous.close();
+      }
+      previous = upstream;
+      for (const message of waiting.splice(0)) upstream.send(message);
+    };
+  });
+}
+
 /** A controller opened from the QR URL and accepted from the panel, its tiles enabled. */
 async function paired(
   page: Page,
@@ -140,10 +221,8 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     await phone.getByTestId("dial-recognisability").fill("0.66");
     await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.66");
 
-    const reloading = page.reload();
-    await expect(phone.getByTestId("link-line")).toHaveText("Screen not connected");
-    await expect(phone.getByTestId("dial-recognisability")).toBeDisabled();
-    await reloading;
+    const shown = await watchLink(phone);
+    await page.reload();
     await expect(page.getByTestId("control-switch")).toBeChecked();
     await expect(page.getByTestId("control-code")).toHaveText(code);
     await expect(page.getByTestId("control-devices")).toContainText("Device 1");
@@ -153,6 +232,28 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     await expect(
       phone.locator(`[data-testid=profile-tile][data-profile-id="${warm.id}"]`),
     ).toHaveAttribute("aria-pressed", "true");
+    // Between the two pages the controller waited, locked (AC29), and only the new page's state
+    // unlocked it: the record holds a lock too short for a poll to be sure of seeing (D-10).
+    expect(await shown()).toEqual(LOCKED_THROUGH_RELOAD);
+  });
+
+  test("a reloaded screen whose socket reaches the server before the old one closes still locks the controllers until its state (SD13, D-06)", async ({
+    page,
+    browser,
+  }) => {
+    await newScreenFirst(page);
+    const url = await screen(page);
+    const phone = await paired(page, browser, url);
+    await phone.getByTestId("dial-recognisability").fill("0.66");
+    await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.66");
+
+    const shown = await watchLink(phone);
+    await page.reload();
+    await expect(page.getByTestId("control-switch")).toBeChecked();
+    // The old page's state does not survive the takeover: the new page's is the built-in's.
+    await expect(phone.getByTestId("dial-recognisability")).toHaveValue("0.3");
+    await expect(phone.getByTestId("link-line")).toHaveText("Connected");
+    expect(await shown()).toEqual(LOCKED_THROUGH_RELOAD);
   });
 
   test("offline: Reconnecting…, locked, nothing sent later; back online the state arrives (AC27, SD12)", async ({
