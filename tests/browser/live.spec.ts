@@ -546,9 +546,7 @@ test("nothing but the page, its assets, health, the screen socket and the two pr
   expect(bodies, "a request carried a body").toEqual([]);
   // B-04 (SD25, AC36): exactly one WebSocket, the screen socket on the page's own server.
   const origin = new URL(page.url());
-  expect(sockets, "the WebSockets opened").toEqual([
-    `WS ws://${origin.host}/api/control/screen`,
-  ]);
+  expect(sockets, "the WebSockets opened").toEqual([`WS ws://${origin.host}/api/control/screen`]);
   expect(requests).toContain("GET /api/profiles");
   expect(requests).toContain(`GET /api/profiles/${stored.id}`);
   await deleteAll(request);
