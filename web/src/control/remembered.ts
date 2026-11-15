@@ -15,6 +15,17 @@ export const DJ_BELOW_PX = 600;
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
+const nothing: StorageLike = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+
+/** `localStorage`, or a store that keeps nothing when merely reading it throws (blocked site data). */
+const browserStorage = (): StorageLike => {
+  try {
+    return localStorage;
+  } catch {
+    return nothing;
+  }
+};
+
 const read = (storage: StorageLike, key: string): string | null => {
   try {
     const value: unknown = storage.getItem(key);
@@ -34,7 +45,7 @@ const write = (storage: StorageLike, key: string, value: string | null): void =>
 };
 
 /** The session key store the controller's link uses. */
-export function keyStore(storage: StorageLike = localStorage) {
+export function keyStore(storage: StorageLike = browserStorage()) {
   return {
     load: () => read(storage, KEY_KEY),
     save: (key: string) => write(storage, KEY_KEY, key),
@@ -46,7 +57,7 @@ export function keyStore(storage: StorageLike = localStorage) {
  * The address the QR code and URL use (SD14): the one chosen before while it is still bound,
  * else the first.
  */
-export function addressStore(storage: StorageLike = localStorage) {
+export function addressStore(storage: StorageLike = browserStorage()) {
   return {
     pick<A extends { address: string }>(addresses: readonly A[]): A | null {
       const chosen = read(storage, ADDRESS_KEY);
@@ -57,7 +68,7 @@ export function addressStore(storage: StorageLike = localStorage) {
 }
 
 /** The controller's mode: the one chosen on this device, else by the viewport (SD9, AC42). */
-export function modeStore(storage: StorageLike = localStorage) {
+export function modeStore(storage: StorageLike = browserStorage()) {
   return {
     initial(width: number): Mode {
       const stored = read(storage, MODE_KEY);

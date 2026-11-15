@@ -1,5 +1,5 @@
 // B-04 (spec, Data): what External control keeps in browser storage.
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ADDRESS_KEY, addressStore, KEY_KEY, keyStore, MODE_KEY, modeStore } from "./remembered.ts";
 
 function memory() {
@@ -23,6 +23,31 @@ const broken = {
     throw new Error("disabled");
   },
 };
+
+describe("browser storage itself unavailable", () => {
+  // Blocked site data: reading `localStorage` throws a SecurityError before any method is called.
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  beforeEach(() => {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new DOMException("blocked", "SecurityError");
+      },
+    });
+  });
+  afterEach(() => {
+    if (real) Object.defineProperty(globalThis, "localStorage", real);
+    else delete (globalThis as { localStorage?: unknown }).localStorage;
+  });
+
+  it("makes every store without throwing, and they remember nothing", () => {
+    const keys = keyStore();
+    expect(keys.load()).toBeNull();
+    expect(() => keys.save("AAAAAAAAAAAAAAAAAAAAAA")).not.toThrow();
+    expect(modeStore().initial(390)).toBe("dj");
+    expect(addressStore().pick([{ address: "192.168.1.5" }])).toEqual({ address: "192.168.1.5" });
+  });
+});
 
 describe("the session key (djv.controlKey)", () => {
   it("saves, loads and clears under its key", () => {

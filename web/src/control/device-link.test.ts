@@ -65,15 +65,17 @@ let link: DeviceLink;
 
 const latest = () => FakeSocket.all.at(-1)!;
 
-function make() {
+function make(
+  store = {
+    load: () => storage.get("key") ?? null,
+    save: (key: string) => void storage.set("key", key),
+    clear: () => void storage.delete("key"),
+  },
+) {
   link = createDeviceLink({
     url: "ws://192.168.1.5:8001/api/control/device",
     connect: (url) => new FakeSocket(url),
-    storage: {
-      load: () => storage.get("key") ?? null,
-      save: (key) => void storage.set("key", key),
-      clear: () => void storage.delete("key"),
-    },
+    storage: store,
     location: {
       hash: () => hash,
       clearHash: () => void (hash = ""),
@@ -126,6 +128,14 @@ describe("opening (SD19)", () => {
     expect(hash).toBe("");
     latest().open();
     expect(latest().sent).toEqual([{ type: "hello", code: CODE }]);
+  });
+
+  it("reads a fragment that is not valid percent-encoding as a wrong code", () => {
+    hash = "#code=%";
+    expect(() => make()).not.toThrow();
+    expect(hash).toBe("");
+    expect(link.view().status).toBe("wrong_code");
+    expect(FakeSocket.all).toEqual([]);
   });
 
   it("presents a stored key instead", () => {
@@ -305,6 +315,36 @@ describe("reconnecting (SD12, AC11, AC27, AC28)", () => {
     latest().drop();
     expect(link.view().status).toBe("ended");
     expect(storage.has("key")).toBe(false);
+  });
+
+  it("reconnects with the key it was approved with when storage did not keep it", () => {
+    hash = `#code=${CODE}`;
+    make({ load: () => null, save: () => {}, clear: () => {} });
+    latest().open();
+    latest().deliver({ type: "approved", key: KEY, deviceId: "d1" });
+    latest().drop();
+    vi.advanceTimersByTime(500);
+    latest().open();
+    expect(latest().sent).toEqual([{ type: "hello", key: KEY }]);
+  });
+
+  it("reconnects with its own key after another tab stored a different one", () => {
+    live();
+    storage.set("key", "BBBBBBBBBBBBBBBBBBBBBB");
+    latest().drop();
+    vi.advanceTimersByTime(500);
+    latest().open();
+    expect(latest().sent).toEqual([{ type: "hello", key: KEY }]);
+  });
+
+  it("clears the pending requests when the pairing ends", () => {
+    live();
+    latest().deliver({
+      type: "pending",
+      requests: [{ deviceId: "d2", hint: "Chrome on Android", label: "Device 2" }],
+    });
+    latest().deliver({ type: "ended" });
+    expect(link.view().pending).toEqual([]);
   });
 
   it("keeps reconnecting while the server does not answer at all (PD4)", () => {

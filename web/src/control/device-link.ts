@@ -124,6 +124,11 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let status: LinkStatus = "needs_code";
   let code: string | null = null;
+  /**
+   * This tab's session key, held here once read or approved: storage may not keep it, and a
+   * second tab on the same origin overwrites it there.
+   */
+  let key: string | null = null;
   let approved = false;
   /** No reconnecting: a refusal, an ended pairing, or stopped. */
   let halted = false;
@@ -159,6 +164,8 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
 
   const end = () => {
     deps.storage.clear();
+    key = null;
+    pending = [];
     halted = true;
     approved = false;
     drop();
@@ -171,6 +178,7 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
         return set("waiting");
       case "approved":
         deps.storage.save(message.key);
+        key = message.key;
         code = null; // from now on the key reconnects
         approved = true;
         deviceId = message.deviceId;
@@ -209,7 +217,6 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
     ws.onopen = () => {
       if (socket !== ws) return;
       backoff.reset();
-      const key = deps.storage.load();
       ws.send(JSON.stringify(code !== null ? { type: "hello", code } : { type: "hello", key }));
     };
     ws.onmessage = (event) => {
@@ -266,11 +273,17 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
       const match = /(?:^#|&)code=([^&]*)/.exec(deps.location.hash());
       if (match) {
         deps.location.clearHash();
-        const presented = normalise(decodeURIComponent(match[1]!));
+        let presented: string;
+        try {
+          presented = normalise(decodeURIComponent(match[1]!));
+        } catch {
+          return set("wrong_code"); // not valid percent-encoding
+        }
         if (!CODE_PATTERN.test(presented)) return set("wrong_code");
         code = presented;
       }
-      if (code !== null || deps.storage.load() !== null) begin();
+      key = deps.storage.load();
+      if (code !== null || key !== null) begin();
       else set("needs_code");
     },
 

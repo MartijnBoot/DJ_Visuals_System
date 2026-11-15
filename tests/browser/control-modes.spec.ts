@@ -186,6 +186,24 @@ test("the status strip shows the round trip, last and p95, after a change (AC43,
   await expect(phone.getByTestId("round-trip")).toHaveText(/^round trip \d+ ms \/ p95 \d+ ms$/);
 });
 
+test("the round trip updates while states arrive faster than it refreshes, as during a drag (AC43)", async ({
+  page,
+  browser,
+}) => {
+  const url = await screen(page);
+  const phone = await paired(page, browser, url);
+  const readout = phone.getByTestId("round-trip");
+  await expect(readout).toHaveText("round trip –");
+  // A change every 100 ms, each answered by a state: the 500 ms refresh must still come round.
+  let shown = false;
+  for (let i = 0; i < 30 && !shown; i++) {
+    await phone.getByTestId("dial-reactivity").fill(String(0.1 + i * 0.02));
+    await phone.waitForTimeout(100);
+    shown = (await readout.textContent()) !== "round trip –";
+  }
+  expect(shown).toBe(true);
+});
+
 test("a second device's request shows inline in VJ mode with its hint, and Accept there approves it (AC8, SD18)", async ({
   page,
   browser,

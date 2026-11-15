@@ -117,7 +117,6 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     // The screen applied b's last; every surface ends there.
     await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.77");
     for (const phone of [a, b]) {
-      await phone.getByTestId("dial-recognisability").blur();
       await expect(phone.getByTestId("dial-recognisability")).toHaveValue("0.77");
     }
   });
@@ -396,7 +395,6 @@ test.describe("part 2: the spec's scenario (T16, Verification 1)", () => {
       await vj.getByTestId("dial-reactivity").fill("0.25");
       await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.8");
       await expect(page.getByTestId("slider-reactivity")).toHaveValue("0.25");
-      await vj.getByTestId("dial-reactivity").blur();
       await expect(vj.getByTestId("dial-reactivity")).toHaveValue("0.25");
       await expectCanvasChanging(page);
     });
