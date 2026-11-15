@@ -119,14 +119,27 @@ describe("createFeatureSource", () => {
     // by baseLatency + outputLatency, so without both the sample lands in the future.
     const { asContext } = fakeContext(0.01, 0.05);
     const source = await createFeatureSource(asContext, stream, "u");
+    now = 1600;
     FakeNode.created[0]!.post({ frame, contextTime: 0.5 });
     expect(source.read(now).capturedAt).toBeCloseTo(1500 - 60 - 10, 9);
+  });
+
+  it("never puts capturedAt after the window reached this thread (D-07, B-08 AC3)", async () => {
+    // A reported outputLatency below the real one (a CI runner with no audio device) maps the
+    // window's newest sample later than the message that carried it, so a frame drawn right
+    // after recorded a negative latency. The arrival time is a hard upper bound.
+    const { asContext } = fakeContext(0.01, 0);
+    const source = await createFeatureSource(asContext, stream, "u");
+    now = 1470; // the estimate says 1480
+    FakeNode.created[0]!.post({ frame, contextTime: 0.5 });
+    expect(source.read(1471).capturedAt).toBe(1470);
   });
 
   it("ignores a message that is not a feature window", async () => {
     const { asContext } = fakeContext();
     const source = await createFeatureSource(asContext, stream, "u");
     const node = FakeNode.created[0]!;
+    now = 1600;
     node.post({ frame, contextTime: 0.5 });
     node.post({ frame: { level: "loud" }, contextTime: 0.6 });
     node.post("hello");
@@ -137,6 +150,7 @@ describe("createFeatureSource", () => {
     const { context, asContext } = fakeContext(0);
     const source = await createFeatureSource(asContext, stream, "u");
     const node = FakeNode.created[0]!;
+    now = 5000; // the window arrives after every capture time read below
     node.post({ frame, contextTime: 2 });
     expect(source.read(1500).capturedAt).toBe(3000);
     context.getOutputTimestamp.mockReturnValue({ contextTime: 1, performanceTime: 2100 });
@@ -147,9 +161,9 @@ describe("createFeatureSource", () => {
   it("decays to ZERO_FEATURES, except capturedAt, after 700 ms with no message (AC12)", async () => {
     const { asContext } = fakeContext(0);
     const source = await createFeatureSource(asContext, stream, "u");
-    FakeNode.created[0]!.post({ frame, contextTime: 0.5 });
+    FakeNode.created[0]!.post({ frame, contextTime: 0 });
     const read = source.read(now + 700);
-    expect(read).toEqual({ ...ZERO_FEATURES, capturedAt: 1500 });
+    expect(read).toEqual({ ...ZERO_FEATURES, capturedAt: 1000 });
   });
 
   it("stop disconnects the graph and closes the port, and leaves the tracks alone", async () => {

@@ -82,15 +82,18 @@ export async function createFeatureSource(
       const { frame, contextTime } = latest;
       // The clock map gives when a context time is heard; the graph processed it this much
       // earlier, which is when the window's newest sample was in hand (PD2). SD15 then adds
-      // baseLatency once more as the input side's share.
+      // baseLatency once more as the input side's share. The latencies are the browser's own
+      // estimates; one reported too low maps the sample after the message that carried it
+      // arrived, which cannot be, so that arrival bounds it (D-07, B-08 AC3: latency ≥ 0).
       const aheadMs = (context.baseLatency + (context.outputLatency ?? 0)) * 1000;
+      const estimate = clock.toPerformance(contextTime) - aheadMs - context.baseLatency * 1000;
       const features: AudioFeatures = {
         level: frame.level,
         low: frame.low,
         mid: frame.mid,
         high: frame.high,
         beat: frame.beat,
-        capturedAt: clock.toPerformance(contextTime) - aheadMs - context.baseLatency * 1000,
+        capturedAt: Math.min(estimate, lastBlockAt),
       };
       return decayFeatures(features, now - lastBlockAt);
     },
