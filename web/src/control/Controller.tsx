@@ -164,7 +164,7 @@ export function Controller() {
                     data-profile-id={p.id}
                     aria-pressed={p.id === state.activeId}
                     disabled={locked}
-                    style={p.id === state.activeId ? styles.active : styles.tile}
+                    style={p.id === state.activeId ? styles.activeTile : styles.tile}
                     onClick={() => link.send({ type: "pick", id: p.id })}
                   >
                     {p.name}
@@ -189,7 +189,7 @@ export function Controller() {
                     data-camera-id={c.deviceId}
                     aria-pressed={c.deviceId === state.cameraId}
                     disabled={locked || !state.started}
-                    style={c.deviceId === state.cameraId ? styles.active : styles.tile}
+                    style={c.deviceId === state.cameraId ? styles.activeTile : styles.tile}
                     onClick={() => link.send({ type: "camera", deviceId: c.deviceId })}
                   >
                     {c.label || `Camera ${i + 1}`}

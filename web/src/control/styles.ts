@@ -19,6 +19,16 @@ const button: CSSProperties = {
   boxSizing: "border-box",
 };
 
+// A camera label can be one long word (a device path): break it rather than scroll sideways.
+const tile: CSSProperties = {
+  ...button,
+  minWidth: 0,
+  whiteSpace: "normal",
+  wordBreak: "break-word",
+  overflowWrap: "anywhere",
+  textAlign: "left",
+};
+
 export const styles = {
   page: {
     position: "fixed",
@@ -52,8 +62,10 @@ export const styles = {
   },
   heading: { margin: 0, fontSize: 14, fontWeight: 600, color: "#ddd" },
   button,
-  tile: { ...button, overflowWrap: "anywhere", textAlign: "left" },
+  tile,
   active: { ...button, color: "#000", background: AMBER, borderColor: AMBER, fontWeight: 700 },
+  /** The chosen tile: a tile's wrapping, the active colours. */
+  activeTile: { ...tile, color: "#000", background: AMBER, borderColor: AMBER, fontWeight: 700 },
   badge: { ...button, color: "#000", background: AMBER, borderColor: AMBER, fontWeight: 700 },
   slider: { width: "100%", minHeight: TARGET, margin: 0, accentColor: AMBER },
   input: {
