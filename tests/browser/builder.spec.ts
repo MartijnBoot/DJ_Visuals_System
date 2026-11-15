@@ -563,7 +563,9 @@ test("leaving unsaved changes asks first: another profile, the back link, and th
   page.once("dialog", (d) => void d.accept());
   await page.getByTestId(`profile-name-${two.id}`).click();
   await expect(page.getByTestId("editor-name")).toHaveValue("Two");
-  expect(await blocks()).toBe(false);
+  // D-08: the guard goes in an effect after the render that shows "Two", so one read can land
+  // between them. Polled until it is gone; a guard that is never removed still fails.
+  await expect.poll(blocks).toBe(false);
 });
 
 test("with the save request failing the draft survives, and Save works once it is restored (AC5)", async ({
