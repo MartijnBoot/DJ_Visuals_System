@@ -132,7 +132,20 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
   let pending: DeviceEntry[] = [];
   let seq = 0;
 
-  const emit = () => listeners.forEach((l) => l());
+  const snapshot = (): LinkView => ({
+    status,
+    text: LINK_TEXT[status],
+    locked: status !== "live",
+    state,
+    pending,
+    deviceId,
+  });
+  // One object per change, so a React `useSyncExternalStore` sees a stable snapshot.
+  let current = snapshot();
+  const emit = () => {
+    current = snapshot();
+    listeners.forEach((l) => l());
+  };
   const set = (next: LinkStatus) => {
     status = next;
     emit();
@@ -270,14 +283,7 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
 
     send,
 
-    view: () => ({
-      status,
-      text: LINK_TEXT[status],
-      locked: status !== "live",
-      state,
-      pending,
-      deviceId,
-    }),
+    view: () => current,
 
     roundTrip: () => trip.read(deps.now()),
 

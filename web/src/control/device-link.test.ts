@@ -347,3 +347,13 @@ describe("subscribe", () => {
     expect(link.view()).toMatchObject({ status: "live", state });
   });
 });
+
+describe("view snapshots", () => {
+  it("returns the same object until something changes, then a new one", () => {
+    live();
+    const first = link.view();
+    expect(link.view()).toBe(first);
+    latest().deliver({ type: "pending", requests: [] });
+    expect(link.view()).not.toBe(first);
+  });
+});

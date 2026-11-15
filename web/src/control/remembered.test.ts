@@ -1,6 +1,6 @@
 // B-04 (spec, Data): what External control keeps in browser storage.
 import { describe, expect, it } from "vitest";
-import { ADDRESS_KEY, addressStore, KEY_KEY, keyStore } from "./remembered.ts";
+import { ADDRESS_KEY, addressStore, KEY_KEY, keyStore, MODE_KEY, modeStore } from "./remembered.ts";
 
 function memory() {
   const map = new Map<string, string>();
@@ -71,5 +71,27 @@ describe("the QR address (djv.controlAddress, SD14)", () => {
     const store = addressStore(broken);
     expect(store.pick(addresses)).toEqual(addresses[0]);
     expect(() => store.save("10.0.0.2")).not.toThrow();
+  });
+});
+
+describe("the controller's mode (djv.controlMode, SD9, AC42)", () => {
+  it("starts in DJ mode below 600 CSS px and VJ from 600, then keeps the choice", () => {
+    expect(modeStore(memory()).initial(599)).toBe("dj");
+    expect(modeStore(memory()).initial(600)).toBe("vj");
+    const storage = memory();
+    const store = modeStore(storage);
+    store.save("vj");
+    expect(storage.map.get(MODE_KEY)).toBe("vj");
+    expect(store.initial(320)).toBe("vj");
+    store.save("dj");
+    expect(store.initial(1024)).toBe("dj");
+  });
+
+  it("ignores anything else stored, and never throws", () => {
+    const storage = memory();
+    storage.map.set(MODE_KEY, "admin");
+    expect(modeStore(storage).initial(1024)).toBe("vj");
+    expect(modeStore(broken).initial(390)).toBe("dj");
+    expect(() => modeStore(broken).save("vj")).not.toThrow();
   });
 });
