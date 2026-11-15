@@ -18,9 +18,15 @@ import {
   type Target,
 } from "./gl.ts";
 import { createLatencyWindow, type LatencyReading } from "./latency.ts";
-import { BUILT_IN_PROFILE, PALETTE_SLOTS, profileUniforms, type Profile } from "./profile.ts";
+import {
+  BUILT_IN_PROFILE,
+  customUniforms,
+  PALETTE_SLOTS,
+  profileUniforms,
+  type Profile,
+} from "./profile.ts";
 import { createScaleController, type RenderScale } from "./scale.ts";
-import { buildFragment } from "./shader.ts";
+import { buildFragment, type FragmentEntry } from "./shader.ts";
 import { createFrameStats, type EngineStats } from "./stats.ts";
 
 export type { EngineStats, FrameStats } from "./stats.ts";
@@ -118,10 +124,25 @@ const UNIFORMS = [
 
 type Locations = Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
 
+/** Present only in a program with a custom effect (B-03 PD7). */
+const CUSTOM_UNIFORMS = [
+  "uCustomStrength",
+  "uCustomParam",
+  "uAudio.level",
+  "uAudio.low",
+  "uAudio.mid",
+  "uAudio.high",
+  "uAudio.beat",
+] as const;
+
+type CustomLocations = Record<(typeof CUSTOM_UNIFORMS)[number], WebGLUniformLocation | null>;
+
 interface Linked {
   key: string;
   program: WebGLProgram;
   loc: Locations;
+  /** Null for a program without custom effects: their uniforms are never set. */
+  custom: CustomLocations | null;
 }
 
 interface PendingSwitch {
@@ -133,8 +154,21 @@ interface PendingSwitch {
   reject(error: Error): void;
 }
 
-/** A program is identified by its ordered effect list. */
-const keyOf = (profile: Profile) => profile.effects.map((e) => e.type).join(",");
+/** The chain a profile's program draws: its effect list, custom code included (B-03 SD3). */
+const entriesOf = (profile: Profile): FragmentEntry[] =>
+  profile.effects.map((e) => (e.type === "custom" ? { type: "custom", code: e.code } : e.type));
+
+/**
+ * A program is identified by its ordered effect list and every custom body's code. The code is
+ * JSON-quoted, so no code can read as another list.
+ */
+const keyOf = (profile: Profile) =>
+  entriesOf(profile)
+    .map((e) => (typeof e === "string" ? e : `custom:${JSON.stringify(e.code)}`))
+    .join(",");
+
+/** The effect types alone, for a log line: never the code. */
+const typesOf = (profile: Profile) => profile.effects.map((e) => e.type).join(",");
 
 export function createEngine(canvas: HTMLCanvasElement): Engine {
   // No multisampling: `blitFramebuffer` may not write to a multisampled default framebuffer.
@@ -144,22 +178,29 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     "KHR_parallel_shader_compile",
   ) as unknown as ParallelCompile | null;
 
-  const linked = (key: string, program: WebGLProgram): Linked => ({
+  const locate = <N extends string>(program: WebGLProgram, names: readonly N[]) =>
+    Object.fromEntries(names.map((name) => [name, gl.getUniformLocation(program, name)])) as Record<
+      N,
+      WebGLUniformLocation | null
+    >;
+  const linked = (key: string, program: WebGLProgram, custom: boolean): Linked => ({
     key,
     program,
-    loc: Object.fromEntries(
-      UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)]),
-    ) as Locations,
+    loc: locate(program, UNIFORMS),
+    custom: custom ? locate(program, CUSTOM_UNIFORMS) : null,
   });
-  // A custom entry passes the picture through until its code is compiled in (B-03 T1).
-  const fragmentFor = (profile: Profile) =>
-    buildFragment(profile.effects.flatMap((e) => (e.type === "custom" ? [] : [e.type])));
+  const hasCustom = (profile: Profile) => profile.effects.some((e) => e.type === "custom");
+  const fragmentFor = (profile: Profile) => buildFragment(entriesOf(profile));
 
   const builtInKey = keyOf(BUILT_IN_PROFILE);
   const cache = new Map<string, Linked>();
   let active: { profile: Profile; linked: Linked } = {
     profile: BUILT_IN_PROFILE,
-    linked: linked(builtInKey, createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(BUILT_IN_PROFILE))),
+    linked: linked(
+      builtInKey,
+      createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(BUILT_IN_PROFILE)),
+      false,
+    ),
   };
   cache.set(builtInKey, active.linked);
   let pending: PendingSwitch | null = null;
@@ -198,14 +239,14 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
         if (!failedKeys.has(next.key)) {
           failedKeys.add(next.key);
           console.warn("profile program did not link; keeping the current profile", {
-            effects: next.key,
+            effects: typesOf(next.profile),
             reason: state.message,
           });
         }
         next.reject(new Error(state.message));
         return;
       }
-      entry = linked(next.key, state.program);
+      entry = linked(next.key, state.program, hasCustom(next.profile));
     }
     pending = null;
     remember(entry);
@@ -325,6 +366,17 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     gl.uniform1f(loc.uMirror, u.mirror);
     gl.uniform1f(loc.uSegments, u.segments);
     gl.uniform1f(loc.uRgbSplit, u.rgbSplit);
+    const custom = active.linked.custom;
+    if (custom) {
+      const c = customUniforms(active.profile, features, dials);
+      gl.uniform1fv(custom.uCustomStrength, c.strength);
+      gl.uniform4fv(custom.uCustomParam, c.params);
+      gl.uniform1f(custom["uAudio.level"], c.audio.level);
+      gl.uniform1f(custom["uAudio.low"], c.audio.low);
+      gl.uniform1f(custom["uAudio.mid"], c.audio.mid);
+      gl.uniform1f(custom["uAudio.high"], c.audio.high);
+      gl.uniform1f(custom["uAudio.beat"], c.audio.beat);
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.framebuffer);

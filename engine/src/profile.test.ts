@@ -7,6 +7,7 @@ import {
   BUILT_IN_PROFILE,
   EFFECTS,
   effectStrength,
+  customUniforms,
   profileUniforms,
   type Effect,
   type EffectType,
@@ -350,5 +351,81 @@ describe("a custom effect's strength (B-03 SD12)", () => {
     expect(profileUniforms(withCustom, features, dials, 500, true, WIDTH)).toEqual(
       profileUniforms(without, features, dials, 500, true, WIDTH),
     );
+  });
+});
+
+// B-03 T4 (spec AC6, SD4, SD12; plan PD1 owner 2026-11-15: audio scaled by reactivity).
+describe("customUniforms (B-03)", () => {
+  const coded = (
+    label: string,
+    over: Partial<Extract<Effect, { type: "custom" }>> = {},
+  ): Effect => ({
+    type: "custom",
+    label,
+    amount: 0.6,
+    abstraction: false,
+    params: [
+      { name: "a", value: 0.25 },
+      { name: "b", value: 0.75 },
+    ],
+    code: "return source(uv);",
+    ...over,
+  });
+  const profile = (effects: Effect[]): Profile => ({ ...twelve(), effects });
+  const loud: AudioFeatures = { level: 0.9, low: 0.8, mid: 0.7, high: 0.6, beat: 1, capturedAt: 0 };
+
+  it("gives each custom effect in stack order its strength and four parameters", () => {
+    const u = customUniforms(
+      profile([coded("A"), effectOf("zoom", 1), coded("B", { amount: 0.2, params: [] })]),
+      loud,
+      { recognisability: 1, reactivity: 1 },
+    );
+    expect(u.strength).toHaveLength(12);
+    expect(u.strength.slice(0, 3)).toEqual([0.6, 0.2, 0]);
+    expect(u.params).toHaveLength(48);
+    expect(u.params.slice(0, 8)).toEqual([0.25, 0.75, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it("at reactivity 0: strength as without the binding, and all five audio values 0 (AC6)", () => {
+    const bound = coded("A", { binding: { feature: "beat", amount: 1 } });
+    const dials = { recognisability: 0.4, reactivity: 0 };
+    const u = customUniforms(profile([bound]), loud, dials);
+    const unbound = customUniforms(profile([coded("A")]), loud, dials);
+    expect(u.strength[0]).toBe(unbound.strength[0]);
+    expect(u.audio).toEqual({ level: 0, low: 0, mid: 0, high: 0, beat: 0 });
+  });
+
+  it("at reactivity 1: the audio values are the features", () => {
+    const u = customUniforms(profile([coded("A")]), loud, { recognisability: 1, reactivity: 1 });
+    expect(u.audio).toEqual({ level: 0.9, low: 0.8, mid: 0.7, high: 0.6, beat: 1 });
+    const half = customUniforms(profile([coded("A")]), loud, {
+      recognisability: 1,
+      reactivity: 0.5,
+    });
+    expect(half.audio.level).toBeCloseTo(0.45, 12);
+  });
+
+  it("scales a flagged effect by recognisability (B-02 SD4) and leaves an unflagged one", () => {
+    const at = (recognisability: number) =>
+      customUniforms(profile([coded("F", { abstraction: true }), coded("P")]), loud, {
+        recognisability,
+        reactivity: 0.5,
+      }).strength.slice(0, 2);
+    expect(at(1)).toEqual([0.6, 0.6]);
+    const [flagged, plain] = at(0.5);
+    expect(flagged).toBeCloseTo(0.3, 12);
+    expect(plain).toBe(0.6);
+  });
+
+  it("is finite and within 0..1 for wild inputs", () => {
+    const wild = { level: Infinity, low: -4, mid: NaN, high: 9, beat: 7, capturedAt: NaN };
+    const u = customUniforms(profile([coded("A", { amount: 7 })]), wild, {
+      recognisability: NaN,
+      reactivity: 9,
+    });
+    for (const v of [...u.strength, ...u.params, ...Object.values(u.audio)]) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
   });
 });

@@ -2,7 +2,7 @@
 // ordered effect list, checked as text. `tests/browser/shader.spec.ts` compiles it.
 import { describe, expect, it } from "vitest";
 import { BUILT_IN_PROFILE, type EffectType } from "./profile.ts";
-import { buildFragment } from "./shader.ts";
+import { buildFragment, CUSTOM_CONTRACT } from "./shader.ts";
 
 /** The body of `vec3 fxN(vec2 uv)` in `source`. */
 function body(source: string, n: number): string {
@@ -94,5 +94,83 @@ describe("the new effects (T6, PD3, PD6)", () => {
     expect(calls("rgbSplit")).toBe(3);
     expect(calls("mirror")).toBe(1);
     expect(calls("paletteMap")).toBe(1);
+  });
+});
+
+// B-03 T4 (spec SD3, SD13; plan PD7): a custom entry is its own function between the
+// contract's defines, behind a wrapper that skips it under strength 0.001.
+describe("custom entries (B-03)", () => {
+  const swap = { type: "custom", code: "return source(uv).bgr;" } as const;
+
+  it("adds nothing to a fragment without a custom entry", () => {
+    const source = buildFragment(["zoom", "flash"]);
+    expect(source).not.toContain("uCustom");
+    expect(source).not.toContain("#define");
+    expect(source).not.toContain("uAudio");
+  });
+
+  it("puts the body in its own function, with source naming the effect before it", () => {
+    const source = buildFragment(["zoom", swap, "flash"]);
+    expect(source).toContain("return source(uv).bgr;");
+    const at = source.indexOf("return source(uv).bgr;");
+    const before = source.slice(0, at);
+    const after = source.slice(at);
+    expect(before.lastIndexOf("#define source fx1")).toBeGreaterThan(-1);
+    expect(before.lastIndexOf("#define strength uCustomStrength[0]")).toBeGreaterThan(-1);
+    expect(before.lastIndexOf("#define param uCustomParam[0]")).toBeGreaterThan(-1);
+    for (const name of CUSTOM_CONTRACT.defines) {
+      expect(after.indexOf(`#undef ${name}`)).toBeGreaterThan(-1);
+      expect(after.indexOf(`#undef ${name}`)).toBeLessThan(after.indexOf("vec3 fx2(vec2 uv)"));
+    }
+    // fx3, the flash, calls the custom effect's wrapper.
+    expect(body(source, 3)).toMatch(/\bfx2\(/);
+  });
+
+  it("wraps the body so it does not run under strength 0.001 (SD13)", () => {
+    const wrapper = body(buildFragment(["zoom", swap]), 2);
+    expect(wrapper).toContain("uCustomStrength[0] < 0.001");
+    expect(wrapper).toMatch(/return fx1\(uv\);/);
+  });
+
+  it("numbers custom effects in stack order for their uniforms", () => {
+    const source = buildFragment([
+      swap,
+      "zoom",
+      { type: "custom", code: "return vec3(param[1]);" },
+    ]);
+    expect(source).toContain("#define strength uCustomStrength[0]");
+    expect(source).toContain("#define strength uCustomStrength[1]");
+    expect(source).toContain("#define source fx2");
+    expect(body(source, 3)).toContain("uCustomStrength[1] < 0.001");
+  });
+
+  it("ends the body on its own line, so a closing // comment cannot swallow the brace", () => {
+    const source = buildFragment([{ type: "custom", code: "return source(uv); // done" }]);
+    expect(source).toMatch(/\/\/ done\n\}/);
+  });
+
+  it("declares the custom uniforms once, before the first function after fx0", () => {
+    const source = buildFragment([swap, swap]);
+    expect(source.match(/uniform float uCustomStrength\[12\];/g)).toHaveLength(1);
+    expect(source.match(/uniform vec4 uCustomParam\[12\];/g)).toHaveLength(1);
+    expect(source.match(/uniform Audio uAudio;/g)).toHaveLength(1);
+  });
+
+  it("names the whole contract (PD7)", () => {
+    expect([...CUSTOM_CONTRACT.defines].sort()).toEqual(
+      [
+        "audio",
+        "lastFrame",
+        "palette",
+        "paletteSize",
+        "param",
+        "resolution",
+        "source",
+        "strength",
+        "time",
+      ].sort(),
+    );
+    expect(CUSTOM_CONTRACT.functions).toEqual(["hash", "valueNoise"]);
+    expect(CUSTOM_CONTRACT.audio).toEqual(["level", "low", "mid", "high", "beat"]);
   });
 });

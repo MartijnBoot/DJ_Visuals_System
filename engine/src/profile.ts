@@ -267,6 +267,53 @@ export function profileUniforms(
   return u;
 }
 
+/** Custom effects a profile can hold, and so the length of their uniform arrays (B-03 SD4). */
+export const CUSTOM_SLOTS = 12;
+
+/** Parameters a custom effect can have; each slot is a `vec4` (B-03 SD4). */
+const CUSTOM_PARAMS = 4;
+
+export interface CustomUniforms {
+  /** Each custom effect's effective strength, in stack order; the rest 0. */
+  strength: number[];
+  /** Four values per custom effect, in declaration order, unset ones 0. */
+  params: number[];
+  /** Each feature × reactivity (PD1, owner 2026-11-15): at reactivity 0 code hears nothing. */
+  audio: Record<FeatureName, number>;
+}
+
+/** The custom effects' uniforms of a frame (B-03 SD3, SD4, SD12; plan PD1, PD7). */
+export function customUniforms(
+  profile: Profile,
+  features: AudioFeatures,
+  dials: Dials,
+): CustomUniforms {
+  const strength = new Array<number>(CUSTOM_SLOTS).fill(0);
+  const params = new Array<number>(CUSTOM_SLOTS * CUSTOM_PARAMS).fill(0);
+  let slot = 0;
+  for (const effect of profile.effects) {
+    if (effect.type !== "custom" || slot >= CUSTOM_SLOTS) continue;
+    strength[slot] = effectStrength(effect, features, dials);
+    effect.params.slice(0, CUSTOM_PARAMS).forEach((param, i) => {
+      params[slot * CUSTOM_PARAMS + i] = clamp01(param.value);
+    });
+    slot++;
+  }
+  const reactivity = clamp01(dials.reactivity);
+  const heard = (name: FeatureName) => clamp01(features[name]) * reactivity;
+  return {
+    strength,
+    params,
+    audio: {
+      level: heard("level"),
+      low: heard("low"),
+      mid: heard("mid"),
+      high: heard("high"),
+      beat: heard("beat"),
+    },
+  };
+}
+
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object") {
     for (const child of Object.values(value)) deepFreeze(child);

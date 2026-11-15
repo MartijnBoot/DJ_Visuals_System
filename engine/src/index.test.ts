@@ -329,3 +329,76 @@ describe("setProfile and the prepared swap (B-02 SD15, PD4)", () => {
     expect(frames().map(usedProgram)).toEqual([0, 1, 0, 1]);
   });
 });
+
+// B-03 T4 (spec SD1, SD3; plan PD7): a program is keyed by its effect list and every body's
+// code; the code reaches the context only through `shaderSource`.
+describe("custom effects in the engine (B-03)", () => {
+  const CODE = "return source(uv).bgr * (0.5 + 0.5 * param[0]); // marker-7f3a";
+  const coded = (code: string, value = 0.5): Profile => ({
+    ...BUILT_IN_PROFILE,
+    name: "Coded",
+    effects: [
+      { type: "zoom", amount: 0.2 },
+      {
+        type: "custom",
+        label: "Swap",
+        amount: 1,
+        abstraction: false,
+        params: [{ name: "mix", value }],
+        code,
+      },
+    ],
+  });
+
+  it("links one program per distinct code, and none for a parameter change", async () => {
+    const { engine, fake, calls } = started();
+    frameAt(0);
+    const first = engine.setProfile(coded(CODE));
+    fake.completeLinks();
+    frameAt(16);
+    await first;
+    await engine.setProfile(coded(CODE, 0.9));
+    frameAt(32);
+    expect(calls.filter((c) => c.name === "createProgram")).toHaveLength(2);
+    expect(uniform(frames().at(-1)!, "uCustomParam")).toEqual(expect.arrayContaining([0.9]));
+    const other = engine.setProfile(coded("return source(uv);"));
+    fake.completeLinks();
+    frameAt(48);
+    await other;
+    expect(calls.filter((c) => c.name === "createProgram")).toHaveLength(3);
+    expect(frames().map(usedProgram)).toEqual([0, 1, 1, 2]);
+  });
+
+  it("hands the code to shaderSource and to no other call", async () => {
+    const { engine, fake, calls } = started();
+    frameAt(0);
+    const switched = engine.setProfile(coded(CODE));
+    fake.completeLinks();
+    frameAt(16);
+    await switched;
+    frameAt(32);
+    const carrying = calls.filter((c) => JSON.stringify(c.args).includes("marker-7f3a"));
+    expect(carrying.map((c) => c.name)).toEqual(["shaderSource"]);
+  });
+
+  it("sets the custom uniforms only for a program that has them", async () => {
+    const { engine, fake } = started();
+    engine.setFeatures({ ...ZERO_FEATURES, level: 0.5, capturedAt: 1 });
+    engine.setDials({ recognisability: 1, reactivity: 1 });
+    frameAt(0);
+    const builtIn = frames()[0]!;
+    expect(
+      builtIn.some(
+        (c) => c.name.startsWith("uniform") && /uCustom|uAudio/.test(JSON.stringify(c.args[0])),
+      ),
+    ).toBe(false);
+    const switched = engine.setProfile(coded(CODE));
+    fake.completeLinks();
+    frameAt(16);
+    await switched;
+    frameAt(32);
+    const last = frames().at(-1)!;
+    expect(uniform(last, "uCustomStrength")).toEqual(expect.arrayContaining([1]));
+    expect(uniform(last, "uAudio.level")).toBe(0.5);
+  });
+});

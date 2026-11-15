@@ -4,8 +4,9 @@
 // and then changes the result. The first effect in the list is therefore applied to the
 // picture first, exactly as separate passes would, at the cost of one pass. Strengths, colours
 // and segments are uniforms (`profileUniforms`), so only a change to the list needs a new
-// program. No profile carries code: the profile selects and orders these snippets, nothing else.
-import type { EffectType } from "./profile.ts";
+// program. A custom effect (B-03 SD1, SD3) is the one exception: its GLSL body becomes one
+// link of the chain, wrapped by the engine (`customLink`).
+import { CUSTOM_SLOTS, type EffectType } from "./profile.ts";
 
 const HEADER = `#version 300 es
 precision highp float;
@@ -147,16 +148,99 @@ const SNIPPETS: Partial<Record<EffectType, Snippet>> = {
 const passThrough: Snippet = (p) => `
   return ${p}(uv);`;
 
-/** The fragment shader for an ordered effect list (PD3). */
-export function buildFragment(types: readonly EffectType[]): string {
-  const functions = types.map((type, i) => {
-    const snippet = SNIPPETS[type] ?? passThrough;
-    return `// ${type}\nvec3 fx${i + 1}(vec2 uv) {${snippet(`fx${i}`)}\n}\n`;
+/** A custom effect's code (B-03 SD1): the body of a function that returns a `vec3`. */
+export interface CustomEntry {
+  type: "custom";
+  code: string;
+}
+
+/** One link of the chain: a built-in type, or custom code. */
+export type FragmentEntry = EffectType | CustomEntry;
+
+/**
+ * The custom effect contract (B-03 SD3, PD7), as `docs/custom-effects.md` documents it. The
+ * defines exist only around a body, so they are reserved words inside it; the functions are
+ * the shader's own helpers; `audio` has these fields.
+ */
+export const CUSTOM_CONTRACT = {
+  defines: [
+    "source",
+    "lastFrame",
+    "resolution",
+    "time",
+    "audio",
+    "palette",
+    "paletteSize",
+    "strength",
+    "param",
+  ],
+  functions: ["hash", "valueNoise"],
+  audio: ["level", "low", "mid", "high", "beat"],
+} as const;
+
+/** Declared only in a fragment with a custom entry, so built-in-only text is unchanged (AC8). */
+const CUSTOM_HEADER = `
+struct Audio {
+  float level;
+  float low;
+  float mid;
+  float high;
+  float beat;
+};
+uniform Audio uAudio;
+uniform float uCustomStrength[${CUSTOM_SLOTS}];
+uniform vec4 uCustomParam[${CUSTOM_SLOTS}];
+`;
+
+/** The contract's names for the body of the `slot`-th custom effect, whose input is `previous`. */
+const contractDefines = (previous: string, slot: number): string[] => [
+  `#define source ${previous}`,
+  "#define lastFrame(p) texture(uPrevious, (p)).rgb",
+  "#define resolution uResolution",
+  "#define time uTime",
+  "#define audio uAudio",
+  "#define palette uPalette",
+  "#define paletteSize int(uPaletteSize)",
+  `#define strength uCustomStrength[${slot}]`,
+  `#define param uCustomParam[${slot}]`,
+];
+
+/**
+ * A custom entry as two functions: its body, between the contract's defines, and the link
+ * `fxN`, which passes the picture through without running the body under strength 0.001
+ * (SD13). The body ends on its own line so a closing `//` comment cannot reach the brace.
+ */
+function customLink(code: string, index: number, slot: number): string {
+  const previous = `fx${index - 1}`;
+  const undefs = CUSTOM_CONTRACT.defines.map((name) => `#undef ${name}`);
+  return [
+    `// custom ${slot}`,
+    ...contractDefines(previous, slot),
+    `vec3 fx${index}Custom(vec2 uv) {`,
+    code,
+    "}",
+    ...undefs,
+    `vec3 fx${index}(vec2 uv) {`,
+    `  if (uCustomStrength[${slot}] < 0.001) return ${previous}(uv);`,
+    `  return fx${index}Custom(uv);`,
+    "}",
+    "",
+  ].join("\n");
+}
+
+/** The fragment shader for an ordered effect list (PD3), custom code included (B-03 SD3). */
+export function buildFragment(entries: readonly FragmentEntry[]): string {
+  let slot = 0;
+  const functions = entries.map((entry, i) => {
+    if (typeof entry !== "string") return customLink(entry.code, i + 1, slot++);
+    const snippet = SNIPPETS[entry] ?? passThrough;
+    return `// ${entry}\nvec3 fx${i + 1}(vec2 uv) {${snippet(`fx${i}`)}\n}\n`;
   });
-  return `${HEADER}
+  const custom = slot > 0 ? CUSTOM_HEADER : "";
+  return `${HEADER}${custom}
 ${functions.join("\n")}
 void main() {
-  outColour = vec4(clamp(fx${types.length}(gl_FragCoord.xy / uResolution), 0.0, 1.0), 1.0);
+  outColour = vec4(clamp(fx${entries.length}(gl_FragCoord.xy / uResolution), 0.0, 1.0), 1.0);
 }
 `;
 }
