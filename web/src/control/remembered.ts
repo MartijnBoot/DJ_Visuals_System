@@ -7,6 +7,9 @@
 export const KEY_KEY = "djv.controlKey";
 export const ADDRESS_KEY = "djv.controlAddress";
 export const MODE_KEY = "djv.controlMode";
+/** B-06 (Data): a sender's session key and what it sends, on the LAN origin. */
+export const SEND_KEY_KEY = "djv.sendKey";
+export const SEND_CHOICE_KEY = "djv.sendChoice";
 
 export type Mode = "dj" | "vj";
 
@@ -44,12 +47,54 @@ const write = (storage: StorageLike, key: string, value: string | null): void =>
   }
 };
 
+const sessionKey = (storage: StorageLike, name: string) => ({
+  load: () => read(storage, name),
+  save: (key: string) => write(storage, name, key),
+  clear: () => write(storage, name, null),
+});
+
 /** The session key store the controller's link uses. */
 export function keyStore(storage: StorageLike = browserStorage()) {
+  return sessionKey(storage, KEY_KEY);
+}
+
+/** The session key store a sender's link uses (B-06 SD15): apart from the controller's. */
+export function sendKeyStore(storage: StorageLike = browserStorage()) {
+  return sessionKey(storage, SEND_KEY_KEY);
+}
+
+/** What a sender sends and from which devices, for its next pairing (B-06 SD14). */
+export interface SendChoice {
+  video: boolean;
+  audio: boolean;
+  cameraId?: string;
+  audioSource?: { kind: "input"; deviceId: string } | { kind: "system" };
+}
+
+function isSendChoice(v: unknown): v is SendChoice {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const { video, audio, cameraId, audioSource } = v as Record<string, unknown>;
+  if (typeof video !== "boolean" || typeof audio !== "boolean") return false;
+  if (cameraId !== undefined && typeof cameraId !== "string") return false;
+  if (audioSource === undefined) return true;
+  if (typeof audioSource !== "object" || audioSource === null) return false;
+  const { kind, deviceId } = audioSource as Record<string, unknown>;
+  return kind === "system" || (kind === "input" && typeof deviceId === "string");
+}
+
+export function sendChoiceStore(storage: StorageLike = browserStorage()) {
   return {
-    load: () => read(storage, KEY_KEY),
-    save: (key: string) => write(storage, KEY_KEY, key),
-    clear: () => write(storage, KEY_KEY, null),
+    load(): SendChoice | null {
+      const raw = read(storage, SEND_CHOICE_KEY);
+      if (raw === null) return null;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        return isSendChoice(parsed) ? parsed : null;
+      } catch {
+        return null;
+      }
+    },
+    save: (choice: SendChoice) => write(storage, SEND_CHOICE_KEY, JSON.stringify(choice)),
   };
 }
 
