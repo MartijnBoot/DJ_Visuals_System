@@ -27,6 +27,33 @@ const warm: Profile = {
   ],
 };
 
+/** A custom effect (B-03 SD4) that passes the picture through. */
+const customEffect = (label: string, code = "return source(uv);"): Profile["effects"][number] => ({
+  type: "custom",
+  label,
+  amount: 0.6,
+  binding: { feature: "beat", amount: 0.5 },
+  abstraction: true,
+  params: [
+    { name: "speed", value: 0.25 },
+    { name: "size", value: 1 },
+  ],
+  code,
+});
+
+/** Three custom effects between two built-ins. */
+const authored: Profile = {
+  ...warm,
+  name: "Authored",
+  effects: [
+    { type: "zoom", amount: 0.1 },
+    customEffect("Swirl", "vec3 c = source(uv);\nreturn c.bgr;"),
+    customEffect("Glow"),
+    customEffect("Ripple", "// a comment { }\nreturn source(uv + vec2(0.01));"),
+    { type: "paletteMap", amount: 1 },
+  ],
+};
+
 let tmp: string;
 let dataDir: string;
 let server: SpawnedServer | undefined;
@@ -152,6 +179,94 @@ describe("conflicts (AC6, AC7)", () => {
   });
 });
 
+describe("custom effects (B-03 AC1, AC2, AC3)", () => {
+  it("creates, reads, updates and imports three custom effects and returns them unchanged", async () => {
+    await boot();
+    const created = await create(authored);
+    expect(created).toMatchObject({ ...authored, revision: 1 });
+    const got = storedProfileSchema.parse(
+      await (await fetch(`${base}/api/profiles/${created.id}`)).json(),
+    );
+    expect(got).toEqual(created);
+
+    const edited: Profile = {
+      ...authored,
+      effects: authored.effects.map((e) =>
+        e.type === "custom" ? { ...e, params: [{ name: "speed", value: 0.75 }] } : e,
+      ),
+    };
+    const updated = storedProfileSchema.parse(
+      await (await put(created.id, { ...edited, revision: 1 })).json(),
+    );
+    expect(updated).toMatchObject({ ...edited, revision: 2, id: created.id });
+
+    const imported = profileListSchema.parse(
+      await (await post("/api/profiles/import", toProfileFile([edited]))).json(),
+    ).profiles;
+    expect(imported[0]).toMatchObject({ ...edited, name: "Authored (2)" });
+    expect(await list()).toEqual([updated, imported[0]]);
+  });
+
+  const custom = (over: Record<string, unknown>) => ({ ...customEffect("Swirl"), ...over });
+  const twoParams = (a: string, b: string) => [
+    { name: a, value: 0 },
+    { name: b, value: 1 },
+  ];
+  const clauses: [string, unknown[], string][] = [
+    ["a 41-character label", [custom({ label: "x".repeat(41) })], "effects.0.label"],
+    ["a label used twice", [custom({}), custom({})], "effects.1.label"],
+    [
+      "five parameters",
+      [custom({ params: Array.from({ length: 5 }, (_, i) => ({ name: `p${i}`, value: 0 })) })],
+      "effects.0.params",
+    ],
+    [
+      "a 25-character parameter name",
+      [custom({ params: [{ name: "x".repeat(25), value: 0 }] })],
+      "effects.0.params.0.name",
+    ],
+    [
+      "a repeated parameter name",
+      [custom({ params: twoParams("a", "a") })],
+      "effects.0.params.1.name",
+    ],
+    [
+      "a parameter value of 1.5",
+      [custom({ params: [{ name: "a", value: 1.5 }] })],
+      "effects.0.params.0.value",
+    ],
+    [
+      "code over 8 KB",
+      [custom({ code: `return source(uv);//${"x".repeat(8200)}` })],
+      "effects.0.code",
+    ],
+    ["code with #", [custom({ code: "#define X\nreturn source(uv);" })], "effects.0.code"],
+    [
+      "code with uniform",
+      [custom({ code: "uniform float u;\nreturn source(uv);" })],
+      "effects.0.code",
+    ],
+    ["code declaring out", [custom({ code: "out vec4 o;\nreturn source(uv);" })], "effects.0.code"],
+    ["unbalanced braces", [custom({ code: "return source(uv); }" })], "effects.0.code"],
+    [
+      "a thirteenth effect",
+      Array.from({ length: 13 }, (_, i) => custom({ label: `fx ${i}` })),
+      "effects",
+    ],
+  ];
+
+  for (const [label, effects, path] of clauses) {
+    it(`answers 400 naming ${path} for ${label}, and stores nothing`, async () => {
+      await boot();
+      const response = await post("/api/profiles", { ...warm, effects });
+      expect(response.status).toBe(400);
+      const body = invalidErrorSchema.parse(await response.json());
+      expect(body.issues.map((i) => i.path)).toContain(path);
+      expect(await list()).toEqual([]);
+    });
+  }
+});
+
 describe("validation (AC8)", () => {
   const clauses: [string, (p: Profile) => unknown, string][] = [
     [
@@ -221,10 +336,29 @@ describe("validation (AC8)", () => {
   });
 });
 
-describe("limits and content types (AC21)", () => {
-  it("answers 413 for a 65 KB write", async () => {
+describe("limits and content types (AC21; B-03 AC23)", () => {
+  it("accepts a 120 KB write of twelve custom effects near 8 KB each (B-03 SD16)", async () => {
     await boot();
-    const response = await post("/api/profiles", { ...warm, name: "x".repeat(65 * 1024) });
+    // Short, tab-indented lines: JSON escapes each tab and newline as two bytes, so 8 KB of
+    // code is about 10 KB of body. Twelve of them are the heaviest save a profile can be.
+    const line = "\t\tc *= 0.5;\n";
+    const code = `${line.repeat(Math.floor((8192 - 20) / line.length))}return source(uv);`;
+    expect(code.length).toBeLessThanOrEqual(8192);
+    const heavy: Profile = {
+      ...warm,
+      effects: Array.from({ length: 12 }, (_, i) => customEffect(`fx ${i}`, code)),
+    };
+    const bytes = JSON.stringify(heavy).length;
+    expect(bytes).toBeGreaterThan(118 * 1024);
+    expect(bytes).toBeLessThan(128 * 1024);
+    const response = await post("/api/profiles", heavy);
+    expect(response.status).toBe(201);
+    expect(storedProfileSchema.parse(await response.json())).toMatchObject(heavy);
+  });
+
+  it("answers 413 for a 129 KB write", async () => {
+    await boot();
+    const response = await post("/api/profiles", { ...warm, name: "x".repeat(129 * 1024) });
     expect(response.status).toBe(413);
     expect(await list()).toEqual([]);
   });
@@ -330,9 +464,39 @@ describe("import (AC10)", () => {
 
   it("answers 422 for another format version, checked before the rest of the file", async () => {
     await boot();
-    const response = await post("/api/profiles/import", { formatVersion: 2, profiles: "nonsense" });
-    expect(response.status).toBe(422);
-    expect(await response.json()).toEqual({ error: "unsupported_version" });
+    for (const formatVersion of [3, 0]) {
+      const response = await post("/api/profiles/import", { formatVersion, profiles: "nonsense" });
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({ error: "unsupported_version" });
+    }
+    expect(await list()).toEqual([]);
+  });
+
+  // B-03 SD15, AC19, AC20 (plan PD13).
+  it("accepts version 2 and refuses version 1 holding a custom effect on formatVersion", async () => {
+    await boot();
+    const v1 = await post("/api/profiles/import", { formatVersion: 1, profiles: [authored] });
+    expect(v1.status).toBe(400);
+    expect(invalidErrorSchema.parse(await v1.json()).issues).toEqual([
+      { path: "formatVersion", message: "a file with a custom effect is formatVersion 2" },
+    ]);
+    expect(await list()).toEqual([]);
+    const v2 = await post("/api/profiles/import", { formatVersion: 2, profiles: [warm, authored] });
+    expect(v2.status).toBe(201);
+    expect((await list()).map((p) => p.name)).toEqual(["Authored", "Warm"]);
+  });
+
+  it("stores nothing from a version-2 bundle with one bad profile (B-03 AC19)", async () => {
+    await boot();
+    const bad = { ...authored, name: "Bad", effects: [customEffect("x", "return source(uv); }")] };
+    const response = await post("/api/profiles/import", {
+      formatVersion: 2,
+      profiles: [authored, bad],
+    });
+    expect(response.status).toBe(400);
+    expect(invalidErrorSchema.parse(await response.json()).issues).toEqual([
+      { path: "profiles.1.effects.0.code", message: expect.any(String), profile: "Bad" },
+    ]);
     expect(await list()).toEqual([]);
   });
 });

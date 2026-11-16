@@ -4,6 +4,7 @@
 // call is recorded; programs link when the test says so.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILT_IN_PROFILE, createEngine, ZERO_FEATURES, type Profile } from "./index.ts";
+import { fragmentLayout } from "./shader.ts";
 
 interface Call {
   name: string;
@@ -25,7 +26,7 @@ interface FakeOptions {
 function fakeCanvas(width: number, height: number, { parallel = true }: FakeOptions = {}) {
   const calls: Call[] = [];
   const programs: FakeProgram[] = [];
-  const control = { failLinks: false };
+  const control = { failLinks: false, shaderLog: "" };
   const special: Record<string, (...args: unknown[]) => unknown> = {
     getExtension: (name) =>
       name === "KHR_parallel_shader_compile" && parallel
@@ -47,6 +48,7 @@ function fakeCanvas(width: number, height: number, { parallel = true }: FakeOpti
       return true;
     },
     getProgramInfoLog: () => "fake link failure",
+    getShaderInfoLog: () => control.shaderLog,
     getUniformLocation: (program, name) => ({ program: (program as FakeProgram).id, name }),
   };
   const gl = new Proxy({} as Record<string, unknown>, {
@@ -58,15 +60,27 @@ function fakeCanvas(width: number, height: number, { parallel = true }: FakeOpti
       };
     },
   });
+  const listeners = new Map<string, ((event: Event) => void)[]>();
   const canvas = {
     clientWidth: width,
     clientHeight: height,
     width: 0,
     height: 0,
     getContext: () => gl,
+    addEventListener: (type: string, listener: (event: Event) => void) => {
+      listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+    },
   } as unknown as HTMLCanvasElement;
+  /** Dispatches a canvas event as Chromium does; says whether its default was prevented. */
+  const fire = (type: string): boolean => {
+    let prevented = false;
+    const event = { type, preventDefault: () => (prevented = true) } as unknown as Event;
+    for (const listener of listeners.get(type) ?? []) listener(event);
+    return prevented;
+  };
   return {
     canvas,
+    fire,
     calls,
     programs,
     control,
@@ -327,5 +341,396 @@ describe("setProfile and the prepared swap (B-02 SD15, PD4)", () => {
     await again;
     expect(calls.filter((c) => c.name === "createProgram")).toHaveLength(2);
     expect(frames().map(usedProgram)).toEqual([0, 1, 0, 1]);
+  });
+});
+
+// B-03 T4 (spec SD1, SD3; plan PD7): a program is keyed by its effect list and every body's
+// code; the code reaches the context only through `shaderSource`.
+describe("custom effects in the engine (B-03)", () => {
+  const CODE = "return source(uv).bgr * (0.5 + 0.5 * param[0]); // marker-7f3a";
+  const coded = (code: string, value = 0.5): Profile => ({
+    ...BUILT_IN_PROFILE,
+    name: "Coded",
+    effects: [
+      { type: "zoom", amount: 0.2 },
+      {
+        type: "custom",
+        label: "Swap",
+        amount: 1,
+        abstraction: false,
+        params: [{ name: "mix", value }],
+        code,
+      },
+    ],
+  });
+
+  it("links one program per distinct code, and none for a parameter change", async () => {
+    const { engine, fake, calls } = started();
+    frameAt(0);
+    const first = engine.setProfile(coded(CODE));
+    fake.completeLinks();
+    frameAt(16);
+    await first;
+    await engine.setProfile(coded(CODE, 0.9));
+    frameAt(32);
+    expect(calls.filter((c) => c.name === "createProgram")).toHaveLength(2);
+    expect(uniform(frames().at(-1)!, "uCustomParam")).toEqual(expect.arrayContaining([0.9]));
+    const other = engine.setProfile(coded("return source(uv);"));
+    fake.completeLinks();
+    frameAt(48);
+    await other;
+    expect(calls.filter((c) => c.name === "createProgram")).toHaveLength(3);
+    expect(frames().map(usedProgram)).toEqual([0, 1, 1, 2]);
+  });
+
+  it("hands the code to shaderSource and to no other call", async () => {
+    const { engine, fake, calls } = started();
+    frameAt(0);
+    const switched = engine.setProfile(coded(CODE));
+    fake.completeLinks();
+    frameAt(16);
+    await switched;
+    frameAt(32);
+    const carrying = calls.filter((c) => JSON.stringify(c.args).includes("marker-7f3a"));
+    expect(carrying.map((c) => c.name)).toEqual(["shaderSource"]);
+  });
+
+  it("sets the custom uniforms only for a program that has them", async () => {
+    const { engine, fake } = started();
+    engine.setFeatures({ ...ZERO_FEATURES, level: 0.5, capturedAt: 1 });
+    engine.setDials({ recognisability: 1, reactivity: 1 });
+    frameAt(0);
+    const builtIn = frames()[0]!;
+    expect(
+      builtIn.some(
+        (c) => c.name.startsWith("uniform") && /uCustom|uAudio/.test(JSON.stringify(c.args[0])),
+      ),
+    ).toBe(false);
+    const switched = engine.setProfile(coded(CODE));
+    fake.completeLinks();
+    frameAt(16);
+    await switched;
+    frameAt(32);
+    const last = frames().at(-1)!;
+    expect(uniform(last, "uCustomStrength")).toEqual(expect.arrayContaining([1]));
+    expect(uniform(last, "uAudio.level")).toBe(0.5);
+  });
+});
+
+// B-03 T5 (plan PD4): in a profile with a custom effect both targets start from the last output,
+// at a swap and when they are recreated, so the limiter always has a real previous frame.
+describe("the limiter's previous frame (B-03)", () => {
+  const coded: Profile = {
+    ...BUILT_IN_PROFILE,
+    name: "Coded",
+    effects: [
+      {
+        type: "custom",
+        label: "Pass",
+        amount: 1,
+        abstraction: false,
+        params: [],
+        code: "return source(uv);",
+      },
+    ],
+  };
+  const blits = (frame: Call[]) => frame.filter((c) => c.name === "blitFramebuffer").length;
+
+  it("copies the last output into both recreated targets, only in a custom profile", async () => {
+    const builtIn = started();
+    frameAt(0);
+    frameAt(16);
+    builtIn.engine.setScaleCap(0.75);
+    frameAt(32);
+    expect(frames().map(blits)).toEqual([1, 1, 1]);
+
+    const custom = started();
+    frameAt(0);
+    const switched = custom.engine.setProfile(coded);
+    custom.fake.completeLinks();
+    frameAt(16);
+    await switched;
+    frameAt(32);
+    custom.engine.setScaleCap(0.75);
+    frameAt(48);
+    frameAt(64);
+    // The swap frame seeds the target it draws into; the recreate frame copies the old output
+    // into the new previous target, then seeds the one it draws into.
+    expect(frames().map(blits)).toEqual([1, 2, 1, 3, 1]);
+  });
+
+  it("copies nothing at a swap into a built-in-only profile", async () => {
+    const { engine, fake } = started();
+    frameAt(0);
+    const switched = engine.setProfile({
+      ...BUILT_IN_PROFILE,
+      effects: [{ type: "zoom", amount: 1 }],
+    });
+    fake.completeLinks();
+    frameAt(16);
+    await switched;
+    expect(frames().map(blits)).toEqual([1, 1]);
+  });
+});
+
+// B-03 T6 (spec AC21; plan PD9): a custom body that does not compile rejects with the effect and
+// the line in its own text; the same code is not compiled again on every slider move.
+describe("compile errors (B-03)", () => {
+  const BROKEN = "float b = nope;\nreturn source(uv);";
+  const broken = (value = 0.5): Profile => ({
+    ...BUILT_IN_PROFILE,
+    name: "Broken",
+    effects: [
+      { type: "zoom", amount: 0.2 },
+      {
+        type: "custom",
+        label: "Swirl",
+        amount: 1,
+        abstraction: false,
+        params: [{ name: "a", value }],
+        code: BROKEN,
+      },
+    ],
+  });
+
+  it("rejects with the effect, its label and the body's own line, and keeps drawing", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { engine, fake, calls } = started(640, 360, { parallel: false });
+    frameAt(0);
+    const [body] = fragmentLayout(["zoom", { type: "custom", code: BROKEN }]);
+    fake.control.failLinks = true;
+    fake.control.shaderLog = `ERROR: 0:${body!.firstLine}: 'nope' : undeclared identifier\n`;
+    const first = engine.setProfile(broken());
+    frameAt(16);
+    await expect(first).rejects.toMatchObject({
+      name: "ProfileCompileError",
+      issues: [
+        { effectIndex: 1, label: "Swirl", line: 1, message: "'nope' : undeclared identifier" },
+      ],
+    });
+    const compiled = calls.filter((c) => c.name === "createShader").length;
+    // The same code with another parameter value: rejected from the cache, nothing compiled.
+    await expect(engine.setProfile(broken(0.9))).rejects.toMatchObject({
+      name: "ProfileCompileError",
+    });
+    expect(calls.filter((c) => c.name === "createShader").length).toBe(compiled);
+    frameAt(32);
+    expect(frames().map(usedProgram)).toEqual([0, 0, 0]);
+  });
+
+  it("rejects with a plain error when the log names no line", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { engine, fake } = started(640, 360, { parallel: false });
+    frameAt(0);
+    fake.control.failLinks = true;
+    const switched = engine.setProfile(broken());
+    frameAt(16);
+    await expect(switched).rejects.toThrow(/link/);
+    await expect(switched).rejects.not.toMatchObject({ name: "ProfileCompileError" });
+  });
+});
+
+// B-03 T7 (spec AC11, SD8; plan PD8): on a GPU that cannot keep up, the custom effects go off.
+describe("the slow-GPU guard (B-03)", () => {
+  const heavy = (value = 0.5): Profile => ({
+    ...BUILT_IN_PROFILE,
+    name: "Heavy",
+    effects: [
+      { type: "zoom", amount: 0.2 },
+      {
+        type: "custom",
+        label: "Heavy",
+        amount: 1,
+        abstraction: false,
+        params: [{ name: "a", value }],
+        code: "return source(uv);",
+      },
+    ],
+  });
+  const drawsCustom = (frame: Call[]) => uniform(frame, "uCustomStrength") !== undefined;
+
+  /** 60 frames at 60 Hz (the refresh estimate), then frames 100 ms apart for `seconds`. */
+  function load(start: number, seconds: number): number {
+    let t = start;
+    for (let i = 0; i < 60; i++) frameAt((t += 1000 / 60));
+    for (let i = 0; i < seconds * 10; i++) frameAt((t += 100));
+    return t;
+  }
+
+  async function heavyOnSlowGpu() {
+    const rig = started(640, 360, { parallel: false });
+    const events: unknown[] = [];
+    rig.engine.onGuard((event) => events.push(event));
+    frameAt(0);
+    const switched = rig.engine.setProfile(heavy());
+    frameAt(10);
+    await switched;
+    return { ...rig, events };
+  }
+
+  it("goes to the profile without its custom effects 3 s after reaching 50%, once", async () => {
+    const { engine, events } = await heavyOnSlowGpu();
+    let t = load(10, 5);
+    expect(engine.stats().renderScale).toBe(0.5);
+    expect(events).toEqual([]);
+    expect(drawsCustom(frames().at(-1)!)).toBe(true);
+    for (let i = 0; i < 40; i++) frameAt((t += 100));
+    expect(events).toEqual([{ kind: "slow", customBypassed: true }]);
+    expect(drawsCustom(frames().at(-1)!)).toBe(false);
+    for (let i = 0; i < 40; i++) frameAt((t += 100));
+    expect(events).toHaveLength(1);
+  });
+
+  it("keeps the bypass for a same-key call and retries on a pick", async () => {
+    const { engine, events } = await heavyOnSlowGpu();
+    let t = load(10, 9);
+    expect(events).toHaveLength(1);
+    await engine.setProfile(heavy(0.9)); // a slider or a live colour: same program key
+    frameAt((t += 100));
+    expect(drawsCustom(frames().at(-1)!)).toBe(false);
+    const retried = engine.setProfile(heavy(), { pick: true });
+    frameAt((t += 100));
+    await retried;
+    frameAt((t += 100));
+    expect(drawsCustom(frames().at(-1)!)).toBe(true);
+    // Still too slow: it gives up again only after another 3 s of its own.
+    for (let i = 0; i < 20; i++) frameAt((t += 100));
+    expect(events).toHaveLength(1);
+    for (let i = 0; i < 20; i++) frameAt((t += 100));
+    expect(events).toHaveLength(2);
+  });
+
+  it("another program key ends the bypass", async () => {
+    const { engine } = await heavyOnSlowGpu();
+    let t = load(10, 9);
+    const edited: Profile = {
+      ...heavy(),
+      effects: [heavy().effects[1]!, heavy().effects[0]!],
+    };
+    const switched = engine.setProfile(edited);
+    frameAt((t += 100));
+    await switched;
+    frameAt(t + 100);
+    expect(drawsCustom(frames().at(-1)!)).toBe(true);
+  });
+
+  it("never fires for a built-in-only profile under the same load", () => {
+    const { engine } = started(640, 360, { parallel: false });
+    const events: unknown[] = [];
+    engine.onGuard((event) => events.push(event));
+    frameAt(0);
+    load(0, 15);
+    expect(engine.stats().renderScale).toBe(0.5);
+    expect(events).toEqual([]);
+  });
+});
+
+// B-03 T8 (spec AC12, SD8; plan PD8): a lost WebGL context is restored and the active profile
+// drawn again, without its custom effects when it holds any.
+describe("context loss (B-03)", () => {
+  const coded: Profile = {
+    ...BUILT_IN_PROFILE,
+    name: "Coded",
+    effects: [
+      { type: "zoom", amount: 0.2 },
+      {
+        type: "custom",
+        label: "Pass",
+        amount: 1,
+        abstraction: false,
+        params: [],
+        code: "return source(uv);",
+      },
+    ],
+  };
+  const draws = (frame: Call[]) => frame.filter((c) => c.name === "drawArrays").length;
+  const created = (frame: Call[], name: string) => frame.filter((c) => c.name === name).length;
+
+  async function playing(profile: Profile) {
+    const rig = started(640, 360, { parallel: false });
+    const events: unknown[] = [];
+    rig.engine.onGuard((event) => events.push(event));
+    frameAt(0);
+    if (profile !== BUILT_IN_PROFILE) {
+      const switched = rig.engine.setProfile(profile);
+      frameAt(16);
+      await switched;
+    }
+    return { ...rig, events };
+  }
+
+  it("prevents the default, draws nothing while lost, and draws again after the restore", async () => {
+    const { fake } = await playing(BUILT_IN_PROFILE);
+    expect(fake.fire("webglcontextlost")).toBe(true);
+    frameAt(100);
+    frameAt(116);
+    expect(frames().slice(-2).map(draws)).toEqual([0, 0]);
+    fake.fire("webglcontextrestored");
+    frameAt(132);
+    const first = log.slice(log.findIndex((c) => c.name === "@frame" && c.args[0] === 116));
+    expect(created(first, "createProgram")).toBeGreaterThan(0);
+    expect(created(first, "createFramebuffer")).toBe(2);
+    expect(draws(frames().at(-1)!)).toBe(1);
+  });
+
+  it("brings a custom profile back without its custom effects and says so", async () => {
+    const { fake, events } = await playing(coded);
+    expect(uniform(frames().at(-1)!, "uCustomStrength")).toBeDefined();
+    fake.fire("webglcontextlost");
+    frameAt(100);
+    fake.fire("webglcontextrestored");
+    frameAt(116);
+    const after = frames().at(-1)!;
+    expect(draws(after)).toBe(1);
+    expect(uniform(after, "uCustomStrength")).toBeUndefined();
+    expect(uniform(after, "uZoom")).toBeGreaterThan(1); // the built-in effects still draw
+    expect(events).toEqual([{ kind: "contextLost", customBypassed: true }]);
+  });
+
+  it("says nothing was bypassed for a built-in-only profile", async () => {
+    const { fake, events } = await playing(BUILT_IN_PROFILE);
+    fake.fire("webglcontextlost");
+    fake.fire("webglcontextrestored");
+    frameAt(100);
+    expect(events).toEqual([{ kind: "contextLost", customBypassed: false }]);
+  });
+
+  it("keeps the bypass for a same-key call after the restore, and a pick retries", async () => {
+    const { engine, fake } = await playing(coded);
+    fake.fire("webglcontextlost");
+    fake.fire("webglcontextrestored");
+    frameAt(100);
+    await engine.setProfile({ ...coded, palette: ["#111111", "#ffffff"] });
+    frameAt(116);
+    expect(uniform(frames().at(-1)!, "uCustomStrength")).toBeUndefined();
+    const retried = engine.setProfile(coded, { pick: true });
+    frameAt(132);
+    await retried;
+    frameAt(148);
+    expect(uniform(frames().at(-1)!, "uCustomStrength")).toBeDefined();
+  });
+
+  it("rejects a switch that was linking when the context went, and links anew after", async () => {
+    const { engine, fake } = await playing(BUILT_IN_PROFILE);
+    const linking = engine.setProfile(coded);
+    fake.fire("webglcontextlost");
+    await expect(linking).rejects.toThrow(/lost/);
+    fake.fire("webglcontextrestored");
+    frameAt(100);
+    const again = engine.setProfile(coded);
+    frameAt(116);
+    await again;
+    frameAt(132);
+    expect(uniform(frames().at(-1)!, "uCustomStrength")).toBeDefined();
+  });
+
+  it("takes a profile handed over while lost, and restores that one", async () => {
+    const { engine, fake, events } = await playing(BUILT_IN_PROFILE);
+    fake.fire("webglcontextlost");
+    await engine.setProfile(coded);
+    fake.fire("webglcontextrestored");
+    frameAt(100);
+    expect(uniform(frames().at(-1)!, "uZoom")).toBeGreaterThan(1);
+    expect(events).toEqual([{ kind: "contextLost", customBypassed: true }]);
   });
 });

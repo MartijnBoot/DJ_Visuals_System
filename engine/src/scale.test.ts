@@ -26,7 +26,7 @@ function rig() {
   const settle = (hz = 60) => {
     for (let n = 0; n < 60; n++) tick(1000 / hz);
   };
-  return { controller, tick, run, settle };
+  return { controller, tick, run, settle, now: () => t };
 }
 
 describe("refresh estimate (PD6)", () => {
@@ -67,6 +67,15 @@ describe("refresh estimate (PD6)", () => {
 describe("stepping (SD8, AC15)", () => {
   it("starts at 100%", () => {
     expect(createScaleController(createFrameStats()).scale()).toBe(1);
+  });
+
+  it("frames more than a second apart step down too (D-11)", () => {
+    const { controller, run, settle } = rig();
+    settle();
+    run(1200, 3600);
+    expect(controller.scale()).toBe(0.75);
+    run(1200, 3600);
+    expect(controller.scale()).toBe(0.5);
   });
 
   it("2 s above budget steps down once, another 2 s again, and never below 50%", () => {
@@ -189,5 +198,36 @@ describe("stepping (SD8, AC15)", () => {
     expect(controller.scale()).toBe(0.5);
     run(1000 / 60, 25_000);
     expect(controller.scale()).toBe(1);
+  });
+});
+
+// B-03 T7 (spec AC11, SD8): how long the one-second mean has been above budget at the floor,
+// for the guard that bypasses custom code on a GPU that cannot keep up.
+describe("time above budget at 50% (B-03 SD8)", () => {
+  it("is 0 above the floor and counts from the first frame above budget at it", () => {
+    const { controller, run, settle, now } = rig();
+    settle();
+    run(25, 2500);
+    expect(controller.scale()).toBe(0.75);
+    expect(controller.starvedFor(now())).toBe(0);
+    let reached = 0;
+    run(25, 2000, (scale) => {
+      if (scale === 0.5 && reached === 0) reached = now();
+    });
+    expect(controller.scale()).toBe(0.5);
+    run(25, 1000);
+    expect(controller.starvedFor(now())).toBeGreaterThanOrEqual(now() - reached - 50);
+    expect(controller.starvedFor(now())).toBeLessThanOrEqual(now() - reached);
+    run(25, 3000);
+    expect(controller.starvedFor(now())).toBeGreaterThanOrEqual(3000);
+  });
+
+  it("goes back to 0 once the mean is not above budget", () => {
+    const { controller, run, settle, now } = rig();
+    settle();
+    run(25, 8000);
+    expect(controller.starvedFor(now())).toBeGreaterThan(0);
+    run(1000 / 60, 1500);
+    expect(controller.starvedFor(now())).toBe(0);
   });
 });

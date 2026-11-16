@@ -34,4 +34,25 @@ describe("Profile compatibility (AC19)", { timeout: 0 }, () => {
     const dropped = (s: string) => s.replace(/^\s*primary\?: number;\r?\n/m, "");
     expect(diagnostics(dropped).join("\n")).toMatch(/primary/);
   });
+
+  // B-03 AC22: the custom effect is part of the shape. Each mutation edits `CustomEffect` only
+  // (`EffectInfo` also declares an `abstraction`).
+  const inCustomEffect =
+    (field: RegExp, to: string) =>
+    (s: string): string =>
+      s.replace(/interface CustomEffect \{[\s\S]*?\n\}/, (block) => block.replace(field, to));
+
+  it("fails when the engine renames a custom effect's code", () => {
+    const renamed = inCustomEffect(/^(\s*)code: string;/m, "$1source: string;");
+    expect(renamed("interface CustomEffect {\n  code: string;\n}")).toContain("source:");
+    expect(diagnostics(renamed).join("\n")).toMatch(/code|source/);
+  });
+
+  it("fails when the engine drops a custom effect's abstraction flag", () => {
+    const dropped = inCustomEffect(/^\s*abstraction: boolean;\r?\n/m, "");
+    expect(dropped("interface CustomEffect {\n  abstraction: boolean;\n}")).not.toContain(
+      "abstraction",
+    );
+    expect(diagnostics(dropped).join("\n")).toMatch(/abstraction/);
+  });
 });

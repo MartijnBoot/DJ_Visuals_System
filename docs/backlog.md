@@ -18,7 +18,7 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 
 | # | ID | Feature | Size | Status |
 |---|---|---|---|---|
-| 1 | B-03 | Claude Code-authored profiles | M | idea |
+| 1 | B-14 | Image assets in profiles | M | idea |
 | 2 | B-06 | Remote input devices | L | idea |
 | 3 | B-07 | Scenes | M | idea |
 | 4 | B-09 | Transitions | M | idea |
@@ -115,7 +115,7 @@ first real table in the schema.
 
 ### B-03 — Claude Code-authored profiles
 
-- **Status:** idea
+- **Status:** specced → `docs/specs/phase-b-03-claude-code-authored-profiles.md`
 - **Added:** 2026-11-11
 - **Size:** M
 
@@ -521,3 +521,35 @@ choices that block it.
 payments, terms and privacy, support.
 
 **Touches.** A guess: auth, profile storage, ADR 0001 (Q3, §7). Depends on B-12.
+
+### B-14 — Image assets in profiles
+
+- **Status:** idea
+- **Added:** 2026-11-15
+- **Size:** M
+
+**Problem.** A profile drawn from a painting can borrow its palette, motion and idea through code
+(B-03), but not the painting itself: its exact colour grade, its surface, its brushwork.
+
+**Idea.** A profile may carry images, stored by id in `DATA_DIR/assets/` (SDR decision 4), that
+custom effects (B-03) read as textures: a colour-grade lookup so the camera takes on the
+painting's colours, a surface texture blended over the feed, warp or mask maps that push the
+picture along the strokes.
+
+**Why it matters.** It makes "based on this painting" literally true, which code alone cannot
+fake convincingly.
+
+**Not this.** Neural style transfer at run time (breaks the latency bound). Blobs in the
+database. Assets referenced by file path (SDR constraint).
+
+**Open questions.**
+
+- Which of the three uses come first (probably the colour grade).
+- Upload, storage and clean-up on delete; size limits.
+- Assets in the export file: a new `formatVersion`, the import limit.
+- The endpoint the screen page reads assets from, and the amended request invariant.
+- How `pnpm profile:check` and the `/profile` command handle assets.
+
+**Touches.** B-03's custom effect contract (texture inputs), `shared/` file format, `server/`
+storage and an endpoint, `docs/invariants.md` request row. Depends on B-03. Split out of B-03 at
+its spec interview (B-03 SD2).

@@ -9,7 +9,7 @@ import { BUILTIN_ID, builtinEntry } from "../profiles/builtin.ts";
 import { download, exportFile, fileName } from "../profiles/file.ts";
 import { Editor } from "./Editor.tsx";
 import { describeFailure } from "./failure.ts";
-import { Preview } from "./Preview.tsx";
+import { Preview, type CompileReport } from "./Preview.tsx";
 import { ProfileList, type CreateSource } from "./ProfileList.tsx";
 import { Transfer } from "./Transfer.tsx";
 import { fromBuiltin, fromPreset, PRESETS } from "./presets.ts";
@@ -58,6 +58,8 @@ export function Builder() {
   // The draft the editor reports, with the profile it belongs to: while the editor of another
   // profile is mounting, the preview keeps showing the saved one and never a stale draft.
   const [reported, setReported] = useState<{ key: string; draft: Profile } | null>(null);
+  /** The preview's last compile result, for the editor's Save gate (B-03 PD10). */
+  const [compile, setCompile] = useState<CompileReport | null>(null);
 
   // Leaving unsaved changes asks first (T12): another profile, a link, closing the tab.
   const confirmDiscard = () => !dirty || window.confirm("Discard your unsaved changes?");
@@ -246,6 +248,9 @@ export function Builder() {
             readOnly={readOnly}
             storedCount={stored.length}
             onImported={(profiles) => setStored((list) => [...list, ...profiles].sort(byName))}
+            onStored={add}
+            // Replace rewrites the open profile: its unsaved changes would go (B-03 PD11).
+            confirmReplace={(id) => id !== selectedId || confirmDiscard()}
           />
         </div>
         {selected && (
@@ -261,11 +266,13 @@ export function Builder() {
                 onDirtyChange={setDirty}
                 onDraftChange={onDraftChange}
                 onSaveCopy={saveCopy}
+                compile={compile}
               />
             </div>
             <div className="bld-preview bld-col">
               <Preview
                 draft={reported?.key === selectedKey ? reported.draft : definitionOf(selected)}
+                onCompile={setCompile}
               />
             </div>
           </>

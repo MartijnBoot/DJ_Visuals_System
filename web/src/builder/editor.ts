@@ -1,21 +1,25 @@
 // The editor's state (B-02 spec AC3, AC8, SD11, SD12; plan T11): a pure reducer over a draft
 // `Profile`, so every rule is tested without a browser. No action can leave the draft in a state
-// the shared schema rejects, except a name outside 1 to 60 characters, which `validate` reports
-// (the schema is the only gate; the editor never lets the rest drift from it).
+// the shared schema rejects, except text as it is typed: a name outside 1 to 60 characters, and
+// a custom effect's label, parameter names and code (B-03 T10), which `validate` reports (the
+// schema is the only gate; the editor never lets the rest drift from it).
 import {
   COLOUR_SLOT_TYPES,
+  CUSTOM_LIMITS,
   derivePrimary,
   EFFECT_TYPES,
   FEATURE_NAMES,
   LIMITS,
   issuesFrom,
   profileSchema,
+  type CustomEffect,
   type Effect,
   type EffectType,
   type FeatureName,
   type Issue,
   type Profile,
 } from "@djv/shared";
+import { CUSTOM_TEMPLATE } from "./custom-template.ts";
 
 export type Action =
   /** "Revert to last saved": the draft becomes a copy of the saved profile (T12). */
@@ -34,7 +38,16 @@ export type Action =
   | { type: "amount"; index: number; value: number }
   | { type: "parameter"; index: number; value: number }
   | { type: "bindingSet"; index: number; feature: FeatureName; amount: number }
-  | { type: "bindingClear"; index: number };
+  | { type: "bindingClear"; index: number }
+  /** B-03: a custom effect from the template (SD9, AC15), and its own fields (SD4, SD12). */
+  | { type: "customAdd" }
+  | { type: "customLabel"; index: number; label: string }
+  | { type: "customAbstraction"; index: number; value: boolean }
+  | { type: "customCode"; index: number; code: string }
+  | { type: "customParamAdd"; index: number }
+  | { type: "customParamRemove"; index: number; param: number }
+  | { type: "customParamName"; index: number; param: number; name: string }
+  | { type: "customParamValue"; index: number; param: number; value: number };
 
 /** What a colour added to the palette starts as. */
 export const NEW_COLOUR = "#808080";
@@ -85,6 +98,43 @@ export function availableTypes(draft: Profile): EffectType[] {
   if (draft.effects.length >= LIMITS.effects) return [];
   const present = new Set<string>(draft.effects.map((e) => e.type));
   return EFFECT_TYPES.filter((t) => !present.has(t));
+}
+
+/** "Custom" is offered while the stack has room (B-03 SD4: custom effects count toward 12). */
+export function canAddCustom(draft: Profile): boolean {
+  return draft.effects.length < LIMITS.effects;
+}
+
+/** `base`, else `base 2`, `base 3`, … : the first not taken, trimmed (B-03 PD5). */
+function freeName(base: string, taken: readonly string[]): string {
+  const used = new Set(taken.map((t) => t.trim()));
+  if (!used.has(base)) return base;
+  for (let n = 2; ; n++) if (!used.has(`${base} ${n}`)) return `${base} ${n}`;
+}
+
+const labels = (draft: Profile) =>
+  draft.effects.flatMap((e) => (e.type === "custom" ? [e.label] : []));
+
+/** Changes the custom effect at `index`; anything else, or no change, leaves the draft. */
+function withCustom(
+  draft: Profile,
+  index: number,
+  change: (e: CustomEffect) => CustomEffect,
+): Profile {
+  return withEffect(draft, index, (e) => (e.type === "custom" ? change(e) : e));
+}
+
+/** Changes parameter `param` of the custom effect at `index`, when it has one. */
+function withParam(
+  draft: Profile,
+  index: number,
+  param: number,
+  change: (p: CustomEffect["params"][number]) => CustomEffect["params"][number],
+): Profile {
+  return withCustom(draft, index, (e) => {
+    if (!Number.isInteger(param) || param < 0 || param >= e.params.length) return e;
+    return { ...e, params: e.params.map((p, i) => (i === param ? change(p) : p)) };
+  });
 }
 
 function newEffect(type: EffectType): Effect {
@@ -213,6 +263,53 @@ export function reduce(draft: Profile, action: Action): Profile {
         const { binding: _binding, ...rest } = e;
         return rest as Effect;
       });
+
+    case "customAdd": {
+      if (!canAddCustom(draft)) return draft;
+      const effect: CustomEffect = {
+        type: "custom",
+        label: freeName(CUSTOM_TEMPLATE.label, labels(draft)),
+        amount: 0.5,
+        abstraction: false,
+        params: CUSTOM_TEMPLATE.params.map((p) => ({ ...p })),
+        code: CUSTOM_TEMPLATE.code,
+      };
+      return { ...draft, effects: [...draft.effects, effect] };
+    }
+
+    // Text is kept as typed, valid or not: `validate` reports it (SD9).
+    case "customLabel":
+      return withCustom(draft, action.index, (e) => ({ ...e, label: action.label }));
+
+    case "customCode":
+      return withCustom(draft, action.index, (e) => ({ ...e, code: action.code }));
+
+    case "customAbstraction":
+      return withCustom(draft, action.index, (e) => ({ ...e, abstraction: action.value === true }));
+
+    case "customParamAdd":
+      return withCustom(draft, action.index, (e) => {
+        if (e.params.length >= CUSTOM_LIMITS.params) return e;
+        const names = e.params.map((p) => p.name);
+        const name = freeName(`param ${e.params.length + 1}`, names);
+        return { ...e, params: [...e.params, { name, value: 0 }] };
+      });
+
+    case "customParamRemove":
+      return withCustom(draft, action.index, (e) => {
+        const { param } = action;
+        if (!Number.isInteger(param) || param < 0 || param >= e.params.length) return e;
+        return { ...e, params: e.params.filter((_, i) => i !== param) };
+      });
+
+    case "customParamName":
+      return withParam(draft, action.index, action.param, (p) => ({ ...p, name: action.name }));
+
+    case "customParamValue":
+      return withParam(draft, action.index, action.param, (p) => ({
+        ...p,
+        value: clamp01(action.value),
+      }));
   }
 }
 

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   derivePrimary,
+  CUSTOM_LIMITS,
+  isSupportedFormatVersion,
+  customCodeIssues,
   EFFECT_TYPES,
-  FORMAT_VERSION,
+  SUPPORTED_FORMAT_VERSIONS,
   LIMITS,
   profileFileSchema,
   profileSchema,
@@ -190,7 +193,7 @@ describe("the file format", () => {
 
   it("exports only name, palette, dials and effects, at format version 1", () => {
     const file = toProfileFile([stored]);
-    expect(FORMAT_VERSION).toBe(1);
+    expect(SUPPORTED_FORMAT_VERSIONS).toEqual([1, 2]);
     expect(file.formatVersion).toBe(1);
     const text = JSON.stringify(file);
     for (const key of ["id", "revision", "createdAt", "updatedAt"]) {
@@ -204,9 +207,9 @@ describe("the file format", () => {
     expect(profileFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
   });
 
-  it("rejects format version 2, an empty bundle and a bad profile with its path", () => {
+  it("rejects format version 3, an empty bundle and a bad profile with its path", () => {
     expect(
-      profileFileSchema.safeParse({ formatVersion: 2, profiles: [builtInShaped] }).success,
+      profileFileSchema.safeParse({ formatVersion: 3, profiles: [builtInShaped] }).success,
     ).toBe(false);
     expect(profileFileSchema.safeParse({ formatVersion: 1, profiles: [] }).success).toBe(false);
     const result = profileFileSchema.safeParse({
@@ -215,6 +218,70 @@ describe("the file format", () => {
     });
     expect(result.success).toBe(false);
     if (!result.success) expect(issuesFrom(result.error)[0]?.path).toBe("profiles.1.palette.1");
+  });
+});
+
+// B-03 SD15, AC20 (plan PD13): version 2 holds custom effects; version 1 stays what B-02 reads.
+describe("format version 2 (B-03)", () => {
+  const withCustom: Profile = {
+    ...builtInShaped,
+    name: "Coded",
+    effects: [
+      {
+        type: "custom",
+        label: "Swirl",
+        amount: 0.5,
+        abstraction: false,
+        params: [],
+        code: "return source(uv);",
+      },
+    ],
+  };
+
+  it("writes built-in-only profiles as version 1, byte for byte as B-02 did", () => {
+    const text = JSON.stringify(toProfileFile([builtInShaped, { ...builtInShaped, name: "B" }]));
+    expect(text).toBe(
+      JSON.stringify({
+        formatVersion: 1,
+        profiles: [builtInShaped, { ...builtInShaped, name: "B" }],
+      }),
+    );
+  });
+
+  it("writes version 2 when any profile holds a custom effect", () => {
+    expect(toProfileFile([withCustom]).formatVersion).toBe(2);
+    expect(toProfileFile([builtInShaped, withCustom]).formatVersion).toBe(2);
+    const file = toProfileFile([builtInShaped, withCustom]);
+    expect(profileFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
+  });
+
+  it("accepts version 2 without a custom effect, and refuses version 0", () => {
+    expect(
+      profileFileSchema.safeParse({ formatVersion: 2, profiles: [builtInShaped] }).success,
+    ).toBe(true);
+    expect(
+      profileFileSchema.safeParse({ formatVersion: 0, profiles: [builtInShaped] }).success,
+    ).toBe(false);
+  });
+
+  it("refuses version 1 holding a custom effect, on formatVersion", () => {
+    const result = profileFileSchema.safeParse({ formatVersion: 1, profiles: [withCustom] });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(issuesFrom(result.error)).toEqual([
+        { path: "formatVersion", message: "a file with a custom effect is formatVersion 2" },
+      ]);
+    }
+  });
+
+  it("tells a supported version from any other", () => {
+    expect([0, 1, 2, 3, 1.5].map(isSupportedFormatVersion)).toEqual([
+      false,
+      true,
+      true,
+      false,
+      false,
+    ]);
   });
 });
 
@@ -312,5 +379,171 @@ describe("the primary colour (B-04 AC37, AC38, AC39, SD10)", () => {
     expect(file.profiles[0]).toEqual({ ...builtInShaped, primary: 0 });
     expect(file.profiles[1]).not.toHaveProperty("primary");
     expect(profileFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
+  });
+});
+
+// B-03 (spec AC1, AC2, AC3, SD4, SD16; plan PD5, PD6): the custom effect, its limits and the
+// checks on its code. Each refusal names the failing field's path.
+describe("the custom effect (B-03)", () => {
+  const custom = (over: Record<string, unknown> = {}) => ({
+    type: "custom",
+    label: "Swirl",
+    amount: 0.5,
+    abstraction: false,
+    params: [{ name: "speed", value: 0.3 }],
+    code: "vec3 c = source(uv);\nreturn c.bgr * strength;",
+    ...over,
+  });
+  const failingCode = (code: string) => failingPaths(withEffects([custom({ code })]));
+
+  it("accepts a custom effect with a binding and returns it unchanged (AC1)", () => {
+    const effect = custom({ binding: { feature: "beat", amount: 0.7 } });
+    const profile = withEffects([{ type: "zoom", amount: 0.1 }, effect]);
+    expect(profileSchema.parse(profile)).toEqual(profile);
+  });
+
+  it("states its limits apart from the B-02 ones (SD16)", () => {
+    expect(CUSTOM_LIMITS).toEqual({
+      labelLength: 40,
+      params: 4,
+      paramNameLength: 24,
+      codeBytes: 8192,
+    });
+  });
+
+  it("accepts twelve custom effects and refuses a thirteenth effect (AC3)", () => {
+    const twelve = Array.from({ length: 12 }, (_, i) => custom({ label: `fx ${i}` }));
+    expect(profileSchema.safeParse(withEffects(twelve)).success).toBe(true);
+    expect(failingPaths(withEffects([...twelve, { type: "zoom", amount: 0 }]))).toContain(
+      "effects",
+    );
+  });
+
+  it("still refuses a repeated built-in beside custom effects (AC3)", () => {
+    const list = [{ type: "zoom", amount: 0 }, custom(), { type: "zoom", amount: 0 }];
+    expect(failingPaths(withEffects(list))).toEqual(["effects.2.type"]);
+  });
+
+  it("refuses an empty, a blank and a 41-character label at its path (AC2)", () => {
+    for (const label of ["", "   ", "x".repeat(41)]) {
+      expect(failingPaths(withEffects([custom({ label })]))).toEqual(["effects.0.label"]);
+    }
+    expect(profileSchema.safeParse(withEffects([custom({ label: "x".repeat(40) })])).success).toBe(
+      true,
+    );
+  });
+
+  it("refuses a label used twice, compared trimmed, at the repeat's path (AC2)", () => {
+    const list = [custom({ label: "Swirl" }), custom({ label: " Swirl " })];
+    expect(failingPaths(withEffects(list))).toEqual(["effects.1.label"]);
+    const cased = [custom({ label: "Swirl" }), custom({ label: "swirl" })];
+    expect(profileSchema.safeParse(withEffects(cased)).success).toBe(true);
+  });
+
+  it("refuses a fifth parameter at the list's path (AC2)", () => {
+    const params = Array.from({ length: 5 }, (_, i) => ({ name: `p${i}`, value: 0 }));
+    expect(failingPaths(withEffects([custom({ params })]))).toEqual(["effects.0.params"]);
+  });
+
+  it("refuses a parameter name outside 1 to 24 characters at its path (AC2)", () => {
+    for (const name of ["", "x".repeat(25)]) {
+      const params = [{ name, value: 0 }];
+      expect(failingPaths(withEffects([custom({ params })]))).toEqual(["effects.0.params.0.name"]);
+    }
+  });
+
+  it("refuses a repeated parameter name at the repeat's path (AC2)", () => {
+    const params = [
+      { name: "speed", value: 0 },
+      { name: "size", value: 0 },
+      { name: "speed", value: 1 },
+    ];
+    expect(failingPaths(withEffects([custom({ params })]))).toEqual(["effects.0.params.2.name"]);
+  });
+
+  it("refuses a parameter value outside 0 to 1 at its path (AC2)", () => {
+    const params = [{ name: "speed", value: 1.5 }];
+    expect(failingPaths(withEffects([custom({ params })]))).toEqual(["effects.0.params.0.value"]);
+  });
+
+  it("refuses code over 8192 UTF-8 bytes and accepts code at the limit (AC2, PD6)", () => {
+    const prefix = "return source(uv);//"; // 20 bytes
+    const accepted = (code: string) =>
+      profileSchema.safeParse(withEffects([custom({ code })])).success;
+    // 8192 bytes of one-, two-, three- and four-byte characters pass; one byte more does not.
+    for (const fill of ["x".repeat(8172), "é".repeat(4086), "€".repeat(2724), "😀".repeat(2043)]) {
+      expect(accepted(`${prefix}${fill}`)).toBe(true);
+      expect(failingCode(`${prefix}${fill}x`)).toEqual(["effects.0.code"]);
+    }
+  });
+
+  it("refuses a # anywhere, in a comment too (AC2, PD6)", () => {
+    expect(failingCode("#define X 1\nreturn source(uv);")).toEqual(["effects.0.code"]);
+    expect(failingCode("// see #2\nreturn source(uv);")).toEqual(["effects.0.code"]);
+  });
+
+  it("refuses the word uniform but not a name that contains it (AC2, PD6)", () => {
+    expect(failingCode("uniform float x;\nreturn source(uv);")).toEqual(["effects.0.code"]);
+    const ok = "float uniformity = 1.0;\nreturn source(uv) * uniformity;";
+    expect(profileSchema.safeParse(withEffects([custom({ code: ok })])).success).toBe(true);
+  });
+
+  it("refuses in, out and inout declarations at the start of a line (AC2, PD6)", () => {
+    for (const line of ["in vec2 v;", "  out vec4 o;", "\tinout float f;"]) {
+      expect(failingCode(`${line}\nreturn source(uv);`)).toEqual(["effects.0.code"]);
+    }
+    const ok = "float inner = 1.0;\nint index = 0;\nreturn source(uv) * inner;";
+    expect(profileSchema.safeParse(withEffects([custom({ code: ok })])).success).toBe(true);
+  });
+
+  it("refuses braces that close the function or stay open (AC2, PD6)", () => {
+    expect(failingCode("return source(uv); }\nvec3 more(vec2 uv) { return vec3(0.0);")).toEqual([
+      "effects.0.code",
+    ]);
+    expect(failingCode("if (true) {\nreturn source(uv);")).toEqual(["effects.0.code"]);
+    expect(failingCode("} {\nreturn source(uv);")).toEqual(["effects.0.code"]);
+  });
+
+  it("does not count braces inside comments, and joins continued lines first (PD6)", () => {
+    const commented = "// }\n/* { } } */\nif (true) { return source(uv); }\nreturn source(uv);";
+    expect(profileSchema.safeParse(withEffects([custom({ code: commented })])).success).toBe(true);
+    // A comment ended by a continued line is code to the compiler, so it is code here too.
+    expect(failingCode("/* *\\\n/ } vec3 more() { /* */\nreturn source(uv);")).toEqual([
+      "effects.0.code",
+    ]);
+    expect(failingCode("/* never closed\nreturn source(uv);")).toEqual(["effects.0.code"]);
+  });
+
+  // B-03 review, finding 2: the compiler ends a `//` comment at a carriage return as well, so a
+  // brace after a lone `\r` is code, and must be counted.
+  it("ends a // comment at a lone carriage return, as the compiler does (PD6)", () => {
+    expect(
+      failingCode("return source(uv); // hidden\r} vec3 escaped(vec2 q) { return vec3(0.0);"),
+    ).toEqual(["effects.0.code"]);
+    expect(failingCode("vec3 c = source(uv);\r  out vec4 o;\rreturn c;")).toEqual([
+      "effects.0.code",
+    ]);
+    expect(failingCode("/* *\\\r/ } vec3 more() { /* */\r\nreturn source(uv);")).toEqual([
+      "effects.0.code",
+    ]);
+    const crlf = "// a comment\r\nif (true) { return source(uv); }\r\nreturn source(uv);";
+    expect(profileSchema.safeParse(withEffects([custom({ code: crlf })])).success).toBe(true);
+  });
+
+  it("gives one issue per broken rule, each naming its rule (PD6)", () => {
+    expect(customCodeIssues("return source(uv);")).toEqual([]);
+    const issues = customCodeIssues("#x\nuniform float u;\n}");
+    expect(issues).toHaveLength(3);
+    expect(issues.join("\n")).toMatch(/#/);
+    expect(issues.join("\n")).toMatch(/uniform/);
+    expect(issues.join("\n")).toMatch(/brace/);
+  });
+
+  it("refuses a custom effect without its abstraction flag, params or code", () => {
+    for (const key of ["abstraction", "params", "code", "label"]) {
+      const without: Record<string, unknown> = custom();
+      delete without[key];
+      expect(failingPaths(withEffects([without]))).toEqual([`effects.0.${key}`]);
+    }
   });
 });

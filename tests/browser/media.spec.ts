@@ -2,23 +2,18 @@
 // camera and microphones, fed by the fixtures `fixtures/media.ts` writes at config load.
 import { expect, test, type Page } from "@playwright/test";
 
+type ClickWindow = { __clickResult: Promise<unknown> };
+
 /**
- * Runs `body` inside a real click, so it has the user activation `getDisplayMedia` and a
- * running `AudioContext` need, and returns what it resolves to.
+ * Clicks the page and returns what the click listener `arm` registered resolves to: the body
+ * runs inside a real click, so it has the user activation `getDisplayMedia` and a running
+ * `AudioContext` need. `arm` runs in the page and registers the listener itself, so no string
+ * is ever run as code (B-03 AC24).
  */
-async function inClick<T>(page: Page, body: string): Promise<T> {
-  await page.evaluate((source) => {
-    const w = window as unknown as { __clickResult: Promise<unknown> };
-    document.addEventListener(
-      "click",
-      () => {
-        w.__clickResult = new Function(`return (async () => { ${source} })();`)();
-      },
-      { once: true },
-    );
-  }, body);
+async function inClick<T>(page: Page, arm: () => void): Promise<T> {
+  await page.evaluate(arm);
   await page.mouse.click(5, 5);
-  return page.evaluate(() => (window as unknown as { __clickResult: Promise<T> }).__clickResult);
+  return page.evaluate(() => (window as unknown as ClickWindow).__clickResult as Promise<T>);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -40,29 +35,33 @@ test("the fake devices are listed with labels after a media request", async ({ p
 });
 
 test("the fake microphone plays the click track: loud bursts and silence", async ({ page }) => {
-  const rms = await inClick<number[]>(
-    page,
-    `
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    });
-    const context = new AudioContext();
-    const analyser = context.createAnalyser();
-    analyser.fftSize = 512;
-    context.createMediaStreamSource(stream).connect(analyser);
-    const buffer = new Float32Array(analyser.fftSize);
-    const reads = [];
-    const end = performance.now() + 2000;
-    while (performance.now() < end) {
-      await new Promise((r) => setTimeout(r, 10));
-      analyser.getFloatTimeDomainData(buffer);
-      reads.push(Math.sqrt(buffer.reduce((s, v) => s + v * v, 0) / buffer.length));
-    }
-    for (const track of stream.getTracks()) track.stop();
-    await context.close();
-    return reads;
-  `,
-  );
+  const rms = await inClick<number[]>(page, () => {
+    const listen = async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      const context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      context.createMediaStreamSource(stream).connect(analyser);
+      const buffer = new Float32Array(analyser.fftSize);
+      const reads: number[] = [];
+      const end = performance.now() + 2000;
+      while (performance.now() < end) {
+        await new Promise((r) => setTimeout(r, 10));
+        analyser.getFloatTimeDomainData(buffer);
+        reads.push(Math.sqrt(buffer.reduce((s, v) => s + v * v, 0) / buffer.length));
+      }
+      for (const track of stream.getTracks()) track.stop();
+      await context.close();
+      return reads;
+    };
+    document.addEventListener(
+      "click",
+      () => ((window as unknown as { __clickResult: Promise<unknown> }).__clickResult = listen()),
+      { once: true },
+    );
+  });
   expect(
     rms.filter((r) => r > 0.3).length,
     `reads: ${rms.map((r) => r.toFixed(2))}`,
@@ -71,15 +70,19 @@ test("the fake microphone plays the click track: loud bursts and silence", async
 });
 
 test("system audio: getDisplayMedia resolves with an audio track", async ({ page }) => {
-  const kinds = await inClick<string[]>(
-    page,
-    `
-    const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
-    const kinds = stream.getTracks().map((t) => t.kind);
-    for (const track of stream.getTracks()) track.stop();
-    return kinds;
-  `,
-  );
+  const kinds = await inClick<string[]>(page, () => {
+    const share = async () => {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+      const kinds = stream.getTracks().map((t) => t.kind);
+      for (const track of stream.getTracks()) track.stop();
+      return kinds;
+    };
+    document.addEventListener(
+      "click",
+      () => ((window as unknown as { __clickResult: Promise<unknown> }).__clickResult = share()),
+      { once: true },
+    );
+  });
   expect(kinds).toContain("audio");
 });
 

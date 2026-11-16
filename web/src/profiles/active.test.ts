@@ -1,5 +1,6 @@
 // T9 (B-02 spec AC11 to AC14; plan PD1, PD16, AD2): the screen page's profile controller with
 // fakes, so its rules are tested without a browser.
+import { ProfileCompileError } from "@djv/engine";
 import type { Profile, StoredProfile } from "@djv/shared";
 import { describe, expect, it, vi } from "vitest";
 import type { ListResult, ProfileResult } from "./api.ts";
@@ -36,7 +37,9 @@ function setup(
       async (id) => options.get ?? { kind: "ok", profile: id === "w1" ? warm : cool },
     ),
   };
-  const setProfile = vi.fn<(profile: Profile) => Promise<void>>(async () => {});
+  const setProfile = vi.fn<(profile: Profile, options?: { pick?: boolean }) => Promise<void>>(
+    async () => {},
+  );
   const setDials = vi.fn();
   const log = vi.fn();
   const save = vi.fn((id: string) => void (memory.id = id));
@@ -182,7 +185,9 @@ describe("pick (AC11, AC13, AC14)", () => {
     api.get.mockClear();
     await active.pick(BUILTIN_ID);
     expect(api.get).not.toHaveBeenCalled();
-    expect(setProfile).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Built-in" }));
+    expect(setProfile).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Built-in" }), {
+      pick: true, // B-03 PD8: a pick retries custom effects the guard turned off
+    });
     expect(setDials).toHaveBeenLastCalledWith({ recognisability: 0.3, reactivity: 0.7 });
     expect(save).toHaveBeenLastCalledWith(BUILTIN_ID);
     expect(active.state().activeId).toBe(BUILTIN_ID);
@@ -222,6 +227,37 @@ describe("pick (AC11, AC13, AC14)", () => {
     expect(active.state()).toMatchObject({ activeId: BUILTIN_ID, selectedId: BUILTIN_ID });
     expect(active.state().reason).toMatch(/prepare/i);
     expect(setDials).not.toHaveBeenCalled();
+  });
+
+  // B-03 AC21 (plan PD9): the reason names the custom effect, never the compiler's text.
+  it("names the custom effect whose code does not compile, and keeps the look", async () => {
+    const { active, setProfile, setDials } = setup();
+    await active.open();
+    setProfile.mockRejectedValueOnce(
+      new ProfileCompileError([
+        { effectIndex: -1, label: "", line: 40, message: "'x' : syntax error" },
+        { effectIndex: 2, label: "Swirl", line: 3, message: "'nope' : undeclared identifier" },
+      ]),
+    );
+    await active.pick("w1");
+    expect(active.state()).toMatchObject({ activeId: BUILTIN_ID });
+    expect(active.state().reason).toBe(
+      'that profile could not be prepared: custom effect "Swirl" does not compile; keeping the current look',
+    );
+    expect(active.state().reason).not.toContain("nope");
+    expect(setDials).not.toHaveBeenCalled();
+  });
+
+  it("keeps the plain reason when no compile issue names an effect", async () => {
+    const { active, setProfile } = setup();
+    await active.open();
+    setProfile.mockRejectedValueOnce(
+      new ProfileCompileError([{ effectIndex: -1, label: "", line: 40, message: "x" }]),
+    );
+    await active.pick("w1");
+    expect(active.state().reason).toBe(
+      "that profile could not be prepared; keeping the current look",
+    );
   });
 
   it("leaves what it shows alone when the profile is edited or deleted elsewhere (AC14)", async () => {
@@ -354,5 +390,54 @@ describe("live colours (B-04 SD7, AC20, AC21, PD6)", () => {
     active.subscribe(listener);
     active.setColour(0, "#111111");
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+// B-03 T9 (spec AC11, AC12, SD8; plan PD8): the guard's reason, kept apart from the list and
+// pick reasons; a pick retries custom effects the guard turned off.
+describe("the guard's reason (B-03)", () => {
+  const SLOW =
+    "custom effects are off: this look is too heavy for this GPU; pick the profile again to retry";
+  const LOST_CUSTOM =
+    "the graphics context was lost and restored; custom effects are off; pick the profile again to retry";
+  const LOST = "the graphics context was lost and restored";
+
+  it("names each guard event", () => {
+    const { active } = setup();
+    active.guard({ kind: "slow", customBypassed: true });
+    expect(active.state().reason).toBe(SLOW);
+    active.guard({ kind: "contextLost", customBypassed: true });
+    expect(active.state().reason).toBe(LOST_CUSTOM);
+    active.guard({ kind: "contextLost", customBypassed: false });
+    expect(active.state().reason).toBe(LOST);
+  });
+
+  it("survives opening the panel", async () => {
+    const { active } = setup();
+    await active.open();
+    active.guard({ kind: "slow", customBypassed: true });
+    await active.open();
+    expect(active.state().reason).toBe(SLOW);
+  });
+
+  it("gives way to a pick's own reason, and clears on a successful pick", async () => {
+    const { active, setProfile } = setup();
+    await active.open();
+    active.guard({ kind: "slow", customBypassed: true });
+    setProfile.mockRejectedValueOnce(new Error("did not link"));
+    await active.pick("w1");
+    expect(active.state().reason).toMatch(/could not be prepared/);
+    await active.pick("c1");
+    expect(active.state().reason).toBeNull();
+  });
+
+  it("asks the engine to retry on a pick, never on a live colour", async () => {
+    const { active, setProfile } = setup();
+    await active.open();
+    await active.pick("w1");
+    expect(setProfile.mock.calls.at(-1)![1]).toEqual({ pick: true });
+    active.setColour(0, "#123456");
+    expect(setProfile.mock.calls.at(-1)![0].palette[0]).toBe("#123456");
+    expect(setProfile.mock.calls.at(-1)![1]).toBeUndefined();
   });
 });

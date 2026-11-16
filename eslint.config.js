@@ -18,6 +18,11 @@ export default defineConfig(
     languageOptions: { globals: globals.browser },
   },
   {
+    // The page `pnpm profile:check` drives runs in the browser it launches (B-03 PD12).
+    files: ["scripts/profile-check-page.ts"],
+    languageOptions: { globals: globals.browser },
+  },
+  {
     // The AudioWorklet processor runs in AudioWorkletGlobalScope, not a window (B-01 PD18).
     files: ["audio/src/processor.ts"],
     languageOptions: { globals: globals.audioWorklet },
@@ -34,6 +39,11 @@ export default defineConfig(
           message: "Read the environment only in server/src/config.ts (docs/invariants.md).",
         },
       ],
+      // B-03 AC24: profile code is GLSL only; no string is ever run as JavaScript
+      // (docs/invariants.md).
+      "no-eval": "error",
+      "no-implied-eval": "error",
+      "no-new-func": "error",
       "@typescript-eslint/no-unused-vars": [
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },

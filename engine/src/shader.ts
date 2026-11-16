@@ -4,8 +4,13 @@
 // and then changes the result. The first effect in the list is therefore applied to the
 // picture first, exactly as separate passes would, at the cost of one pass. Strengths, colours
 // and segments are uniforms (`profileUniforms`), so only a change to the list needs a new
-// program. No profile carries code: the profile selects and orders these snippets, nothing else.
-import type { EffectType } from "./profile.ts";
+// program. A custom effect (B-03 SD1, SD3) is the one exception: its GLSL body becomes one
+// link of the chain, wrapped by the engine (`customLink`).
+import { FLASH_MAX } from "./look.ts";
+import { CUSTOM_SLOTS, type EffectType } from "./profile.ts";
+
+/** `FLASH_MAX` as a GLSL float literal. */
+const FLASH_LIMIT = Number.isInteger(FLASH_MAX) ? `${FLASH_MAX}.0` : `${FLASH_MAX}`;
 
 const HEADER = `#version 300 es
 precision highp float;
@@ -147,16 +152,164 @@ const SNIPPETS: Partial<Record<EffectType, Snippet>> = {
 const passThrough: Snippet = (p) => `
   return ${p}(uv);`;
 
-/** The fragment shader for an ordered effect list (PD3). */
-export function buildFragment(types: readonly EffectType[]): string {
-  const functions = types.map((type, i) => {
-    const snippet = SNIPPETS[type] ?? passThrough;
-    return `// ${type}\nvec3 fx${i + 1}(vec2 uv) {${snippet(`fx${i}`)}\n}\n`;
-  });
-  return `${HEADER}
-${functions.join("\n")}
-void main() {
-  outColour = vec4(clamp(fx${types.length}(gl_FragCoord.xy / uResolution), 0.0, 1.0), 1.0);
+/** A custom effect's code (B-03 SD1): the body of a function that returns a `vec3`. */
+export interface CustomEntry {
+  type: "custom";
+  code: string;
 }
+
+/** One link of the chain: a built-in type, or custom code. */
+export type FragmentEntry = EffectType | CustomEntry;
+
+/**
+ * The custom effect contract (B-03 SD3, PD7), as `docs/custom-effects.md` documents it. The
+ * defines exist only around a body, so they are reserved words inside it; the functions are
+ * the shader's own helpers; `audio` has these fields.
+ */
+export const CUSTOM_CONTRACT = {
+  defines: [
+    "source",
+    "lastFrame",
+    "resolution",
+    "time",
+    "audio",
+    "palette",
+    "paletteSize",
+    "strength",
+    "param",
+  ],
+  functions: ["hash", "valueNoise"],
+  audio: ["level", "low", "mid", "high", "beat"],
+} as const;
+
+/** Declared only in a fragment with a custom entry, so built-in-only text is unchanged (AC8). */
+const CUSTOM_HEADER = `
+struct Audio {
+  float level;
+  float low;
+  float mid;
+  float high;
+  float beat;
+};
+uniform Audio uAudio;
+uniform float uCustomStrength[${CUSTOM_SLOTS}];
+uniform vec4 uCustomParam[${CUSTOM_SLOTS}];
 `;
+
+/** The contract's names for the body of the `slot`-th custom effect, whose input is `previous`. */
+const contractDefines = (previous: string, slot: number): string[] => [
+  `#define source ${previous}`,
+  "#define lastFrame(p) texture(uPrevious, (p)).rgb",
+  "#define resolution uResolution",
+  "#define time uTime",
+  "#define audio uAudio",
+  "#define palette uPalette",
+  "#define paletteSize int(uPaletteSize)",
+  `#define strength uCustomStrength[${slot}]`,
+  `#define param uCustomParam[${slot}]`,
+];
+
+/**
+ * A custom entry as two functions: its body, between the contract's defines, and the link
+ * `fxN`, which passes the picture through without running the body under strength 0.001
+ * (SD13). The body ends on its own line so a closing `//` comment cannot reach the brace.
+ */
+function customLink(code: string, index: number, slot: number): { text: string; codeAt: number } {
+  const previous = `fx${index - 1}`;
+  const undefs = CUSTOM_CONTRACT.defines.map((name) => `#undef ${name}`);
+  const before = [
+    `// custom ${slot}`,
+    ...contractDefines(previous, slot),
+    `vec3 fx${index}Custom(vec2 uv) {`,
+  ].join("\n");
+  const after = [
+    "}",
+    ...undefs,
+    `vec3 fx${index}(vec2 uv) {`,
+    `  if (uCustomStrength[${slot}] < 0.001) return ${previous}(uv);`,
+    `  return fx${index}Custom(uv);`,
+    "}",
+    "",
+  ].join("\n");
+  return { text: `${before}\n${code}\n${after}`, codeAt: before.length + 1 };
+}
+
+/** Where a custom body sits in its fragment, 1-based (B-03 PD9). */
+export interface BodyLayout {
+  /** Index in the entry list, which is the profile's effect list. */
+  effectIndex: number;
+  firstLine: number;
+  lineCount: number;
+}
+
+/** The fragment and the lines each custom body occupies in it: built together, never apart. */
+function assemble(entries: readonly FragmentEntry[]): { source: string; bodies: BodyLayout[] } {
+  let slot = 0;
+  const placed: { text: string; code?: { at: number; effectIndex: number; lineCount: number } }[] =
+    entries.map((entry, i) => {
+      if (typeof entry !== "string") {
+        // GLSL ends a line at CR, LF or CRLF; one form keeps the layout's count the compiler's.
+        const code = entry.code.replace(/\r\n?/g, "\n");
+        const link = customLink(code, i + 1, slot++);
+        const lineCount = code.split("\n").length;
+        return { text: link.text, code: { at: link.codeAt, effectIndex: i, lineCount } };
+      }
+      const snippet = SNIPPETS[entry] ?? passThrough;
+      return { text: `// ${entry}\nvec3 fx${i + 1}(vec2 uv) {${snippet(`fx${i}`)}\n}\n` };
+    });
+  const last = `fx${entries.length}(gl_FragCoord.xy / uResolution)`;
+  const main =
+    slot > 0
+      ? limitedMain(last)
+      : `void main() {
+  outColour = vec4(clamp(${last}, 0.0, 1.0), 1.0);
+}`;
+  const prefix = `${HEADER}${slot > 0 ? CUSTOM_HEADER : ""}\n`;
+  const bodies: BodyLayout[] = [];
+  // The prefix's newlines, then each piece's own plus the one that joins it to the next.
+  let linesBefore = prefix.split("\n").length - 1;
+  for (const piece of placed) {
+    if (piece.code) {
+      const firstLine = linesBefore + piece.text.slice(0, piece.code.at).split("\n").length;
+      bodies.push({
+        effectIndex: piece.code.effectIndex,
+        firstLine,
+        lineCount: piece.code.lineCount,
+      });
+    }
+    linesBefore += piece.text.split("\n").length;
+  }
+  const source = `${prefix}${placed.map((p) => p.text).join("\n")}
+${main}
+`;
+  return { source, bodies };
+}
+
+/** The fragment shader for an ordered effect list (PD3), custom code included (B-03 SD3). */
+export function buildFragment(entries: readonly FragmentEntry[]): string {
+  return assemble(entries).source;
+}
+
+/** The lines each custom body occupies in `buildFragment(entries)`, for compile errors (PD9). */
+export function fragmentLayout(entries: readonly FragmentEntry[]): BodyLayout[] {
+  return assemble(entries).bodies;
+}
+
+/**
+ * The flash limiter (B-03 SD5, PD3), engine code after the chain, so no body can skip it: a
+ * colour that is not finite becomes the previous output (read by exponent bits, which no fast
+ * math folds away), and a luma step above `FLASH_MAX` from the previous output at this pixel is
+ * moved back along the line to it, so the step is exactly `FLASH_MAX`.
+ */
+function limitedMain(last: string): string {
+  return `void main() {
+  vec3 previous = texelFetch(uPrevious, ivec2(gl_FragCoord.xy), 0).rgb;
+  vec3 colour = ${last};
+  uvec3 exponent = floatBitsToUint(colour) & uvec3(0x7f800000u);
+  if (any(equal(exponent, uvec3(0x7f800000u)))) colour = previous;
+  colour = clamp(colour, 0.0, 1.0);
+  float delta = dot(colour - previous, vec3(0.299, 0.587, 0.114));
+  if (abs(delta) > ${FLASH_LIMIT}) colour = previous + (colour - previous) * (${FLASH_LIMIT} / abs(delta));
+  outColour = vec4(colour, 1.0);
+}`;
 }

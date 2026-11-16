@@ -17,6 +17,7 @@ import {
   listStored,
   type Definition,
 } from "./fixtures/profiles.ts";
+import { start } from "./helpers.ts";
 
 test.beforeEach(async ({ request }) => {
   await deleteAll(request);
@@ -339,8 +340,11 @@ test("the add menu never lists a present type and is empty at twelve (AC3)", asy
   await page.goto("/builder");
   await page.getByTestId(`profile-name-${one.id}`).click();
   const add = page.getByTestId("effect-add");
+  // The built-in types; "Custom" (B-03 SD9) is offered beside them and may repeat.
   const offered = async () =>
-    (await add.locator("option").allTextContents()).filter((t) => t !== "choose…");
+    (await add.locator("option").allTextContents()).filter(
+      (t) => t !== "choose…" && t !== "Custom",
+    );
   expect(await offered()).not.toContain("paletteMap");
   expect(await offered()).toHaveLength(11);
 
@@ -662,7 +666,9 @@ test("delete then import the bundle: it returns with a new id; import again: 'Na
   expect(back[0]!.id).not.toBe(alpha.id);
   expect(await names(page)).toEqual(["Built-in", "Alpha"]);
 
+  // One profile whose name is taken: B-03 SD10 asks; "Add as a copy" is the import of before.
   await importFile(page, "bundle.json", bundle.text);
+  await page.getByTestId("import-copy").click();
   await expect(page.getByTestId("transfer-message")).toContainText("Imported: Alpha (2)");
   expect((await listStored(request)).map((p) => p.name)).toEqual(["Alpha", "Alpha (2)"]);
   expect(await names(page)).toEqual(["Built-in", "Alpha", "Alpha (2)"]);
@@ -686,8 +692,8 @@ test("a file with one broken field, a version 2 file and a text file each store 
 
   await importFile(
     page,
-    "v2.json",
-    JSON.stringify({ ...JSON.parse(bundle.text), formatVersion: 2 }),
+    "v3.json",
+    JSON.stringify({ ...JSON.parse(bundle.text), formatVersion: 3 }),
   );
   await expect(message).toHaveText("unsupported file version");
 
@@ -717,6 +723,120 @@ test("a file the server refuses is reported by profile and field, and stores not
     }),
   );
   await importFile(page, "bundle.json", bundle.text);
+  await page.getByTestId("import-copy").click(); // the name is taken: B-03 SD10 asks first
   await expect(page.getByTestId("transfer-message")).toContainText("Alpha: palette.1 — refused");
   expect(await listStored(request)).toEqual(before);
+});
+
+// B-03 T12 (spec SD10, AC17, AC18, AC19; plan PD11): importing one profile whose name is taken.
+const oneProfileFile = (definition: Definition) =>
+  JSON.stringify({ formatVersion: 1, profiles: [definition] });
+
+test("importing one profile with a taken name asks; Replace keeps the id, the screen picks it after a reload (AC17)", async ({
+  page,
+  request,
+  context,
+}) => {
+  const starry = await createProfile(request, flat("Starry", "#112233"));
+  // The screen page remembers it, as after a pick there.
+  const screen = await context.newPage();
+  await screen.goto("/");
+  await screen.evaluate((id) => localStorage.setItem("djv.profile", id), starry.id);
+
+  await page.goto("/builder");
+  await importFile(page, "starry.json", oneProfileFile(flat("  starry ", "#445566")));
+  await expect(page.getByTestId("import-replace")).toHaveText("Replace Starry");
+  await expect(page.getByTestId("import-copy")).toHaveText("Add as a copy");
+  await page.getByTestId("import-replace").click();
+  await expect(page.getByTestId("transfer-message")).toContainText("Replaced: starry");
+
+  const [replaced] = await listStored(request);
+  expect(replaced).toMatchObject({ id: starry.id, revision: 2, name: "starry" });
+  expect(replaced!.palette).toEqual(["#445566", "#445566"]);
+  expect(await names(page)).toEqual(["Built-in", "starry"]);
+
+  await screen.reload();
+  await start(screen);
+  await expect(screen.getByTestId("profile-picker")).toHaveValue(starry.id);
+});
+
+test("Add as a copy stores 'Name (2)' and leaves the stored one (AC17)", async ({
+  page,
+  request,
+}) => {
+  const starry = await createProfile(request, flat("Starry", "#112233"));
+  await page.goto("/builder");
+  await importFile(page, "starry.json", oneProfileFile(flat("Starry", "#445566")));
+  await page.getByTestId("import-copy").click();
+  await expect(page.getByTestId("transfer-message")).toContainText("Imported: Starry (2)");
+  const all = await listStored(request);
+  expect(all.map((p) => p.name)).toEqual(["Starry", "Starry (2)"]);
+  expect(all[0]).toMatchObject({ id: starry.id, revision: 1, palette: ["#112233", "#112233"] });
+});
+
+test("a save elsewhere before Replace is refused with 409: Reload theirs keeps it, Save mine as a copy adds (AC18)", async ({
+  page,
+  request,
+}) => {
+  const starry = await createProfile(request, flat("Starry", "#112233"));
+  await page.goto("/builder");
+  await importFile(page, "starry.json", oneProfileFile(flat("Starry", "#445566")));
+  await expect(page.getByTestId("import-replace")).toBeVisible();
+  // Another tab saves between the choice appearing and Replace.
+  const theirs = await request.put(`/api/profiles/${starry.id}`, {
+    data: { ...flat("Starry", "#778899"), revision: 1 },
+  });
+  expect(theirs.status()).toBe(200);
+  await page.getByTestId("import-replace").click();
+  await expect(page.getByTestId("conflict")).toBeVisible();
+  expect((await listStored(request))[0]).toMatchObject({
+    revision: 2,
+    palette: ["#778899", "#778899"],
+  });
+
+  await page.getByTestId("conflict-reload").click();
+  await expect(page.getByTestId("conflict")).toHaveCount(0);
+  expect((await listStored(request)).map((p) => p.name)).toEqual(["Starry"]);
+
+  await importFile(page, "starry.json", oneProfileFile(flat("Starry", "#445566")));
+  await expect(page.getByTestId("import-replace")).toBeVisible();
+  await request.put(`/api/profiles/${starry.id}`, {
+    data: { ...flat("Starry", "#000000"), revision: 2 },
+  });
+  await page.getByTestId("import-replace").click();
+  await page.getByTestId("conflict-copy").click();
+  await expect(page.getByTestId("transfer-message")).toContainText("Imported: Starry (2)");
+  expect((await listStored(request)).map((p) => p.name)).toEqual(["Starry", "Starry (2)"]);
+});
+
+test("a two-profile bundle with a taken name only adds (AC19)", async ({ page, request }) => {
+  await createProfile(request, flat("Starry", "#112233"));
+  await page.goto("/builder");
+  const bundle = JSON.stringify({
+    formatVersion: 1,
+    profiles: [flat("Starry", "#445566"), flat("Other", "#445566")],
+  });
+  await importFile(page, "bundle.json", bundle);
+  await expect(page.getByTestId("transfer-message")).toContainText("Imported: Starry (2), Other");
+  await expect(page.getByTestId("import-replace")).toHaveCount(0);
+});
+
+test("Replace asks before discarding unsaved changes to the open profile (PD11)", async ({
+  page,
+  request,
+}) => {
+  const starry = await createProfile(request, flat("Starry", "#112233"));
+  await openProfile(page, starry.id);
+  await page.getByTestId("editor-dial-reactivity").fill("0.9");
+  await expect(page.getByTestId("editor-dirty")).toBeVisible();
+  await importFile(page, "starry.json", oneProfileFile(flat("Starry", "#445566")));
+  page.once("dialog", (d) => void d.dismiss());
+  await page.getByTestId("import-replace").click();
+  await expect(page.getByTestId("editor-dirty")).toBeVisible();
+  expect((await listStored(request))[0]!.revision).toBe(1);
+  page.once("dialog", (d) => void d.accept());
+  await page.getByTestId("import-replace").click();
+  await expect(page.getByTestId("transfer-message")).toContainText("Replaced: Starry");
+  await expect(page.getByTestId("editor-dirty")).toHaveCount(0);
+  expect((await listStored(request))[0]!.revision).toBe(2);
 });

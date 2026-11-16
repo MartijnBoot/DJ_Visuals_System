@@ -18,9 +18,16 @@ import {
   type Target,
 } from "./gl.ts";
 import { createLatencyWindow, type LatencyReading } from "./latency.ts";
-import { BUILT_IN_PROFILE, PALETTE_SLOTS, profileUniforms, type Profile } from "./profile.ts";
+import {
+  BUILT_IN_PROFILE,
+  customUniforms,
+  PALETTE_SLOTS,
+  profileUniforms,
+  type Profile,
+} from "./profile.ts";
 import { createScaleController, type RenderScale } from "./scale.ts";
-import { buildFragment } from "./shader.ts";
+import { buildFragment, fragmentLayout, type FragmentEntry } from "./shader.ts";
+import { locateErrors, ProfileCompileError, type BodyLines } from "./compile-error.ts";
 import { createFrameStats, type EngineStats } from "./stats.ts";
 
 export type { EngineStats, FrameStats } from "./stats.ts";
@@ -28,8 +35,20 @@ export type { LatencyReading } from "./latency.ts";
 export type { RenderScale } from "./scale.ts";
 export type { AudioFeatures, Dials } from "./features.ts";
 export { DEFAULT_DIALS, ZERO_FEATURES } from "./features.ts";
-export type { Binding, Effect, EffectInfo, EffectType, FeatureName, Profile } from "./profile.ts";
+export type {
+  Binding,
+  BuiltInEffect,
+  CustomEffect,
+  CustomParam,
+  Effect,
+  EffectInfo,
+  EffectType,
+  FeatureName,
+  Profile,
+} from "./profile.ts";
 export { BUILT_IN_PROFILE, EFFECTS, effectStrength } from "./profile.ts";
+export { locateErrors, ProfileCompileError } from "./compile-error.ts";
+export type { CompileIssue } from "./compile-error.ts";
 
 export interface Engine {
   start(): void;
@@ -50,10 +69,32 @@ export interface Engine {
    * apply on the next frame and this resolves at once. Another list: its program is linked
    * while the old profile keeps drawing, and this resolves at the frame that swaps it in. It
    * rejects when the program does not link (the old profile keeps drawing) or when a later
-   * call supersedes it.
+   * call supersedes it. While the guard has bypassed this profile's custom effects, a call with
+   * the same program key keeps the bypass; `pick` or another key ends it (B-03 PD8).
    */
-  setProfile(profile: Profile): Promise<void>;
+  setProfile(profile: Profile, options?: SetProfileOptions): Promise<void>;
+  /** Called when the guard bypasses custom effects (B-03 SD8, PD8); returns an unsubscribe. */
+  onGuard(listener: (event: GuardEvent) => void): () => void;
 }
+
+export interface SetProfileOptions {
+  /**
+   * The person picked this profile: custom effects the guard bypassed run again (B-03 PD8's
+   * "retry"; named for the act, as the gate's guard reads a test's `retry` as a test retry).
+   */
+  pick?: boolean;
+}
+
+/** What the runtime guard did (B-03 SD8, PD8). */
+export interface GuardEvent {
+  /** `slow`: too heavy for this GPU even at 50%; `contextLost`: the WebGL context came back. */
+  kind: "slow" | "contextLost";
+  /** Whether the profile now draws without its custom effects. */
+  customBypassed: boolean;
+}
+
+/** How long the GPU may stay above budget at 50% before custom effects go off (SD8). */
+export const GUARD_AFTER_MS = 3000;
 
 /** Thrown by `createEngine` when the canvas gives no WebGL2 context. */
 export class WebGL2UnavailableError extends Error {
@@ -76,6 +117,9 @@ const HAVE_CURRENT_DATA = 2;
 
 /** Linked programs kept for a quick switch back; the built-in's and the active one stay. */
 const PROGRAM_CACHE = 8;
+
+/** Failed keys remembered: each holds up to twelve bodies of code, so only a few (PD9). */
+const FAILURE_CACHE = 16;
 
 const UNIFORMS = [
   "uSource",
@@ -108,10 +152,25 @@ const UNIFORMS = [
 
 type Locations = Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
 
+/** Present only in a program with a custom effect (B-03 PD7). */
+const CUSTOM_UNIFORMS = [
+  "uCustomStrength",
+  "uCustomParam",
+  "uAudio.level",
+  "uAudio.low",
+  "uAudio.mid",
+  "uAudio.high",
+  "uAudio.beat",
+] as const;
+
+type CustomLocations = Record<(typeof CUSTOM_UNIFORMS)[number], WebGLUniformLocation | null>;
+
 interface Linked {
   key: string;
   program: WebGLProgram;
   loc: Locations;
+  /** Null for a program without custom effects: their uniforms are never set. */
+  custom: CustomLocations | null;
 }
 
 interface PendingSwitch {
@@ -119,41 +178,89 @@ interface PendingSwitch {
   key: string;
   /** Null when the program is already linked (in the cache). */
   linking: Linking | null;
+  /** Where each custom body sits in the fragment, to locate a compile error (PD9). */
+  bodies: BodyLines[];
   resolve(): void;
   reject(error: Error): void;
 }
 
-/** A program is identified by its ordered effect list. */
-const keyOf = (profile: Profile) => profile.effects.map((e) => e.type).join(",");
+/** The chain a profile's program draws: its effect list, custom code included (B-03 SD3). */
+const entriesOf = (profile: Profile): FragmentEntry[] =>
+  profile.effects.map((e) => (e.type === "custom" ? { type: "custom", code: e.code } : e.type));
+
+/**
+ * A program is identified by its ordered effect list and every custom body's code. The code is
+ * JSON-quoted, so no code can read as another list.
+ */
+const keyOf = (profile: Profile) =>
+  entriesOf(profile)
+    .map((e) => (typeof e === "string" ? e : `custom:${JSON.stringify(e.code)}`))
+    .join(",");
+
+/** The effect types alone, for a log line: never the code. */
+const typesOf = (profile: Profile) => profile.effects.map((e) => e.type).join(",");
 
 export function createEngine(canvas: HTMLCanvasElement): Engine {
   // No multisampling: `blitFramebuffer` may not write to a multisampled default framebuffer.
   const gl = canvas.getContext("webgl2", { antialias: false });
   if (!gl) throw new WebGL2UnavailableError();
-  const parallel = gl.getExtension(
+  let parallel = gl.getExtension(
     "KHR_parallel_shader_compile",
   ) as unknown as ParallelCompile | null;
 
-  const linked = (key: string, program: WebGLProgram): Linked => ({
+  const locate = <N extends string>(program: WebGLProgram, names: readonly N[]) =>
+    Object.fromEntries(names.map((name) => [name, gl.getUniformLocation(program, name)])) as Record<
+      N,
+      WebGLUniformLocation | null
+    >;
+  const linked = (key: string, program: WebGLProgram, custom: boolean): Linked => ({
     key,
     program,
-    loc: Object.fromEntries(
-      UNIFORMS.map((name) => [name, gl.getUniformLocation(program, name)]),
-    ) as Locations,
+    loc: locate(program, UNIFORMS),
+    custom: custom ? locate(program, CUSTOM_UNIFORMS) : null,
   });
-  const fragmentFor = (profile: Profile) => buildFragment(profile.effects.map((e) => e.type));
+  const hasCustom = (profile: Profile) => profile.effects.some((e) => e.type === "custom");
+  const fragmentFor = (profile: Profile) => buildFragment(entriesOf(profile));
+  const bodiesOf = (profile: Profile): BodyLines[] =>
+    fragmentLayout(entriesOf(profile)).map((body) => {
+      const effect = profile.effects[body.effectIndex];
+      return { ...body, label: effect?.type === "custom" ? effect.label : "" };
+    });
 
   const builtInKey = keyOf(BUILT_IN_PROFILE);
   const cache = new Map<string, Linked>();
-  let active = {
+  let active: { profile: Profile; linked: Linked } = {
     profile: BUILT_IN_PROFILE,
-    linked: linked(builtInKey, createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(BUILT_IN_PROFILE))),
+    linked: linked(
+      builtInKey,
+      createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(BUILT_IN_PROFILE)),
+      false,
+    ),
   };
   cache.set(builtInKey, active.linked);
   let pending: PendingSwitch | null = null;
   /** The first frame after a swap mixes nothing of the old look into the new one (PD4). */
   let swapped = false;
-  const failedKeys = new Set<string>();
+  /** Keys that did not link, with why: logged once; custom code is not compiled again (PD9). */
+  const failures = new Map<string, Error>();
+  const noteFailure = (key: string, error: Error) => {
+    failures.set(key, error);
+    for (const old of failures.keys()) {
+      if (failures.size <= FAILURE_CACHE) break;
+      failures.delete(old);
+    }
+  };
+  /** A remembered failure, with the labels the profile has now (a rename keeps the key). */
+  const failureFor = (key: string, profile: Profile): Error | null => {
+    const error = failures.get(key);
+    if (!error || !(error instanceof ProfileCompileError)) return error ?? null;
+    return new ProfileCompileError(
+      error.issues.map((issue) => {
+        const effect = profile.effects[issue.effectIndex];
+        return effect?.type === "custom" ? { ...issue, label: effect.label } : issue;
+      }),
+    );
+  };
 
   const remember = (entry: Linked) => {
     cache.delete(entry.key);
@@ -183,26 +290,30 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       if (state.state === "pending") return;
       pending = null;
       if (state.state === "failed") {
-        if (!failedKeys.has(next.key)) {
-          failedKeys.add(next.key);
+        const issues = locateErrors(state.message, next.bodies);
+        const error =
+          issues.length > 0 ? new ProfileCompileError(issues) : new Error(state.message);
+        if (!failures.has(next.key)) {
+          noteFailure(next.key, error);
           console.warn("profile program did not link; keeping the current profile", {
-            effects: next.key,
+            effects: typesOf(next.profile),
             reason: state.message,
           });
         }
-        next.reject(new Error(state.message));
+        next.reject(error);
         return;
       }
-      entry = linked(next.key, state.program);
+      entry = linked(next.key, state.program, hasCustom(next.profile));
     }
     pending = null;
     remember(entry);
     active = { profile: next.profile, linked: entry };
+    customSince = null; // a new custom program gets its own 3 s before the guard looks
     swapped = true;
     next.resolve();
   };
 
-  const sourceTexture = createTexture(gl);
+  let sourceTexture = createTexture(gl);
 
   const frames = createFrameStats();
   const scaler = createScaleController(frames);
@@ -216,13 +327,37 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 
   const targetsFor = (width: number, height: number): [Target, Target] => {
     if (targets && targets[0].width === width && targets[0].height === height) return targets;
-    if (targets) {
-      for (const t of targets) deleteTarget(gl, t);
+    const old = targets;
+    targets = [createTarget(gl, width, height), createTarget(gl, width, height)];
+    if (old) {
+      // In a profile with code the limiter needs the real previous frame (B-03 PD4): the last
+      // output, scaled into the new previous target. Built-in profiles start from black.
+      if (active.linked.custom) copy(old[1 - current]!, targets[1 - current]!);
+      for (const t of old) deleteTarget(gl, t);
       // Recreated targets are cleared black: no smear on the next frame, or it mixes that in.
       swapped = true;
     }
-    targets = [createTarget(gl, width, height), createTarget(gl, width, height)];
     return targets;
+  };
+
+  /** Scales one target's picture into another. */
+  const copy = (from: Target, to: Target) => {
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, to.framebuffer);
+    gl.blitFramebuffer(
+      0,
+      0,
+      from.width,
+      from.height,
+      0,
+      0,
+      to.width,
+      to.height,
+      gl.COLOR_BUFFER_BIT,
+      gl.LINEAR,
+    );
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
   };
 
   /** Uploads the camera's current frame; returns its size, or null to draw the noise field. */
@@ -243,6 +378,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 
   const frame = (timestamp: number) => {
     handle = requestAnimationFrame(frame);
+    if (lost) return; // nothing can draw until the context is restored (B-03 AC12)
     advance();
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
@@ -257,6 +393,81 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     }
     frames.record(timestamp);
     scaler.record(timestamp);
+    guardSlow(timestamp);
+  };
+
+  /** The WebGL context is lost: every GL object is gone and nothing draws (B-03 AC12). */
+  let lost = false;
+
+  // Preventing the default asks the browser to restore the context (B-03 SD8).
+  canvas.addEventListener("webglcontextlost", (event) => {
+    event.preventDefault();
+    lost = true;
+    if (pending) {
+      pending.reject(new Error("the WebGL context was lost"));
+      pending = null;
+    }
+  });
+
+  /**
+   * Everything is made again: texture, targets (on the next frame) and the active profile's
+   * program, linked at once and without custom effects, so the picture returns on the next
+   * frame. A profile with custom effects keeps them off until it is picked again (PD8).
+   */
+  canvas.addEventListener("webglcontextrestored", () => {
+    lost = false;
+    parallel = gl.getExtension("KHR_parallel_shader_compile") as unknown as ParallelCompile | null;
+    cache.clear();
+    failures.clear();
+    targets = null;
+    current = 0;
+    sourceTexture = createTexture(gl);
+    const wanted = active.profile;
+    const hadCustom = bypassed !== null || hasCustom(wanted);
+    if (bypassed === null && hasCustom(wanted)) bypassed = keyOf(wanted);
+    let drawn = withoutCustom(wanted);
+    let program: WebGLProgram;
+    try {
+      program = createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(drawn));
+    } catch {
+      drawn = BUILT_IN_PROFILE; // built-ins only always link; this is a last resort
+      program = createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(drawn));
+    }
+    active = { profile: drawn, linked: linked(keyOf(drawn), program, false) };
+    cache.set(active.linked.key, active.linked);
+    customSince = null;
+    swapped = true;
+    emitGuard({ kind: "contextLost", customBypassed: hadCustom });
+  });
+
+  /** The program key whose custom effects the guard turned off, until a pick or another key. */
+  let bypassed: string | null = null;
+  /** When the custom program in use started drawing; null while no custom code runs. */
+  let customSince: number | null = null;
+  const guardListeners = new Set<(event: GuardEvent) => void>();
+  const emitGuard = (event: GuardEvent) => guardListeners.forEach((listener) => listener(event));
+  const withoutCustom = (profile: Profile): Profile => ({
+    ...profile,
+    effects: profile.effects.filter((e) => e.type !== "custom"),
+  });
+
+  /**
+   * SD8: custom code that keeps the GPU above budget at 50% for 3 s, after running for 3 s, is
+   * turned off; built-ins and the camera keep drawing. Never while a switch is pending, so a
+   * guard cannot cancel a pick.
+   */
+  const guardSlow = (timestamp: number) => {
+    if (!active.linked.custom) {
+      customSince = null;
+      return;
+    }
+    customSince ??= timestamp;
+    if (bypassed !== null || pending) return;
+    if (timestamp - customSince < GUARD_AFTER_MS) return;
+    if (scaler.starvedFor(timestamp) < GUARD_AFTER_MS) return;
+    bypassed = active.linked.key;
+    switchTo(withoutCustom(active.profile)).catch(() => {});
+    emitGuard({ kind: "slow", customBypassed: true });
   };
 
   const draw = (timestamp: number, canvasWidth: number, canvasHeight: number) => {
@@ -269,6 +480,9 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     const previous = pair[1 - current]!;
     const size = uploadSource();
     const u = profileUniforms(active.profile, features, dials, timestamp, size !== null, width);
+    // A profile with code starts with both targets holding the last output, so a body that
+    // discards a pixel leaves a picture at most one limited step old (B-03 PD3, PD4).
+    if (swapped && active.linked.custom) copy(previous, target);
     if (swapped) u.feedback = 0;
     swapped = false;
     const loc = active.linked.loc;
@@ -313,6 +527,17 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     gl.uniform1f(loc.uMirror, u.mirror);
     gl.uniform1f(loc.uSegments, u.segments);
     gl.uniform1f(loc.uRgbSplit, u.rgbSplit);
+    const custom = active.linked.custom;
+    if (custom) {
+      const c = customUniforms(active.profile, features, dials);
+      gl.uniform1fv(custom.uCustomStrength, c.strength);
+      gl.uniform4fv(custom.uCustomParam, c.params);
+      gl.uniform1f(custom["uAudio.level"], c.audio.level);
+      gl.uniform1f(custom["uAudio.low"], c.audio.low);
+      gl.uniform1f(custom["uAudio.mid"], c.audio.mid);
+      gl.uniform1f(custom["uAudio.high"], c.audio.high);
+      gl.uniform1f(custom["uAudio.beat"], c.audio.beat);
+    }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.framebuffer);
@@ -331,6 +556,40 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     );
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
     current = 1 - current;
+  };
+
+  /** Switches the drawn profile (B-02 SD15, PD4); `setProfile` adds the guard's rules. */
+  const switchTo = (profile: Profile): Promise<void> => {
+    const key = keyOf(profile);
+    if (pending && pending.key === key && pending.linking) {
+      // The same list is already linking: keep the link, take the newer values.
+      const linking = pending.linking;
+      pending.linking = null;
+      supersede();
+      return new Promise((resolve, reject) => {
+        pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile) };
+      });
+    }
+    supersede();
+    if (key === active.linked.key) {
+      active = { ...active, profile };
+      return Promise.resolve();
+    }
+    // Code that did not compile is not compiled again on the next slider move (PD9).
+    const failed = hasCustom(profile) ? failureFor(key, profile) : null;
+    if (failed) return Promise.reject(failed);
+    return new Promise((resolve, reject) => {
+      let linking: Linking | null = null;
+      if (!cache.has(key)) {
+        try {
+          linking = beginProgram(gl, FULLSCREEN_VERTEX, fragmentFor(profile));
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+      }
+      pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile) };
+    });
   };
 
   return {
@@ -359,34 +618,22 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     setScaleCap(cap) {
       scaler.setCap(cap);
     },
-    setProfile(profile) {
-      const key = keyOf(profile);
-      if (pending && pending.key === key && pending.linking) {
-        // The same list is already linking: keep the link, take the newer values.
-        const linking = pending.linking;
-        pending.linking = null;
-        supersede();
-        return new Promise((resolve, reject) => {
-          pending = { profile, key, linking, resolve, reject };
-        });
-      }
-      supersede();
-      if (key === active.linked.key) {
+    setProfile(profile, options = {}) {
+      if (lost) {
+        // Nothing links now; the restore draws this one (without custom effects).
+        if (options.pick || keyOf(profile) !== bypassed) bypassed = null;
         active = { ...active, profile };
         return Promise.resolve();
       }
-      return new Promise((resolve, reject) => {
-        let linking: Linking | null = null;
-        if (!cache.has(key)) {
-          try {
-            linking = beginProgram(gl, FULLSCREEN_VERTEX, fragmentFor(profile));
-          } catch (error) {
-            reject(error instanceof Error ? error : new Error(String(error)));
-            return;
-          }
-        }
-        pending = { profile, key, linking, resolve, reject };
-      });
+      if (bypassed !== null && !options.pick && keyOf(profile) === bypassed) {
+        return switchTo(withoutCustom(profile)); // a slider or a live colour keeps the bypass
+      }
+      bypassed = null;
+      return switchTo(profile);
+    },
+    onGuard(listener) {
+      guardListeners.add(listener);
+      return () => void guardListeners.delete(listener);
     },
   };
 }

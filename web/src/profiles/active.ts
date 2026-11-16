@@ -9,6 +9,7 @@
 // controller edits in memory and never saves; a pick, the same profile included, starts again
 // from the stored palette. While a pick is pending a colour change is dropped: handing the engine
 // a profile then would cancel the pick, and the swap would discard the colour anyway.
+import { ProfileCompileError, type GuardEvent } from "@djv/engine";
 import { derivePrimary, type Profile } from "@djv/shared";
 import type { ListResult, ProfileResult } from "./api.ts";
 import { BUILTIN_ID, builtinEntry } from "./builtin.ts";
@@ -44,8 +45,11 @@ export interface ActiveDeps {
     get(id: string): Promise<ProfileResult>;
   };
   storage: { load(): string | null; save(id: string): void };
-  /** Hands the profile to the engine; resolves at the swap, rejects when it cannot be prepared. */
-  setProfile(profile: Profile): Promise<void>;
+  /**
+   * Hands the profile to the engine; resolves at the swap, rejects when it cannot be prepared.
+   * `pick`: the person picked it, so custom effects the guard turned off run again (B-03 PD8).
+   */
+  setProfile(profile: Profile, options?: { pick?: boolean }): Promise<void>;
   setDials(dials: Profile["dials"]): void;
   log(id: string): void;
 }
@@ -57,6 +61,8 @@ export interface ActiveProfile {
   setColour(slot: number, value: string): void;
   /** Puts one slot back to its stored colour. */
   resetColour(slot: number): void;
+  /** The engine's guard acted (B-03 SD8): its reason shows until the next successful pick. */
+  guard(event: GuardEvent): void;
   state(): ActiveState;
   subscribe(listener: () => void): () => void;
 }
@@ -71,6 +77,30 @@ const REASONS = {
   unusable: "that profile could not be read; keeping the current look",
   engine: "that profile could not be prepared; keeping the current look",
 } as const;
+
+/** The guard's reasons (B-03 PD8); the panel and every controller show them word for word. */
+const GUARD_REASONS = {
+  slow: "custom effects are off: this look is too heavy for this GPU; pick the profile again to retry",
+  lostCustom:
+    "the graphics context was lost and restored; custom effects are off; pick the profile again to retry",
+  lost: "the graphics context was lost and restored",
+} as const;
+
+function guardReasonOf(event: GuardEvent): string {
+  if (event.kind === "slow") return GUARD_REASONS.slow;
+  return event.customBypassed ? GUARD_REASONS.lostCustom : GUARD_REASONS.lost;
+}
+
+/**
+ * Why the engine refused a profile (B-03 AC21, PD9): the custom effect whose code does not
+ * compile, by its label, never the compiler's text (the reason reaches controllers too).
+ */
+function engineReason(error: unknown): string {
+  const located =
+    error instanceof ProfileCompileError ? error.issues.find((i) => i.effectIndex >= 0) : undefined;
+  if (!located) return REASONS.engine;
+  return `that profile could not be prepared: custom effect "${located.label}" does not compile; keeping the current look`;
+}
 
 export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   const builtin = builtinEntry();
@@ -87,6 +117,8 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   /** The token of the pick in flight, or 0. */
   let picking = 0;
   let reason: string | null = null;
+  /** Kept apart from `reason`: opening the panel clears that, never this (B-03 PD8). */
+  let guardReason: string | null = null;
   let rememberedPicked = false;
   let token = 0;
   const listeners = new Set<() => void>();
@@ -108,7 +140,7 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     activeId: active.id,
     activeName: active.name,
     selectedId: loaded ? active.id : (entries()[0]?.id ?? BUILTIN_ID),
-    reason,
+    reason: reason ?? guardReason,
     loaded,
     palette: [...live],
     storedPalette: [...activeProfile.palette],
@@ -118,10 +150,10 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   /** Switches to `profile` in the engine, then its dials; `false` when the engine refuses. */
   const apply = async (id: string, profile: Profile, mine: number): Promise<boolean> => {
     try {
-      await deps.setProfile(profile);
-    } catch {
+      await deps.setProfile(profile, { pick: true });
+    } catch (error) {
       if (mine === token) {
-        reason = REASONS.engine;
+        reason = engineReason(error);
         emit();
       }
       return false;
@@ -134,6 +166,7 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     activeProfile = profile;
     live = [...profile.palette];
     reason = null;
+    guardReason = null;
     emit();
     return true;
   };
@@ -205,6 +238,10 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     resetColour(slot) {
       const stored = activeProfile.palette[slot];
       if (stored !== undefined) recolour(slot, stored);
+    },
+    guard(event) {
+      guardReason = guardReasonOf(event);
+      emit();
     },
     state,
     subscribe(listener) {

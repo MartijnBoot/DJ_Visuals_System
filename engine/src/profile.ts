@@ -34,7 +34,31 @@ interface EffectOf<T extends string> {
 
 type Slotted<T extends string> = EffectOf<T> & { colourSlot: number };
 
-export type Effect =
+/** A custom effect's named parameter (B-03 SD4). */
+export interface CustomParam {
+  name: string;
+  /** 0 to 1. */
+  value: number;
+}
+
+/** GLSL code as one more link in the chain (B-03 SD1, SD3, SD4, SD12). */
+export interface CustomEffect {
+  type: "custom";
+  /** Unique in the profile. */
+  label: string;
+  /** Base strength, 0 to 1. */
+  amount: number;
+  binding?: Binding;
+  /** Scaled by recognisability (SD12). */
+  abstraction: boolean;
+  /** 0 to 4, in the order the code reads them. */
+  params: CustomParam[];
+  /** A GLSL function body; it only ever reaches `shaderSource`. */
+  code: string;
+}
+
+/** The twelve effects of the library (B-02 SD3). */
+export type BuiltInEffect =
   | EffectOf<"pixelate">
   | EffectOf<"posterise">
   | EffectOf<"smear">
@@ -48,7 +72,10 @@ export type Effect =
   | (EffectOf<"mirror"> & { segments: number })
   | EffectOf<"rgbSplit">;
 
-export type EffectType = Effect["type"];
+export type Effect = BuiltInEffect | CustomEffect;
+
+/** The built-in types only: `custom` is not in the library (B-03 PD5). */
+export type EffectType = BuiltInEffect["type"];
 
 export interface Profile {
   name: string;
@@ -93,9 +120,14 @@ export const PALETTE_SLOTS = 6;
 
 const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
 
-/** SD4: `clamp01(base × (abstraction ? recognisability : 1) + binding × feature × reactivity)`. */
+/**
+ * SD4: `clamp01(base × (abstraction ? recognisability : 1) + binding × feature × reactivity)`.
+ * A custom effect carries its own abstraction flag (B-03 SD12).
+ */
 export function effectStrength(effect: Effect, features: AudioFeatures, dials: Dials): number {
-  const scale = EFFECTS[effect.type].abstraction ? clamp01(dials.recognisability) : 1;
+  const abstraction =
+    effect.type === "custom" ? effect.abstraction : EFFECTS[effect.type].abstraction;
+  const scale = abstraction ? clamp01(dials.recognisability) : 1;
   const base = clamp01(effect.amount) * scale;
   const binding = effect.binding;
   const bound = binding
@@ -235,6 +267,53 @@ export function profileUniforms(
   return u;
 }
 
+/** Custom effects a profile can hold, and so the length of their uniform arrays (B-03 SD4). */
+export const CUSTOM_SLOTS = 12;
+
+/** Parameters a custom effect can have; each slot is a `vec4` (B-03 SD4). */
+const CUSTOM_PARAMS = 4;
+
+export interface CustomUniforms {
+  /** Each custom effect's effective strength, in stack order; the rest 0. */
+  strength: number[];
+  /** Four values per custom effect, in declaration order, unset ones 0. */
+  params: number[];
+  /** Each feature × reactivity (PD1, owner 2026-11-15): at reactivity 0 code hears nothing. */
+  audio: Record<FeatureName, number>;
+}
+
+/** The custom effects' uniforms of a frame (B-03 SD3, SD4, SD12; plan PD1, PD7). */
+export function customUniforms(
+  profile: Profile,
+  features: AudioFeatures,
+  dials: Dials,
+): CustomUniforms {
+  const strength = new Array<number>(CUSTOM_SLOTS).fill(0);
+  const params = new Array<number>(CUSTOM_SLOTS * CUSTOM_PARAMS).fill(0);
+  let slot = 0;
+  for (const effect of profile.effects) {
+    if (effect.type !== "custom" || slot >= CUSTOM_SLOTS) continue;
+    strength[slot] = effectStrength(effect, features, dials);
+    effect.params.slice(0, CUSTOM_PARAMS).forEach((param, i) => {
+      params[slot * CUSTOM_PARAMS + i] = clamp01(param.value);
+    });
+    slot++;
+  }
+  const reactivity = clamp01(dials.reactivity);
+  const heard = (name: FeatureName) => clamp01(features[name]) * reactivity;
+  return {
+    strength,
+    params,
+    audio: {
+      level: heard("level"),
+      low: heard("low"),
+      mid: heard("mid"),
+      high: heard("high"),
+      beat: heard("beat"),
+    },
+  };
+}
+
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object") {
     for (const child of Object.values(value)) deepFreeze(child);
@@ -248,19 +327,21 @@ function deepFreeze<T>(value: T): T {
  * term: block centre, zoom, displace, the source with edges; posterise, smear, brightness,
  * grain, flash. White in slot 1 is B-01's flash, grain and edge colour.
  */
-export const BUILT_IN_PROFILE: Profile = deepFreeze({
-  name: "Built-in",
-  palette: ["#000000", "#ffffff"],
-  dials: { recognisability: 0.3, reactivity: 0.7 },
-  effects: [
-    { type: "edges", amount: 0, binding: { feature: "high", amount: 1 }, colourSlot: 1 },
-    { type: "displace", amount: 0, binding: { feature: "beat", amount: 1 } },
-    { type: "zoom", amount: 0, binding: { feature: "low", amount: 1 } },
-    { type: "posterise", amount: 1 },
-    { type: "smear", amount: 1 },
-    { type: "brightness", amount: 0, binding: { feature: "level", amount: 1 } },
-    { type: "grain", amount: 0, binding: { feature: "high", amount: 1 }, colourSlot: 1 },
-    { type: "flash", amount: 0, binding: { feature: "beat", amount: 1 }, colourSlot: 1 },
-    { type: "pixelate", amount: 1 },
-  ],
-});
+export const BUILT_IN_PROFILE: Omit<Profile, "effects"> & { effects: BuiltInEffect[] } = deepFreeze(
+  {
+    name: "Built-in",
+    palette: ["#000000", "#ffffff"],
+    dials: { recognisability: 0.3, reactivity: 0.7 },
+    effects: [
+      { type: "edges", amount: 0, binding: { feature: "high", amount: 1 }, colourSlot: 1 },
+      { type: "displace", amount: 0, binding: { feature: "beat", amount: 1 } },
+      { type: "zoom", amount: 0, binding: { feature: "low", amount: 1 } },
+      { type: "posterise", amount: 1 },
+      { type: "smear", amount: 1 },
+      { type: "brightness", amount: 0, binding: { feature: "level", amount: 1 } },
+      { type: "grain", amount: 0, binding: { feature: "high", amount: 1 }, colourSlot: 1 },
+      { type: "flash", amount: 0, binding: { feature: "beat", amount: 1 }, colourSlot: 1 },
+      { type: "pixelate", amount: 1 },
+    ],
+  },
+);

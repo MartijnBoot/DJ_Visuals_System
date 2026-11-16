@@ -2,8 +2,11 @@ import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyError } from "fastify";
 import type { Logger } from "./log.ts";
 
-/** A write's body limit (B-02 SD18); the import route sets its own, larger one. */
-export const BODY_LIMIT = 64 * 1024;
+/**
+ * A write's body limit (B-02 SD18, raised by B-03 SD16 so twelve custom effects fit one save);
+ * the import route sets its own, larger one.
+ */
+export const BODY_LIMIT = 128 * 1024;
 
 export function createApp(log: Logger) {
   // Fastify's request id (`reqId`) on every log line belongs to the request (SD17).

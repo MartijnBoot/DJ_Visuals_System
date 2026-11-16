@@ -1,9 +1,10 @@
 // Export and import files (B-02 spec SD7, AC9, AC10; plan T13). The text is `toProfileFile` of
-// the shared package: format version 1 and each profile's name, palette, dials and effects, never
-// an id, revision or timestamp. An imported file is data, never code: it is checked with the
-// shared schema here, before anything is sent, and the server checks it again.
+// the shared package: format version 1 (2 when a profile holds a custom effect, B-03 SD15) and
+// each profile's name, palette, dials and effects, never an id, revision or timestamp. An
+// imported file is data, never JavaScript: it is checked with the shared schema here, before
+// anything is sent, and the server checks it again.
 import {
-  FORMAT_VERSION,
+  isSupportedFormatVersion,
   issuesFrom,
   profileFileSchema,
   toProfileFile,
@@ -88,7 +89,7 @@ export function readImport(text: string): ReadResult {
   if (
     isRecord(parsed) &&
     typeof parsed.formatVersion === "number" &&
-    parsed.formatVersion !== FORMAT_VERSION
+    !isSupportedFormatVersion(parsed.formatVersion)
   ) {
     return { kind: "unsupported_version" };
   }
