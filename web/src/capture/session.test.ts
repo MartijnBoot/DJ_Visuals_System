@@ -498,3 +498,33 @@ describe("camera requests while one is opening (B-04 AC25, PD7)", () => {
     expect(r.getUserMedia).not.toHaveBeenCalled();
   });
 });
+
+describe("the standby for remote audio (B-06 T11, SD7, AC21, AC27)", () => {
+  it("exposes the context once Start has made it", async () => {
+    const r = rig();
+    expect(r.session.context()).toBeNull();
+    await r.session.start({});
+    expect(r.session.context()).toBe(r.contexts[0]);
+  });
+
+  it("opens an input with remember: false and leaves djv.sources byte for byte", async () => {
+    const r = rig();
+    await r.session.start({ audio: { kind: "system" } });
+    const before = r.storage.getItem("djv.sources");
+    expect(before).toContain("system");
+    await r.session.setAudio({ kind: "input", deviceId: "mic-2" }, { remember: false });
+    expect(r.session.state()).toMatchObject({
+      audio: "ok",
+      audioChoice: { kind: "input", deviceId: "mic-2" },
+    });
+    expect(r.live("audio").map((t) => t.deviceId)).toEqual(["mic-2"]);
+    expect(r.storage.getItem("djv.sources")).toBe(before);
+  });
+
+  it("still saves with the default call", async () => {
+    const r = rig();
+    await r.session.start({ audio: { kind: "system" } });
+    await r.session.setAudio({ kind: "input", deviceId: "mic-2" });
+    expect(loadRemembered(r.storage).audio).toEqual({ kind: "input", deviceId: "mic-2" });
+  });
+});

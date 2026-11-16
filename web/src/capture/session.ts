@@ -51,7 +51,13 @@ export interface Session {
   /** Call from the Start click: the context and the media requests need its activation. */
   start(choice: Remembered): Promise<void>;
   setCamera(deviceId: string): Promise<void>;
-  setAudio(choice: AudioChoice): Promise<void>;
+  /**
+   * `remember: false` opens without writing `djv.sources`: the standby input B-06 opens in place
+   * of a System audio share while a remote audio is main (PD2, AC21, AC27).
+   */
+  setAudio(choice: AudioChoice, options?: { remember: boolean }): Promise<void>;
+  /** The AudioContext Start made, for a remote feature source (B-06 PD6); null before Start. */
+  context(): AudioContext | null;
   stop(): void;
   state(): SessionState;
   read(now: number): AudioFeatures;
@@ -232,7 +238,7 @@ export function createSession(deps: SessionDeps): Session {
     setStatus("camera", "ok");
   };
 
-  const openAudio = async (choice: AudioChoice | undefined, anyDevice = false) => {
+  const openAudio = async (choice: AudioChoice | undefined, anyDevice = false, remember = true) => {
     const system = choice?.kind === "system";
     const keep = (e: unknown, systemReason: string) => {
       if (!system)
@@ -277,7 +283,7 @@ export function createSession(deps: SessionDeps): Session {
       ? { kind: "system" }
       : { kind: "input", deviceId: track.getSettings().deviceId ?? "default" };
     wantedAudio = audioChoice;
-    saveRemembered({ audio: audioChoice }, deps.storage);
+    if (remember) saveRemembered({ audio: audioChoice }, deps.storage);
     setStatus("audio", "ok");
   };
 
@@ -374,9 +380,10 @@ export function createSession(deps: SessionDeps): Session {
       latestCamera = null;
       await attempt("camera", () => openCamera(deviceId));
     },
-    async setAudio(choice) {
-      if (started) await attempt("audio", () => openAudio(choice));
+    async setAudio(choice, options = { remember: true }) {
+      if (started) await attempt("audio", () => openAudio(choice, false, options.remember));
     },
+    context: () => context,
     stop() {
       stopped = true;
       if (retryTimer) clearTimeout(retryTimer);
