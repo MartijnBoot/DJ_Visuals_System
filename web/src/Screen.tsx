@@ -11,6 +11,8 @@
 // Remote input (B-06): the page answers each sender's offer (`remote/peers.ts`) and, at the start
 // of each frame, `remote/sources.ts` decides which features and which video element the engine
 // gets — the session's local ones or a sender's — so a loss falls back in the frame it is seen.
+// The panel lists the senders' cameras and the main audio from the sources' facts, and each
+// sender's connection from the page's own peer (PD5); nothing about a peer goes to the server.
 import { createFeatureSource, ZERO_FEATURES } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
 import {
@@ -26,12 +28,15 @@ import { createLatencyWindow } from "../../engine/src/latency.ts";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "./capture/devices.ts";
 import { loadRemembered, type AudioChoice } from "./capture/remembered.ts";
 import { createSession, type Session, type SessionState } from "./capture/session.ts";
+import type { SenderEntry, SenderState } from "./control/ExternalControl.tsx";
 import { createVideo, hasFrame, videoReady } from "./capture/video.ts";
 import { createApplier } from "./control/apply.ts";
 import { openSocket } from "./control/device-link.ts";
 import { createScreenLink, toScreenState } from "./control/screen-link.ts";
+import type { AudioSource } from "./remote/main-audio.ts";
 import { createPeers } from "./remote/peers.ts";
 import { createSources, type Sources } from "./remote/sources.ts";
+import { UNREACHABLE_MS } from "./send/peer.ts";
 import { audioToEngine } from "./features-compat.ts";
 import { startFrameFeed } from "./frame-feed.ts";
 import { Overlay } from "./Overlay.tsx";
@@ -43,6 +48,25 @@ import { loadProfileId, saveProfileId } from "./profiles/remembered.ts";
 import { createWakeLock } from "./wake-lock.ts";
 
 const IDLE: SessionState = { camera: "idle", audio: "idle", video: null, contextState: "none" };
+
+/** What the panel shows of the remote sources (B-06 AC14, SD22). */
+interface PanelRemote {
+  cameras: DeviceOption[];
+  cameraId: string | null;
+  mainAudio: { choice: AudioSource; line: string } | null;
+}
+
+const NO_REMOTE: PanelRemote = { cameras: [], cameraId: null, mainAudio: null };
+
+function panelRemote(sources: Sources, now: number): PanelRemote {
+  const facts = sources.facts(now);
+  const line = sources.audioLine(now);
+  return {
+    cameras: facts.cameras.map(({ deviceId, label }) => ({ deviceId, label })),
+    cameraId: facts.cameraId,
+    mainAudio: facts.mainAudio && line ? { choice: facts.mainAudio.choice, line } : null,
+  };
+}
 
 /** B-06 PD12: a remote audio track reaches Web Audio only while a media element plays it. */
 function attachAudio(stream: MediaStream) {
@@ -100,6 +124,7 @@ export function Screen() {
     audioInputs: [],
   });
   const [remembered] = useState(() => loadRemembered());
+  const [remote, setRemote] = useState<PanelRemote>(NO_REMOTE);
   const [wakeLock] = useState(() => createWakeLock(navigator, document));
   // What the screen's state is built from, read at the start of a frame rather than from React
   // state, whose updates land after it (B-04 PD5).
@@ -173,7 +198,27 @@ export function Screen() {
         sourcesRef.current?.setSenders(list);
       },
     });
-    return { applier, link, peers, senders: () => senders };
+    /** Senders whose peer has been connected since their first offer (PD5). */
+    const reached = new Set<string>();
+    /**
+     * B-06 PD5: a sender's state from this page's peer. Not connected within 10 s of the first
+     * offer, and never before, is "could not reach" (AC13); a lost feed or a dropped peer is
+     * "lost"; the camera drawn is "on screen". No peer and no socket is "lost" too.
+     */
+    const senderState = (entry: SenderEntry): SenderState => {
+      const peer = peers.connection(entry.deviceId);
+      if (!peer) return entry.online ? "connecting" : "lost";
+      if (!peer.connected) {
+        if (reached.has(entry.deviceId)) return "connecting";
+        return Date.now() - peer.firstOfferAt >= UNREACHABLE_MS ? "could not reach" : "connecting";
+      }
+      reached.add(entry.deviceId);
+      const down = peer.state === "disconnected" || peer.state === "failed";
+      if (down || peers.feeds().some((f) => f.deviceId === entry.deviceId && f.lost)) return "lost";
+      const drawn = sourcesRef.current?.analysing(performance.now()).video;
+      return drawn === entry.deviceId ? "on screen" : "connected";
+    };
+    return { applier, link, peers, senders: () => senders, senderState };
   });
   useEffect(() => {
     control.link.start();
@@ -226,7 +271,10 @@ export function Screen() {
       createVideo,
       hasFrame,
       log: (state, label) => console.info("capture", { kind: "audio", state, device: label }),
-      onChange: () => control.link.markDirty(),
+      onChange: () => {
+        control.link.markDirty();
+        setRemote(panelRemote(sources, performance.now()));
+      },
     });
     sources.setSenders(control.senders());
     sourcesRef.current = sources;
@@ -375,13 +423,17 @@ export function Screen() {
           started={started}
           onStart={() => void start()}
           capture={capture}
-          cameraId={started ? capture.cameraId : remembered.cameraId}
+          cameraId={started ? (remote.cameraId ?? capture.cameraId) : remembered.cameraId}
           audioChoice={started ? capture.audioChoice : remembered.audio}
           cameras={devices.cameras}
           audioInputs={devices.audioInputs}
           systemAudio={supportsSystemAudio(navigator.mediaDevices)}
           onCamera={(id) => sourcesRef.current?.setCamera(id)}
           onAudio={(choice: AudioChoice) => void sessionRef.current?.setAudio(choice)}
+          remoteCameras={remote.cameras}
+          mainAudio={remote.mainAudio}
+          onMainAudio={(source) => sourcesRef.current?.setMainAudio(source)}
+          senderState={control.senderState}
           dials={dials}
           onDials={applyDials}
           cap={cap}

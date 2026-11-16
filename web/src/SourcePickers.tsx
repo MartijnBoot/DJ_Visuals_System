@@ -14,6 +14,8 @@ export interface SourcePickersProps {
   cameras: DeviceOption[];
   audioInputs: DeviceOption[];
   systemAudio: boolean;
+  /** B-06 AC14: senders' cameras, listed after the local ones with a remote mark; screen only. */
+  remoteCameras?: readonly DeviceOption[];
   onCamera(deviceId: string): void;
   onAudio(choice: AudioChoice): void;
 }
@@ -69,6 +71,10 @@ export function SourcePickers(props: SourcePickersProps) {
   // change the browser reports (review C3); otherwise the select already shows it and stays mute.
   const systemStopped = props.audioChoice?.kind === "system" && capture.audio === "lost";
   const audio = systemStopped ? "stopped" : audioValue(props.audioChoice);
+  const cameras = [
+    ...props.cameras,
+    ...(props.remoteCameras ?? []).map((d) => ({ ...d, label: `${d.label} (remote)` })),
+  ];
 
   return (
     <>
@@ -82,7 +88,7 @@ export function SourcePickers(props: SourcePickersProps) {
             value={camera}
             onChange={(e) => props.onCamera(e.target.value)}
           >
-            {options(props.cameras, camera, (d) => d, "camera")}
+            {options(cameras, camera, (d) => d, "camera")}
           </select>
         )}
       </Row>
