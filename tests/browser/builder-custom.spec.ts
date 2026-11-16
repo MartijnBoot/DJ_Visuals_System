@@ -247,7 +247,9 @@ test("one character typed into code that compiled disables Save until its compil
   await expect(page.getByTestId("custom-compile-custom-0")).toHaveText("ok");
 });
 
-test("the preview shows its frame time, a number above 0 that changes (AC16)", async ({
+// A steady 60 Hz loop reads "16.7 ms" every time, so "it changes" is shown by making the look
+// heavy: the readout must rise with what the GPU really spends a frame (gate run 5, 2026-11-16).
+test("the preview shows its frame time, above 0, and it rises when the look gets heavy (AC16)", async ({
   page,
   request,
 }) => {
@@ -257,11 +259,22 @@ test("the preview shows its frame time, a number above 0 that changes (AC16)", a
   await expect(frameTime).toHaveText(/^frame \d+\.\d ms$/);
   const read = async () => Number((await frameTime.textContent())!.match(/[\d.]+/)![0]);
   await expect.poll(read).toBeGreaterThan(0);
-  const seen = new Set<number>();
-  await expect
-    .poll(async () => {
-      seen.add(await read());
-      return seen.size;
-    })
-    .toBeGreaterThan(1);
+  const light = await read();
+
+  // 240 samples of the picture before it per pixel: on SwiftShader at the gate's viewport the
+  // preview (363×204) then spends over 100 ms a frame at 100% (120 samples measured about 60 ms,
+  // 2026-11-16), far above the light reading even after the scale steps down.
+  await page.getByTestId("effect-add").selectOption("custom");
+  await page.getByTestId("effect-amount-custom-0").fill("1");
+  await page
+    .getByTestId("custom-code-custom-0")
+    .fill(
+      "vec3 acc = vec3(0.0);\nfor (int i = 0; i < 240; i++) {\n  acc += source(uv + vec2(float(i) * 0.0002, 0.0));\n}\nreturn acc / 240.0;",
+    );
+  await expect(page.getByTestId("custom-compile-custom-0")).toHaveText("ok");
+  // Filling the code scrolls the editor into view and the preview out of it. Chromium does not
+  // hold the frame loop back for a canvas off screen, so its frames stay at 16.7 ms whatever its
+  // shader costs (measured: 600 frames in 10 s at 480 samples). On screen, as a person sees it.
+  await page.getByTestId("preview").scrollIntoViewIfNeeded();
+  await expect.poll(read, { timeout: 15_000 }).toBeGreaterThan(light + 10);
 });
