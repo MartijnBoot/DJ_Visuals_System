@@ -236,7 +236,10 @@ about ≤400 changed source lines (tests do not count) across ≤10 files.
 - **Depends on:** T2
 - **Autonomy note:** file layout inside `tls/` is fixed by the spec's Data section; the rest is
   the builder's. Stop if owner-only file modes cannot be set on Windows in a way a test can
-  observe — record it and ask (SD23 says "where the OS allows").
+  observe — record it and ask (SD23 says "where the OS allows"). **Asked and answered,
+  2026-11-16:** on Windows a `0o600` write reads back `0o666`. Owner accepted the
+  recommendation: keys are written `0o600` everywhere and the mode is asserted on POSIX only
+  (`it.skipIf(win32)`); on Windows the folder's own permissions protect them.
 
 ### T4 — `shared/src/control.ts`: roles, setup messages, remote state
 - **Implements:** AC11, SD6, SD16, SD21, SD22
