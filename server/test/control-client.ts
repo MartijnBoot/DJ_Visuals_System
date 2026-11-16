@@ -1,7 +1,13 @@
 // A `ws` client for the External control tests (B-04 T5 to T7): keeps every message it receives,
-// parsed with the shared schema it is given, and waits on them.
+// parsed with the shared schema it is given, and waits on them. The LAN listener is HTTPS
+// (B-06 T5): its clients trust the test's own root and nothing else (`ca`), so a broken chain
+// fails here.
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { request as httpsRequest } from "node:https";
 import { connect as tcpConnect } from "node:net";
+import { join } from "node:path";
+import { connect as tlsConnect } from "node:tls";
 import type { z } from "zod";
 import WebSocket from "ws";
 
@@ -22,6 +28,45 @@ export interface ConnectOptions {
   origin?: string;
   headers?: Record<string, string>;
   localAddress?: string;
+  /** The only CA a `wss:` connection trusts: the test's own root. */
+  ca?: string | Buffer;
+}
+
+/** The root `DATA_DIR/tls/` holds once External control was switched on (PEM). */
+export const testRoot = (dataDir: string): Buffer => readFileSync(join(dataDir, "tls", "root.crt"));
+
+/**
+ * A request to the LAN listener over TLS, trusting `ca` alone (B-06 T5), as a `Response`: the
+ * same shape `fetch` gives the tests of the plain-HTTP listener before it.
+ */
+export function lanGet(
+  url: string,
+  ca: string | Buffer,
+  init: { method?: string; headers?: Record<string, string>; body?: string } = {},
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const req = httpsRequest(
+      url,
+      { method: init.method ?? "GET", headers: init.headers ?? {}, ca, timeout: 10_000 },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => {
+          const headers = new Headers();
+          for (const [name, value] of Object.entries(res.headers)) {
+            if (value !== undefined)
+              headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+          }
+          const status = res.statusCode ?? 0;
+          const body = status === 204 || status === 304 ? null : Buffer.concat(chunks);
+          resolve(new Response(body, { status, headers }));
+        });
+      },
+    );
+    req.on("timeout", () => req.destroy(new Error("no answer within 10000 ms")));
+    req.on("error", reject);
+    req.end(init.body);
+  });
 }
 
 const opened = new Set<WebSocket>();
@@ -38,10 +83,11 @@ export function closeAll(): void {
 export function connect<T>(
   url: string,
   schema: z.ZodType<T>,
-  { origin, headers, localAddress }: ConnectOptions = {},
+  { origin, headers, localAddress, ca }: ConnectOptions = {},
 ): Promise<Client<T>> {
   const ws = new WebSocket(url, {
     ...(origin === undefined ? {} : { origin }),
+    ...(ca === undefined ? {} : { ca }),
     ...(headers ? { headers } : {}),
     ...(localAddress ? { localAddress } : {}),
   });
@@ -87,23 +133,25 @@ export function connect<T>(
 }
 
 /**
- * Sends a WebSocket upgrade with a raw request target over TCP, bypassing every client's URL
- * handling, and resolves with the first line of the answer ("" if the socket closes first).
+ * Sends a WebSocket upgrade with a raw request target over TCP (over TLS trusting `ca` alone,
+ * when given), bypassing every client's URL handling, and resolves with the first line of the
+ * answer ("" if the socket closes first).
  */
 export function rawUpgrade(
   host: string,
   port: number,
   target: string,
   origin: string,
+  ca?: string | Buffer,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const socket = tcpConnect({ host, port });
+    const socket = ca === undefined ? tcpConnect({ host, port }) : tlsConnect({ host, port, ca });
     let answer = "";
     socket.setTimeout(5000, () => {
       socket.destroy();
       reject(new Error("no answer within 5000 ms"));
     });
-    socket.once("connect", () =>
+    socket.once(ca === undefined ? "connect" : "secureConnect", () =>
       socket.write(
         `GET ${target} HTTP/1.1\r\nHost: ${host}:${port}\r\nOrigin: ${origin}\r\n` +
           "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" +

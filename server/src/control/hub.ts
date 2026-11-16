@@ -65,7 +65,7 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
     devices: pairing.devices(),
     pending: pairing.pending(),
     senders: [],
-    fingerprint: null,
+    fingerprint: lan.fingerprint(),
     ...(error ? { error } : {}),
   });
 

@@ -66,7 +66,7 @@ export function ExternalControl({ view, onAction }: ExternalControlProps) {
   const address = addresses.find((a) => a.address === chosen) ?? store.pick(addresses) ?? null;
   const url =
     status?.on && status.code && address
-      ? `http://${address.address}:${status.port}/control#code=${status.code}`
+      ? `https://${address.address}:${status.port}/control#code=${status.code}`
       : null;
   const qr = useMemo(() => (url ? qrPath(url) : null), [url]);
 

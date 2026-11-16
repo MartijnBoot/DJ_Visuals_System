@@ -37,6 +37,7 @@ const lan: Lan = {
   disable: async () => {},
   isOn: () => true,
   addresses: () => [{ address: "127.0.0.1", name: "test" }],
+  fingerprint: () => null,
 };
 
 const info = vi.fn();

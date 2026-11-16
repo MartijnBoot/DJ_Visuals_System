@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boot, type Booted } from "../src/boot.ts";
 import type { ControlAddress } from "../src/control/addresses.ts";
 import { loadConfig } from "../src/config.ts";
-import { closeAll, connect, refused, type Client } from "./control-client.ts";
+import { closeAll, connect, lanGet, refused, testRoot, type Client } from "./control-client.ts";
 import { freePort, repoRoot } from "./spawn-server.ts";
 
 const PAGE = "<!doctype html><title>control-fixture-page</title>";
@@ -94,7 +94,9 @@ async function act(client: Client<ToScreen>, type: string): Promise<ControlStatu
   return message.status;
 }
 
-const lan = (path: string) => fetch(`http://127.0.0.1:${controlPort}${path}`);
+/** The LAN listener over TLS, trusting this test's own root alone (B-06 T5). */
+const lan = (path: string, init?: Parameters<typeof lanGet>[2]) =>
+  lanGet(`https://127.0.0.1:${controlPort}${path}`, testRoot(join(tmp, "data")), init);
 
 const externalIPv4 = () =>
   Object.values(networkInterfaces())
@@ -130,7 +132,7 @@ describe("switching on (AC3, AC5, PD8)", () => {
       devices: [],
       pending: [],
       senders: [],
-      fingerprint: null,
+      fingerprint: expect.stringMatching(/^[0-9A-F]{16}$/),
     });
     expect(await refused("127.0.0.1", controlPort)).toBe(false);
   });
@@ -167,7 +169,7 @@ describe("switching on (AC3, AC5, PD8)", () => {
       const cors = [...response.headers.keys()].filter((h) => h.startsWith("access-control-"));
       expect(cors, path).toEqual([]);
     }
-    const post = await fetch(`http://127.0.0.1:${controlPort}/api/profiles`, {
+    const post = await lan("/api/profiles", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",

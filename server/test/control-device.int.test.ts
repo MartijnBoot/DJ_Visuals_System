@@ -21,6 +21,7 @@ import {
   connect,
   rawUpgrade,
   refused,
+  testRoot,
   type Client,
   type ConnectOptions,
 } from "./control-client.ts";
@@ -126,12 +127,15 @@ async function statusWhere(pred: (s: ControlStatus) => boolean, from = 0): Promi
   return found!;
 }
 
-const deviceUrl = () => `ws://127.0.0.1:${controlPort}/api/control/device`;
-const deviceOrigin = () => `http://127.0.0.1:${controlPort}`;
+const deviceUrl = () => `wss://127.0.0.1:${controlPort}/api/control/device`;
+const deviceOrigin = () => `https://127.0.0.1:${controlPort}`;
+/** The only CA a device trusts: the root this test's DATA_DIR made at switch-on (B-06 T5). */
+const root = () => testRoot(join(tmp, "data"));
 
 function device(options: ConnectOptions = {}): Promise<Client<ToDevice>> {
   return connect(deviceUrl(), toDeviceSchema, {
     origin: deviceOrigin(),
+    ca: root(),
     headers: { "user-agent": UA },
     ...options,
   });
@@ -184,7 +188,10 @@ describe("the device socket's Origin (AC16)", () => {
   ])("refuses %s with 403", async (_label, origin) => {
     const value = typeof origin === "function" ? origin() : origin;
     await expect(
-      connect(deviceUrl(), toDeviceSchema, value === undefined ? {} : { origin: value }),
+      connect(deviceUrl(), toDeviceSchema, {
+        ca: root(),
+        ...(value === undefined ? {} : { origin: value }),
+      }),
     ).rejects.toThrow("HTTP 403");
   });
 
@@ -285,6 +292,8 @@ describe("approval (AC10, AC11, SD5)", () => {
     if (pending.type !== "pending") throw new Error("not pending");
     helper.client.send({ type: "accept", deviceId: pending.requests[0]!.deviceId });
     await client.find(is("approved"));
+    // Over TLS the two may arrive in separate reads (B-06 T5): wait for both, then check order.
+    await client.find(is("screen"));
     expect(client.messages.slice(1, 3).map((m) => m.type)).toEqual(["approved", "screen"]);
     expect(client.messages[2]).toEqual({ type: "screen", connected: false });
   });
@@ -468,7 +477,7 @@ describe("ending pairings (AC6, AC13, AC14, AC17)", () => {
   });
 
   it("answers 404 to an upgrade whose request target is not a URL, and keeps running (AC5)", async () => {
-    expect(await rawUpgrade("127.0.0.1", controlPort, "http://[", deviceOrigin())).toMatch(
+    expect(await rawUpgrade("127.0.0.1", controlPort, "http://[", deviceOrigin(), root())).toMatch(
       /^HTTP\/1\.1 404 /,
     );
     const a = await waiting();

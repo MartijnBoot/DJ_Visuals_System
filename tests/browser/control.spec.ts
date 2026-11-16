@@ -9,7 +9,7 @@ import {
   type BrowserContext,
   type Page,
 } from "@playwright/test";
-import { startControlServer, type ControlServer } from "./control-server.ts";
+import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-server.ts";
 import { createProfile, twelveEffects, type Stored } from "./fixtures/profiles.ts";
 import { record, recorded, start } from "./helpers.ts";
 
@@ -39,7 +39,7 @@ async function screen(page: Page): Promise<string> {
 }
 
 async function controller(browser: Browser, url: string, viewport = PHONE): Promise<Page> {
-  const context = await browser.newContext({ viewport });
+  const context = await browser.newContext({ viewport, ...LAN_CONTEXT });
   contexts.push(context);
   const phone = await context.newPage();
   await phone.goto(url);

@@ -3,11 +3,14 @@
 // 127.0.0.1, so no real LAN address is ever bound and the server can be closed and booted again
 // on the same ports (T16's restart). Every log line is kept for the privacy checks. Beside it, a
 // device client: a page on the LAN origin that opens the device socket with the browser's own
-// WebSocket, so the Origin is right for free (PD1).
+// WebSocket, so the Origin is right for free (PD1). The LAN listener is HTTPS (B-06 T5): its
+// root is made in this server's temporary DATA_DIR at the first switch-on, and every LAN-side
+// browser context is created with `LAN_CONTEXT` (B-06 PD9) — Chromium has no per-context trust
+// store; the chain itself is proven by Node in `server/test/control-tls.int.test.ts`.
 import type { BrowserContext, Page } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
-import { createServer } from "node:net";
+import { connect as tcpConnect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { boot, type Booted } from "../../server/src/boot.ts";
@@ -26,13 +29,36 @@ const { pino } = createRequire(resolve(root, "server/package.json"))("pino") as 
 
 export const LOOPBACK: ControlAddress = { address: "127.0.0.1", name: "loopback (test)" };
 
+/** Every browser context that opens a LAN page (B-06 PD9). */
+export const LAN_CONTEXT = { ignoreHTTPSErrors: true } as const;
+
+/** True when nothing accepts a TCP connection on 127.0.0.1:`port`. */
+export function lanRefused(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = tcpConnect({ host: "127.0.0.1", port });
+    socket.setTimeout(10_000, () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once("error", () => resolve(true));
+  });
+}
+
 export interface ControlServer {
   port: number;
   controlPort: number;
   /** The screen page's origin, `http://127.0.0.1:PORT`. */
   origin: string;
-  /** The External control listener's origin, `http://127.0.0.1:CONTROL_PORT`. */
+  /** The External control listener's origin, `https://127.0.0.1:CONTROL_PORT` (B-06 T5). */
   lanOrigin: string;
+  /** The server's DATA_DIR (its `tls/` folder holds the root once switched on). */
+  dataDir: string;
+  /** The test root, PEM: exists once External control was switched on. */
+  root(): Buffer;
   /** Every log line so far, parsed. */
   lines: Record<string, unknown>[];
   /** The seam's next answer; `[]` for "no private address". */
@@ -63,6 +89,7 @@ export async function startControlServer(): Promise<ControlServer> {
   while (controlPort === port) controlPort = await freePort();
   const dir = mkdtempSync(join(tmpdir(), "djv-control-"));
   const lines: Record<string, unknown>[] = [];
+  const dataDir = join(dir, "data");
   let addresses: ControlAddress[] = [LOOPBACK];
   let booted: Booted | null = null;
 
@@ -73,7 +100,7 @@ export async function startControlServer(): Promise<ControlServer> {
         LOG_LEVEL: "debug",
         PORT: String(port),
         CONTROL_PORT: String(controlPort),
-        DATA_DIR: join(dir, "data"),
+        DATA_DIR: dataDir,
       }),
       {
         migrationsDir: resolve(root, "server/migrations"),
@@ -98,7 +125,9 @@ export async function startControlServer(): Promise<ControlServer> {
     port,
     controlPort,
     origin: `http://127.0.0.1:${port}`,
-    lanOrigin: `http://127.0.0.1:${controlPort}`,
+    lanOrigin: `https://127.0.0.1:${controlPort}`,
+    dataDir,
+    root: () => readFileSync(join(dataDir, "tls", "root.crt")),
     lines,
     setAddresses: (next) => void (addresses = next),
     close,
@@ -144,7 +173,7 @@ export async function deviceClient(
         ws.onopen = () => resolve();
         ws.onerror = () => reject(new Error("device socket failed"));
       }),
-    `ws://127.0.0.1:${server.controlPort}/api/control/device`,
+    `wss://127.0.0.1:${server.controlPort}/api/control/device`,
   );
   const messages = () => page.evaluate(() => (window as unknown as DeviceWindow).__device.messages);
   return {

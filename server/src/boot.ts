@@ -19,6 +19,7 @@ import { createLogger, type Logger } from "./log.ts";
 import { migrate } from "./migrate.ts";
 import { registerProfiles } from "./profiles/routes.ts";
 import { createProfileStore } from "./profiles/store.ts";
+import { createCertificateStore } from "./tls/store.ts";
 
 export const HOST = "127.0.0.1";
 export const DB_FILE = "djvisuals.sqlite";
@@ -115,20 +116,26 @@ export async function boot(
   // message is dropped with a warn rather than closing the socket (AC33); `ws` closes beyond it.
   // The device socket's is 64 KB (PD1): its own limit is 4 KB.
   const now = () => Date.now();
+  const random = (size: number) => crypto.getRandomValues(new Uint8Array(size));
+  // B-06 SD4, SD23: the local CA under DATA_DIR/tls/, read only when switching on.
+  const certificateStore = createCertificateStore({
+    dir: join(resolve(config.DATA_DIR), "tls"),
+    now,
+    random,
+    log,
+  });
   const deviceSockets = socketServer(64 * 1024);
   const hub: Hub = createHub({
     log,
     controlPort: config.CONTROL_PORT,
     now,
-    pairing: createPairing({
-      now,
-      random: (size) => crypto.getRandomValues(new Uint8Array(size)),
-    }),
+    pairing: createPairing({ now, random }),
     lan: createLan({
       log,
       port: config.CONTROL_PORT,
       ...(paths.staticDir === undefined ? {} : { staticDir: resolve(paths.staticDir) }),
       addresses: paths.controlAddresses ?? defaultControlAddresses,
+      certificates: (addresses) => certificateStore.forAddresses(addresses),
       prepare: (lanApp, { address }) => {
         // Closing this listener waits for every connection, upgraded ones included. The hub ends
         // the sockets it knows (a hello was sent); one still open here never said hello, and
@@ -140,8 +147,9 @@ export async function boot(
         routeUpgrades(lanApp.server, [
           {
             path: DEVICE_SOCKET,
-            // Its own listener's origin only (SD25): the page it served on this address.
-            origins: () => [`http://${address}:${config.CONTROL_PORT}`],
+            // Its own listener's origin only (SD25): the page it served on this address, over
+            // HTTPS (B-06 AC7).
+            origins: () => [`https://${address}:${config.CONTROL_PORT}`],
             wss: deviceSockets,
             onConnection: (socket, request) => {
               sockets.add(socket);
