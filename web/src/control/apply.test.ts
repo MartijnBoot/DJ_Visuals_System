@@ -54,6 +54,7 @@ function rig(started = true) {
     setColour: vi.fn(),
     resetColour: vi.fn(),
     setCamera: vi.fn(),
+    setMainAudio: vi.fn(),
     pick: vi.fn(() => new Promise<void>((r) => (release = r))),
     refresh: vi.fn(),
     started: () => started,
@@ -172,5 +173,26 @@ describe("each control (AC20, AC21, AC24, AC26)", () => {
     await Promise.resolve();
     runFrame(32);
     expect(r.acks).toEqual([[{ deviceId: "d1", seq: 4 }]]);
+  });
+});
+
+describe("B-06 controls (T13, SD8, SD22, AC14, AC20)", () => {
+  it("mainAudio goes to the main-audio choice and is acknowledged", () => {
+    const r = rig();
+    r.applier.receive("d1", { type: "mainAudio", seq: 4, source: "local" });
+    runFrame(16);
+    expect(r.deps.setMainAudio).toHaveBeenCalledWith("local");
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 4 }]]);
+  });
+
+  it("a remote: camera goes to the camera choice like a local one, after Start only", () => {
+    const before = rig(false);
+    before.applier.receive("d1", { type: "camera", seq: 1, deviceId: "remote:d9" });
+    runFrame(16);
+    expect(before.deps.setCamera).not.toHaveBeenCalled();
+    const after = rig();
+    after.applier.receive("d1", { type: "camera", seq: 2, deviceId: "remote:d9" });
+    runFrame(32);
+    expect(after.deps.setCamera).toHaveBeenCalledWith("remote:d9");
   });
 });

@@ -28,5 +28,8 @@ export function chromiumArgs(media: { wav: string; y4m: string }): string[] {
     "--use-fake-ui-for-media-stream",
     `--use-file-for-fake-audio-capture=${media.wav}`,
     `--use-file-for-fake-video-capture=${media.y4m}`,
+    // B-06 PD10: two contexts of this browser are a sender and a screen page on one machine,
+    // reaching each other with host candidates only (no ICE server); loopback may be one.
+    "--allow-loopback-in-peer-connection",
   ];
 }

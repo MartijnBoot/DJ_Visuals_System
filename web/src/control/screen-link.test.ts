@@ -79,6 +79,8 @@ const status = (devices: string[] = []): ControlStatus => ({
 let link: ScreenLink;
 let onControl: Mock<(deviceId: string, control: Control) => void>;
 let onNewDevice: Mock<() => void>;
+let onSetup: Mock<(message: unknown) => void>;
+let onSenders: Mock<(senders: unknown[]) => void>;
 let built: number;
 const latest = () => FakeSocket.all.at(-1)!;
 const types = (s: FakeSocket) => s.sent.map((m) => m.type);
@@ -89,6 +91,8 @@ beforeEach(() => {
   built = 0;
   onControl = vi.fn<(deviceId: string, control: Control) => void>();
   onNewDevice = vi.fn<() => void>();
+  onSetup = vi.fn<(message: unknown) => void>();
+  onSenders = vi.fn<(senders: unknown[]) => void>();
   link = createScreenLink({
     url: "ws://127.0.0.1:8000/api/control/screen",
     connect: () => new FakeSocket(),
@@ -98,6 +102,8 @@ beforeEach(() => {
     },
     onControl,
     onNewDevice,
+    onSetup,
+    onSenders,
   });
   link.start();
 });
@@ -306,5 +312,82 @@ describe("toScreenState (SD5, SD8, AC26)", () => {
     const built = toScreenState({ ...input, capture: { camera: "idle", audio: "idle" } });
     expect(built.cameraId).toBeNull();
     expect(screenStateSchema.safeParse(built).success).toBe(true);
+  });
+});
+
+describe("remote sources (B-06 T13, SD16, SD21, SD22)", () => {
+  const offer = { type: "offer", deviceId: "d3", sdp: "v=0\r\n" } as const;
+  const candidate = {
+    type: "candidate",
+    deviceId: "d3",
+    candidate: "candidate:1 1 udp 1 127.0.0.1 5000 typ host",
+    sdpMid: "0",
+    sdpMLineIndex: 0,
+  } as const;
+
+  it("hands an offer and a candidate to the sources", () => {
+    latest().open();
+    latest().deliver(offer);
+    latest().deliver(candidate);
+    expect(onSetup.mock.calls).toEqual([[offer], [candidate]]);
+  });
+
+  it("hands every status's senders on, so a sender that left closes its peer", () => {
+    latest().open();
+    const sender = {
+      deviceId: "d3",
+      hint: "Chrome on Windows",
+      label: "Device 3",
+      sends: ["audio"] as ("audio" | "video")[],
+      online: true,
+    };
+    latest().deliver({ type: "status", status: { ...status(), senders: [sender] } });
+    latest().deliver({ type: "status", status: status() });
+    expect(onSenders.mock.calls).toEqual([[[sender]], [[]]]);
+  });
+
+  it("relays answer, candidate and stream while open, and says false when not", () => {
+    const answer = { type: "answer", deviceId: "d3", sdp: "v=0\r\n" } as const;
+    expect(link.relay(answer)).toBe(false);
+    latest().open();
+    expect(link.relay(answer)).toBe(true);
+    expect(link.relay({ type: "stream", deviceId: "d3", active: true })).toBe(true);
+    expect(latest().sent).toEqual([answer, { type: "stream", deviceId: "d3", active: true }]);
+  });
+});
+
+describe("toScreenState with remote facts (B-06 T13, AC14, AC27)", () => {
+  it("lists remote cameras after the local ones, the picked remote id, and the main audio", async () => {
+    const storage = { load: () => null, save: () => {} };
+    const { createActiveProfile } = await import("../profiles/active.ts");
+    const active = createActiveProfile({
+      api: {
+        list: async () => ({ ok: true, profiles: [] }),
+        get: async () => ({ ok: false, reason: "x" }),
+      } as never,
+      storage,
+      setProfile: async () => {},
+      setDials: () => {},
+      log: () => {},
+    });
+    const built = toScreenState({
+      profiles: active.state(),
+      dials: { recognisability: 0.4, reactivity: 0.6 },
+      capture: { camera: "ok", audio: "ok", cameraId: "cam-1" },
+      cameras: [{ deviceId: "cam-1", label: "Front" }],
+      started: true,
+      remote: {
+        cameras: [{ deviceId: "remote:d2", label: "Safari on iPhone — Device 2", remote: true }],
+        cameraId: "remote:d2",
+        mainAudio: { choice: "remote", playing: "local", label: "Device 3" },
+      },
+    });
+    expect(built.cameras).toEqual([
+      { deviceId: "cam-1", label: "Front", remote: false },
+      { deviceId: "remote:d2", label: "Safari on iPhone — Device 2", remote: true },
+    ]);
+    expect(built.cameraId).toBe("remote:d2");
+    expect(built.mainAudio).toEqual({ choice: "remote", playing: "local", label: "Device 3" });
+    expect(screenStateSchema.parse(built)).toEqual(built);
   });
 });

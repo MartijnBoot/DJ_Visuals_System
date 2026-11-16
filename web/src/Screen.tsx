@@ -8,6 +8,9 @@
 // control (B-04): the page opens one WebSocket to its own server on load (`control/
 // screen-link.ts`); received controls are applied at the start of the next frame, before the
 // engine draws (`control/apply.ts`), and the page sends its state at most once per frame.
+// Remote input (B-06): the page answers each sender's offer (`remote/peers.ts`) and, at the start
+// of each frame, `remote/sources.ts` decides which features and which video element the engine
+// gets — the session's local ones or a sender's — so a loss falls back in the frame it is seen.
 import { createFeatureSource, ZERO_FEATURES } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
 import {
@@ -21,10 +24,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "./capture/devices.ts";
 import { loadRemembered, type AudioChoice } from "./capture/remembered.ts";
 import { createSession, type Session, type SessionState } from "./capture/session.ts";
-import { createVideo } from "./capture/video.ts";
+import { createVideo, hasFrame, videoReady } from "./capture/video.ts";
 import { createApplier } from "./control/apply.ts";
 import { openSocket } from "./control/device-link.ts";
 import { createScreenLink, toScreenState } from "./control/screen-link.ts";
+import { createPeers } from "./remote/peers.ts";
+import { createSources, type Sources } from "./remote/sources.ts";
 import { audioToEngine } from "./features-compat.ts";
 import { startFrameFeed } from "./frame-feed.ts";
 import { Overlay } from "./Overlay.tsx";
@@ -37,10 +42,25 @@ import { createWakeLock } from "./wake-lock.ts";
 
 const IDLE: SessionState = { camera: "idle", audio: "idle", video: null, contextState: "none" };
 
+/** B-06 PD12: a remote audio track reaches Web Audio only while a media element plays it. */
+function attachAudio(stream: MediaStream) {
+  const element = document.createElement("audio");
+  element.muted = true; // never to the speakers
+  element.srcObject = stream;
+  void element.play().catch((e: unknown) => console.warn("remote audio did not play", e));
+  return {
+    release() {
+      element.pause();
+      element.srcObject = null;
+    },
+  };
+}
+
 export function Screen() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const sessionRef = useRef<Session | null>(null);
+  const sourcesRef = useRef<Sources | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [overlay, setOverlay] = useState(false);
   const [panel, setPanel] = useState(true);
@@ -84,20 +104,49 @@ export function Screen() {
       setDials: (next) => applyDials(next),
       setColour: (slot, value) => active.setColour(slot, value),
       resetColour: (slot) => active.resetColour(slot),
-      setCamera: (deviceId) => void sessionRef.current?.setCamera(deviceId),
+      setCamera: (deviceId) => sourcesRef.current?.setCamera(deviceId),
+      setMainAudio: (source) => sourcesRef.current?.setMainAudio(source),
       pick: (id) => active.pick(id),
       refresh: () => void active.open(),
       started: () => startedRef.current,
+    });
+    // B-06: the senders' labels, for log lines (never a device's own label, SD25).
+    const labels = new Map<string, string>();
+    let senders: Parameters<Sources["setSenders"]>[0] = [];
+    const peers = createPeers({
+      send: (message) => void link.relay(message),
+      now: () => Date.now(),
+      log: (event, deviceId) =>
+        console.info("remote", { event, device: labels.get(deviceId) ?? "unknown" }),
+      onChange: () => link.markDirty(),
     });
     const link = createScreenLink({
       url: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/control/screen`,
       connect: openSocket,
       buildState: () =>
-        toScreenState({ ...facts.current, profiles: active.state(), started: startedRef.current }),
+        toScreenState({
+          ...facts.current,
+          profiles: active.state(),
+          started: startedRef.current,
+          ...(sourcesRef.current ? { remote: sourcesRef.current.facts(performance.now()) } : {}),
+        }),
       onControl: (deviceId, received) => applier.receive(deviceId, received),
       onNewDevice: () => void active.open(), // a controller connecting is a user action (SD22)
+      onSetup: (message) =>
+        message.type === "offer"
+          ? peers.offer(message.deviceId, message.sdp)
+          : peers.candidate(message.deviceId, {
+              candidate: message.candidate,
+              sdpMid: message.sdpMid,
+              sdpMLineIndex: message.sdpMLineIndex,
+            }),
+      onSenders: (list) => {
+        for (const s of list) labels.set(s.deviceId, s.label);
+        senders = list;
+        sourcesRef.current?.setSenders(list);
+      },
     });
-    return { applier, link };
+    return { applier, link, peers, senders: () => senders };
   });
   useEffect(() => {
     control.link.start();
@@ -136,25 +185,44 @@ export function Screen() {
       createFeatureSource,
       moduleUrl: processorUrl,
       createVideo,
+      videoReady, // a camera switch keeps the old picture until the new one's frame (B-06 PD14)
       gestures: document,
       log: (kind, state, reason) => console.info("capture", { kind, state, reason }),
     });
     sessionRef.current = session;
-    let video: HTMLVideoElement | null = null;
-    const unsubscribe = session.subscribe((state) => {
-      setCapture(state);
-      if (state.video !== video) engine.setSource((video = state.video));
+    const sources = createSources({
+      session,
+      peers: control.peers,
+      createFeatureSource,
+      moduleUrl: processorUrl,
+      attachAudio,
+      createVideo,
+      hasFrame,
+      log: (state, label) => console.info("capture", { kind: "audio", state, device: label }),
+      onChange: () => control.link.markDirty(),
     });
+    sources.setSenders(control.senders());
+    sourcesRef.current = sources;
+    const unsubscribe = session.subscribe((state) => setCapture(state));
+    let video: HTMLVideoElement | null = null;
     // Each frame reads the features just before the engine draws with them (frame-feed.ts).
-    // B-04: received controls first, then this frame's acknowledgements and state.
+    // B-04: received controls first, then this frame's acknowledgements and state. B-06: then the
+    // sources decide this frame's video and features, from flags read now.
     const stopFeed = startFrameFeed(
       engine,
-      () => audioToEngine(session.read(performance.now())),
-      () => control.link.flush(control.applier.drain()),
+      () => audioToEngine(sources.read(performance.now())),
+      () => {
+        control.link.flush(control.applier.drain());
+        sources.frame(performance.now());
+        const next = sources.video();
+        if (next !== video) engine.setSource((video = next));
+      },
     );
     return () => {
       stopFeed();
       unsubscribe();
+      sources.stop();
+      sourcesRef.current = null;
       stopGuard();
       session.stop();
       engine.stop();
@@ -190,6 +258,7 @@ export function Screen() {
     if (!session) return;
     setStarted(true);
     const capturing = session.start(remembered); // within the click: the context and requests need it
+    sourcesRef.current?.start(); // the context exists now: remote audio can be analysed (B-06 SD17)
     void wakeLock.hold();
     void active.open(); // Start is a user action: the first profile request (B-02 PD1)
     await capturing;
@@ -219,7 +288,7 @@ export function Screen() {
   const stats = useCallback(() => engineRef.current?.stats() ?? null, []);
   const latency = useCallback(() => engineRef.current?.latency() ?? null, []);
   const lockState = useCallback(() => wakeLock.state(), [wakeLock]);
-  const read = useCallback((now: number) => sessionRef.current?.read(now) ?? ZERO_FEATURES, []);
+  const read = useCallback((now: number) => sourcesRef.current?.read(now) ?? ZERO_FEATURES, []);
 
   return (
     <>
@@ -257,7 +326,7 @@ export function Screen() {
           cameras={devices.cameras}
           audioInputs={devices.audioInputs}
           systemAudio={supportsSystemAudio(navigator.mediaDevices)}
-          onCamera={(id) => void sessionRef.current?.setCamera(id)}
+          onCamera={(id) => sourcesRef.current?.setCamera(id)}
           onAudio={(choice: AudioChoice) => void sessionRef.current?.setAudio(choice)}
           dials={dials}
           onDials={applyDials}
