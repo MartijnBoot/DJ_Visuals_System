@@ -536,16 +536,23 @@ dev machine.
   Code session put a painting in `inspiration/starry/`, run `/profile starry`. Expect
   `profiles/starry.json`, `profiles/starry.md`, stills under `profiles/.check/`, and `git
   status` showing only the two files.
+  **Done 2026-11-16, passed:** `/profile` run on Van Gogh's _The Starry Night_ under the slug
+  `starry-night` (painting in `inspiration/starry-night/`, not committed). `profile:check`
+  compiled it and wrote the nine stills; `git status` showed only `profiles/starry-night.json`
+  and `profiles/starry-night.md`, committed as the first authored profile.
 - **H2 — after T12** (Verification 3, 4). `pnpm start`, `/builder`, import `profiles/starry.json`;
   move a parameter, edit a number, break and fix the code, save. Ask the agent for a change,
   import again, choose Replace: same id, and the screen page selects it after a reload.
+  **Done 2026-11-16, passed** (reported by the owner).
 - **H3 — after T9** (Verification 5, 6). On `/` with the real camera and a track: the look runs;
   recognisability with and without the abstraction flag; a strobing profile pulses and
   `profile:check` reported clipping. Judge PD2 and PD4 here: a strobe in the room, a cut into a
   custom profile.
+  **Done 2026-11-16, passed** (reported by the owner); PD2 and PD4 stand as built.
 - **H4 — after T9** (Verification 7; AC11 and AC12 on the real GPU). A far too heavy profile: the
   scale steps to 50%, the custom effects go off, panel and a paired controller say why, a
   re-pick retries. If the GPU watchdog fires instead, note whether the picture returns.
+  **Done 2026-11-16, passed** (reported by the owner).
 - **H5 — after T17** (Verification 8). Push; CI runs the gate. Pushing, the PR and the merge are
   the owner's.
 
