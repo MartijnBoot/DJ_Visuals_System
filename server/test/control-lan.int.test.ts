@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { boot, type Booted } from "../src/boot.ts";
 import type { ControlAddress } from "../src/control/addresses.ts";
 import { loadConfig } from "../src/config.ts";
-import { closeAll, connect, refused, type Client } from "./control-client.ts";
+import { closeAll, connect, lanGet, refused, testRoot, type Client } from "./control-client.ts";
 import { freePort, repoRoot } from "./spawn-server.ts";
 
 const PAGE = "<!doctype html><title>control-fixture-page</title>";
@@ -94,7 +94,9 @@ async function act(client: Client<ToScreen>, type: string): Promise<ControlStatu
   return message.status;
 }
 
-const lan = (path: string) => fetch(`http://127.0.0.1:${controlPort}${path}`);
+/** The LAN listener over TLS, trusting this test's own root alone (B-06 T5). */
+const lan = (path: string, init?: Parameters<typeof lanGet>[2]) =>
+  lanGet(`https://127.0.0.1:${controlPort}${path}`, testRoot(join(tmp, "data")), init);
 
 const externalIPv4 = () =>
   Object.values(networkInterfaces())
@@ -129,6 +131,8 @@ describe("switching on (AC3, AC5, PD8)", () => {
       code: expect.stringMatching(/^[A-Z2-9]{6}$/),
       devices: [],
       pending: [],
+      senders: [],
+      fingerprint: expect.stringMatching(/^[0-9A-F]{16}$/),
     });
     expect(await refused("127.0.0.1", controlPort)).toBe(false);
   });
@@ -140,6 +144,11 @@ describe("switching on (AC3, AC5, PD8)", () => {
     expect(page.status).toBe(200);
     expect(page.headers.get("content-type")).toMatch(/text\/html/);
     expect(await page.text()).toContain("control-fixture-page");
+    // B-06 T18: the sending page is the same built page.
+    const send = await lan("/send");
+    expect(send.status).toBe(200);
+    expect(send.headers.get("content-type")).toMatch(/text\/html/);
+    expect(await send.text()).toContain("control-fixture-page");
     const asset = await lan("/assets/app-1234.js");
     expect(asset.status).toBe(200);
     expect(await asset.text()).toContain("console.log");
@@ -159,13 +168,14 @@ describe("switching on (AC3, AC5, PD8)", () => {
       "/assets/nope.js",
       "/assets/../index.html",
       "/control/x",
+      "/send/x",
     ]) {
       const response = await lan(path);
       expect(response.status, path).toBe(404);
       const cors = [...response.headers.keys()].filter((h) => h.startsWith("access-control-"));
       expect(cors, path).toEqual([]);
     }
-    const post = await fetch(`http://127.0.0.1:${controlPort}/api/profiles`, {
+    const post = await lan("/api/profiles", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
@@ -182,10 +192,11 @@ describe("switching on (AC3, AC5, PD8)", () => {
     expect((await lan("/control")).status).toBe(200);
   });
 
-  it("under --api-only answers 404 to /control and /assets/*", async () => {
+  it("under --api-only answers 404 to /control, /send and /assets/*", async () => {
     await start(() => [LOOPBACK], null);
     expect((await act(await screen(), "enable")).on).toBe(true);
     expect((await lan("/control")).status).toBe(404);
+    expect((await lan("/send")).status).toBe(404);
     expect((await lan("/assets/app-1234.js")).status).toBe(404);
   });
 });
@@ -203,6 +214,8 @@ describe("switching off (AC6)", () => {
       code: null,
       devices: [],
       pending: [],
+      senders: [],
+      fingerprint: null,
     });
     expect(await refused("127.0.0.1", controlPort)).toBe(true);
   });

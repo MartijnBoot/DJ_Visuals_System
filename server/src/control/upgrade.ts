@@ -3,7 +3,7 @@
 // names is 404 and a foreign or missing `Origin` is 403, both before any handshake; everything
 // after the handshake (framing, masking, ping, close) is `ws`'s. WebSockets are not covered by
 // CORS, so without the Origin check any page open in the browser could talk to these sockets.
-import type { IncomingMessage, Server } from "node:http";
+import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 
@@ -26,7 +26,15 @@ const refuse = (socket: Duplex, status: 403 | 404) => {
 export const socketServer = (maxPayload: number) =>
   new WebSocketServer({ noServer: true, maxPayload });
 
-export function routeUpgrades(server: Server, routes: readonly UpgradeRoute[]): void {
+/** An HTTP or HTTPS server: both emit `upgrade` (B-06 T5: the LAN listener is HTTPS). */
+export interface UpgradeSource {
+  on(
+    event: "upgrade",
+    listener: (request: IncomingMessage, socket: Duplex, head: Buffer) => void,
+  ): unknown;
+}
+
+export function routeUpgrades(server: UpgradeSource, routes: readonly UpgradeRoute[]): void {
   server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on("error", () => socket.destroy());
     // A request target Node's parser accepts can still fail URL parsing; thrown here it would

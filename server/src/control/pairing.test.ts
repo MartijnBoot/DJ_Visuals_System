@@ -100,7 +100,12 @@ describe("requests, approval and rejection (SD4, SD18, AC10)", () => {
 
   it("a right code waits, with the hint and a sequence label", () => {
     const device = waiting();
-    expect(device).toEqual({ deviceId: expect.any(String), hint: HINT, label: "Device 1" });
+    expect(device).toEqual({
+      deviceId: expect.any(String),
+      hint: HINT,
+      label: "Device 1",
+      sends: [],
+    });
     expect(pairing.pending()).toEqual([device]);
     expect(waiting(OTHER_IP).label).toBe("Device 2");
   });
@@ -249,5 +254,128 @@ describe("the limits (SD21, AC15)", () => {
     expect(pairing.accept(b.deviceId)).toEqual({ kind: "refused", reason: "too_many" });
     expect(pairing.pending()).toEqual([]);
     expect(pairing.devices()).toHaveLength(8);
+  });
+});
+
+describe("roles and the sender limits (B-06 T7, SD6, SD8, SD12, SD15, AC8, AC10)", () => {
+  beforeEach(() => pairing.enable());
+  let ip = 0;
+  /** Each request from its own address, as each device is. */
+  const nextIp = () => `192.168.2.${++ip}`;
+
+  function requestAs(sends: ("video" | "audio")[]) {
+    return pairing.request(nextIp(), pairing.code()!, HINT, sends);
+  }
+  function senderWaiting(sends: ("video" | "audio")[]) {
+    const result = requestAs(sends);
+    if (result.kind !== "waiting") throw new Error(`request gave ${JSON.stringify(result)}`);
+    return result.device;
+  }
+  function sender(sends: ("video" | "audio")[]) {
+    const device = senderWaiting(sends);
+    const result = pairing.accept(device.deviceId);
+    if (result.kind !== "approved") throw new Error(`accept gave ${JSON.stringify(result)}`);
+    return { device, key: result.key };
+  }
+  const controller = () => {
+    const device = waiting(nextIp());
+    expect(pairing.accept(device.deviceId).kind).toBe("approved");
+    return device;
+  };
+
+  it("stores the role on the entry; a controller's is empty", () => {
+    expect(senderWaiting(["video", "audio"]).sends).toEqual(["video", "audio"]);
+    expect(waiting(nextIp()).sends).toEqual([]);
+    expect(pairing.pending().map((d) => d.sends)).toEqual([["video", "audio"], []]);
+  });
+
+  it("lists controllers in devices() and senders in senders(); sendsOf names the role", () => {
+    const c = controller();
+    const s = sender(["audio"]);
+    expect(pairing.devices().map((d) => d.deviceId)).toEqual([c.deviceId]);
+    expect(pairing.senders().map((d) => d.deviceId)).toEqual([s.device.deviceId]);
+    expect(pairing.sendsOf(s.device.deviceId)).toEqual(["audio"]);
+    expect(pairing.sendsOf(c.deviceId)).toEqual([]);
+    expect(pairing.sendsOf("dnone")).toBeNull();
+  });
+
+  it("resume returns the role", () => {
+    const deviceIp = nextIp();
+    const result = pairing.request(deviceIp, pairing.code()!, HINT, ["video"]);
+    if (result.kind !== "waiting") throw new Error("not waiting");
+    const accepted = pairing.accept(result.device.deviceId);
+    if (accepted.kind !== "approved") throw new Error("not approved");
+    expect(pairing.resume(deviceIp, accepted.key)).toEqual({
+      kind: "ok",
+      device: expect.objectContaining({ sends: ["video"] }),
+    });
+  });
+
+  it("one audio sender approved → a second request is audio_taken", () => {
+    sender(["audio"]);
+    expect(requestAs(["audio"])).toEqual({ kind: "refused", reason: "audio_taken" });
+    expect(requestAs(["video", "audio"])).toEqual({ kind: "refused", reason: "audio_taken" });
+    expect(requestAs(["video"]).kind).toBe("waiting");
+  });
+
+  it("two pending audio requests: the second accept is audio_taken", () => {
+    const first = senderWaiting(["audio"]);
+    const second = senderWaiting(["audio"]);
+    expect(pairing.accept(first.deviceId).kind).toBe("approved");
+    expect(pairing.accept(second.deviceId)).toEqual({ kind: "refused", reason: "audio_taken" });
+    expect(pairing.pending()).toEqual([]);
+  });
+
+  it("four video senders → the fifth is too_many, at request and at accept", () => {
+    const waitingFifth = senderWaiting(["video"]);
+    for (let i = 0; i < 4; i += 1) sender(["video"]);
+    expect(requestAs(["video"])).toEqual({ kind: "refused", reason: "too_many" });
+    expect(pairing.accept(waitingFifth.deviceId)).toEqual({ kind: "refused", reason: "too_many" });
+  });
+
+  it("eight controllers and four video senders and an audio sender coexist", () => {
+    for (let i = 0; i < 8; i += 1) controller();
+    for (let i = 0; i < 4; i += 1) sender(["video"]);
+    sender(["audio"]);
+    expect(pairing.devices()).toHaveLength(8);
+    expect(pairing.senders()).toHaveLength(5);
+    expect(pairing.request(nextIp(), pairing.code()!, HINT)).toEqual({
+      kind: "refused",
+      reason: "too_many",
+    });
+  });
+
+  it("a video and audio device counts in both limits", () => {
+    sender(["video", "audio"]);
+    expect(requestAs(["audio"])).toEqual({ kind: "refused", reason: "audio_taken" });
+    for (let i = 0; i < 3; i += 1) sender(["video"]);
+    expect(requestAs(["video"])).toEqual({ kind: "refused", reason: "too_many" });
+  });
+
+  it("audio_taken wins over too_many when both apply", () => {
+    sender(["video", "audio"]);
+    for (let i = 0; i < 3; i += 1) sender(["video"]);
+    expect(requestAs(["video", "audio"])).toEqual({ kind: "refused", reason: "audio_taken" });
+  });
+
+  it("the 4 pending places are shared by every role", () => {
+    senderWaiting(["video"]);
+    senderWaiting(["audio"]);
+    waiting(nextIp());
+    waiting(nextIp());
+    expect(requestAs(["video"])).toEqual({ kind: "refused", reason: "too_many" });
+  });
+
+  it("a disconnected audio sender frees the place", () => {
+    const { device } = sender(["audio"]);
+    expect(pairing.disconnect(device.deviceId)).toBe(true);
+    expect(requestAs(["audio"]).kind).toBe("waiting");
+  });
+
+  it("newCode ends senders too", () => {
+    const { device, key } = sender(["video"]);
+    expect(pairing.newCode()).toContain(device.deviceId);
+    expect(pairing.senders()).toEqual([]);
+    expect(pairing.resume("192.168.2.1", key)).toEqual({ kind: "refused", reason: "ended" });
   });
 });

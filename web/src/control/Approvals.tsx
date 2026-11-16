@@ -1,7 +1,8 @@
 // Pending approval requests on a controller (B-04 spec SD18, AC8, AC10): each with its device hint
 // and sequence label, Accept and Reject. VJ mode lists them inline; DJ mode shows a "1 waiting"
 // badge that opens the same list as a prompt. A device never sees its own request here: it is
-// not approved while it waits.
+// not approved while it waits. A sender's request names its role (B-06 AC8): "<hint> — Device n
+// wants to send video" (or "audio", "video and audio").
 import type { DeviceEntry } from "@djv/shared";
 import { useEffect, useRef } from "react";
 import { styles } from "./styles.ts";
@@ -13,13 +14,20 @@ export interface ApprovalsProps {
   onReject(deviceId: string): void;
 }
 
+/** What a request reads: a controller's hint and label, a sender's with the role (B-06 AC8). */
+export function requestText(entry: Pick<DeviceEntry, "hint" | "label" | "sends">): string {
+  if (entry.sends.length === 0) return `${entry.hint} · ${entry.label}`;
+  const role = (["video", "audio"] as const).filter((k) => entry.sends.includes(k)).join(" and ");
+  return `${entry.hint} — ${entry.label} wants to send ${role}`;
+}
+
 export function ApprovalList({ pending, disabled, onAccept, onReject }: ApprovalsProps) {
   return (
     <ul data-testid="approvals" style={{ ...styles.list, display: "grid", gap: 8 }}>
       {pending.map((entry) => (
         <li key={entry.deviceId} data-device-id={entry.deviceId} style={styles.request}>
-          <span style={{ flex: "1 1 160px" }}>
-            {entry.hint} · {entry.label}
+          <span data-testid="approval-text" style={{ flex: "1 1 160px" }}>
+            {requestText(entry)}
           </span>
           <span style={{ display: "flex", gap: 8 }}>
             <button

@@ -1,6 +1,17 @@
 // B-04 (spec, Data): what External control keeps in browser storage.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ADDRESS_KEY, addressStore, KEY_KEY, keyStore, MODE_KEY, modeStore } from "./remembered.ts";
+import {
+  ADDRESS_KEY,
+  addressStore,
+  KEY_KEY,
+  keyStore,
+  MODE_KEY,
+  modeStore,
+  SEND_CHOICE_KEY,
+  SEND_KEY_KEY,
+  sendChoiceStore,
+  sendKeyStore,
+} from "./remembered.ts";
 
 function memory() {
   const map = new Map<string, string>();
@@ -118,5 +129,55 @@ describe("the controller's mode (djv.controlMode, SD9, AC42)", () => {
     expect(modeStore(storage).initial(1024)).toBe("vj");
     expect(modeStore(broken).initial(390)).toBe("dj");
     expect(() => modeStore(broken).save("vj")).not.toThrow();
+  });
+});
+
+describe("a sender's key and choice (B-06 T17, SD15, Data)", () => {
+  it("keeps the sender's key under djv.sendKey, apart from the controller's", () => {
+    const storage = memory();
+    expect(SEND_KEY_KEY).toBe("djv.sendKey");
+    const store = sendKeyStore(storage);
+    store.save("AAAAAAAAAAAAAAAAAAAAAA");
+    expect(storage.map.get("djv.sendKey")).toBe("AAAAAAAAAAAAAAAAAAAAAA");
+    expect(keyStore(storage).load()).toBeNull();
+    store.clear();
+    expect(store.load()).toBeNull();
+  });
+
+  it("remembers what it sends and from which devices under djv.sendChoice", () => {
+    const storage = memory();
+    expect(SEND_CHOICE_KEY).toBe("djv.sendChoice");
+    const store = sendChoiceStore(storage);
+    expect(store.load()).toBeNull();
+    const choice = {
+      video: true,
+      audio: true,
+      cameraId: "cam-back",
+      audioSource: { kind: "system" as const },
+    };
+    store.save(choice);
+    expect(store.load()).toEqual(choice);
+    store.save({ video: false, audio: true, audioSource: { kind: "input", deviceId: "mic-2" } });
+    expect(store.load()).toEqual({
+      video: false,
+      audio: true,
+      audioSource: { kind: "input", deviceId: "mic-2" },
+    });
+  });
+
+  it("reads anything else as nothing remembered, and never throws", () => {
+    const storage = memory();
+    for (const bad of [
+      "{",
+      "[]",
+      '{"video":"yes","audio":true}',
+      '{"video":true}',
+      '{"video":true,"audio":false,"audioSource":{"kind":"x"}}',
+    ]) {
+      storage.map.set("djv.sendChoice", bad);
+      expect(sendChoiceStore(storage).load()).toBeNull();
+    }
+    expect(sendChoiceStore(broken).load()).toBeNull();
+    expect(() => sendChoiceStore(broken).save({ video: true, audio: false })).not.toThrow();
   });
 });

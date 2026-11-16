@@ -40,6 +40,11 @@ export interface SessionDeps {
   ) => Promise<FeatureSource>;
   moduleUrl: string;
   createVideo: (stream: MediaStream) => HTMLVideoElement;
+  /**
+   * Resolves once a new camera's element has its first frame (at most 2 s, B-06 PD14); the old
+   * camera stays open and on screen until then. Default: at once.
+   */
+  videoReady?: (video: HTMLVideoElement) => Promise<void>;
   /** Where a click to resume a suspended context is heard (the document). */
   gestures: Pick<EventTarget, "addEventListener" | "removeEventListener">;
   storage?: Pick<Storage, "getItem" | "setItem">;
@@ -51,7 +56,19 @@ export interface Session {
   /** Call from the Start click: the context and the media requests need its activation. */
   start(choice: Remembered): Promise<void>;
   setCamera(deviceId: string): Promise<void>;
-  setAudio(choice: AudioChoice): Promise<void>;
+  /**
+   * `remember: false` opens without writing `djv.sources`: the standby input B-06 opens in place
+   * of a System audio share while a remote audio is main (PD2, AC21, AC27).
+   */
+  setAudio(choice: AudioChoice, options?: { remember: boolean }): Promise<void>;
+  /**
+   * While a remote audio is main (B-06 PD2, AC21): when the wanted local audio is System audio —
+   * running, still being picked at Start, or cancelled — the default input takes its place,
+   * opened after any running request and never remembered. A chosen input stays as it is.
+   */
+  inputStandby(): Promise<void>;
+  /** The AudioContext Start made, for a remote feature source (B-06 PD6); null before Start. */
+  context(): AudioContext | null;
   stop(): void;
   state(): SessionState;
   read(now: number): AudioFeatures;
@@ -97,6 +114,8 @@ export function createSession(deps: SessionDeps): Session {
   let cameraId: string | undefined;
   let audioChoice: AudioChoice | undefined;
   let wantedAudio: AudioChoice | undefined;
+  /** Whether the running audio was opened to be remembered: its retries keep that (PD2). */
+  let rememberAudio = true;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   const state = (): SessionState => {
@@ -225,14 +244,18 @@ export function createSession(deps: SessionDeps): Session {
     }
     const track = stream.getVideoTracks()[0];
     if (stopped || !track) return stopTracks(stream);
+    const next = deps.createVideo(stream);
+    // The old camera keeps running and on screen until the new one has a frame (AC16).
+    await (deps.videoReady?.(next) ?? Promise.resolve());
+    if (stopped) return stopTracks(stream);
     hold("camera", stream, track);
-    video = deps.createVideo(stream);
+    video = next;
     cameraId = track.getSettings().deviceId ?? id;
     saveRemembered({ cameraId }, deps.storage);
     setStatus("camera", "ok");
   };
 
-  const openAudio = async (choice: AudioChoice | undefined, anyDevice = false) => {
+  const openAudio = async (choice: AudioChoice | undefined, anyDevice = false, remember = true) => {
     const system = choice?.kind === "system";
     const keep = (e: unknown, systemReason: string) => {
       if (!system)
@@ -277,7 +300,8 @@ export function createSession(deps: SessionDeps): Session {
       ? { kind: "system" }
       : { kind: "input", deviceId: track.getSettings().deviceId ?? "default" };
     wantedAudio = audioChoice;
-    saveRemembered({ audio: audioChoice }, deps.storage);
+    rememberAudio = remember;
+    if (remember) saveRemembered({ audio: audioChoice }, deps.storage);
     setStatus("audio", "ok");
   };
 
@@ -308,7 +332,7 @@ export function createSession(deps: SessionDeps): Session {
     }
     if (retryable("audio")) {
       log("audio", "retry");
-      tasks.push(attempt("audio", () => openAudio(wantedAudio)));
+      tasks.push(attempt("audio", () => openAudio(wantedAudio, false, rememberAudio)));
     }
     await Promise.all(tasks);
   };
@@ -374,9 +398,16 @@ export function createSession(deps: SessionDeps): Session {
       latestCamera = null;
       await attempt("camera", () => openCamera(deviceId));
     },
-    async setAudio(choice) {
-      if (started) await attempt("audio", () => openAudio(choice));
+    async setAudio(choice, options = { remember: true }) {
+      if (started) await attempt("audio", () => openAudio(choice, false, options.remember));
     },
+    async inputStandby() {
+      if (!started) return;
+      while (running.audio) await running.audio.catch(() => {});
+      if (wantedAudio?.kind !== "system") return;
+      await attempt("audio", () => openAudio(undefined, false, false));
+    },
+    context: () => context,
     stop() {
       stopped = true;
       if (retryTimer) clearTimeout(retryTimer);

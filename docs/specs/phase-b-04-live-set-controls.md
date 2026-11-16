@@ -132,7 +132,8 @@ The owner's answers from the interview (2026-11-14), then defaults marked as suc
   code gets nothing without an approval (SD4); a sniffed session key replayed from another IP is
   refused. A device whose IP changes must be accepted again. Remaining, accepted risk: a sniffer
   on the same network who also spoofs an approved device's IP can send controls. HTTPS is
-  decided once in B-06, which needs it for remote cameras.
+  decided once in B-06, which needs it for remote cameras — closed by B-06 SD13
+  (`docs/specs/phase-b-06-remote-input-devices.md`).
 - **SD16 — The channel is a WebSocket through `@fastify/websocket`.** Two new server
   dependencies (`@fastify/websocket` and `ws`), approved by approving this spec under the
   conditions in "Dependencies". This is the SDR's "control WebSocket" as written.

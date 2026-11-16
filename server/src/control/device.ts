@@ -8,23 +8,34 @@
 import {
   DEVICE_RATE_PER_SECOND,
   deviceMessageSchema,
-  MAX_DEVICE_MESSAGE,
   type Control,
+  type DeviceMessage,
+  type SendKind,
 } from "@djv/shared";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
 import type { Logger } from "../log.ts";
-import { receive } from "./channel.ts";
+import { deviceMaxBytes, receive } from "./channel.ts";
 import { hint } from "./hint.ts";
 
 /** What a device socket asks of the hub. */
 export interface DeviceHub {
   /** A code presented: returns the new request's id, or null when refused (the hub answers). */
-  request(socket: WebSocket, ip: string, code: string, hint: string): string | null;
+  request(
+    socket: WebSocket,
+    ip: string,
+    code: string,
+    hint: string,
+    sends: readonly SendKind[],
+  ): string | null;
   /** A key presented: returns the device's id, or null when refused (the hub answers). */
   resume(socket: WebSocket, ip: string, key: string): string | null;
   /** True while `socket` is the approved socket of `deviceId`. */
   isApproved(deviceId: string, socket: WebSocket): boolean;
+  /** What an approved device sends; empty for a controller, null for none (B-06). */
+  sendsOf(deviceId: string): readonly SendKind[] | null;
+  /** A sender's offer or candidate, for the target screen (B-06 SD16). */
+  setup(deviceId: string, message: Extract<DeviceMessage, { type: "offer" | "candidate" }>): void;
   control(deviceId: string, control: Control): void;
   accept(deviceId: string): void;
   reject(deviceId: string): void;
@@ -53,7 +64,7 @@ export function attachDevice(
 
   receive(socket, {
     schema: deviceMessageSchema,
-    maxBytes: MAX_DEVICE_MESSAGE,
+    maxBytes: deviceMaxBytes,
     ratePerSecond: DEVICE_RATE_PER_SECOND,
     now,
     log,
@@ -64,14 +75,22 @@ export function attachDevice(
         greeted = true;
         deviceId =
           message.code !== undefined
-            ? hub.request(socket, ip, message.code, deviceHint)
+            ? hub.request(socket, ip, message.code, deviceHint, message.sends ?? [])
             : hub.resume(socket, ip, message.key!);
         return;
       }
       if (deviceId === null || !hub.isApproved(deviceId, socket)) return; // AC34
+      if (message.type === "hello") return;
+      // B-06 SD6, AC9: a sender may send only setup messages, a controller never.
+      const sender = (hub.sendsOf(deviceId) ?? []).length > 0;
+      const setup = message.type === "offer" || message.type === "candidate";
+      if (sender !== setup) {
+        return log.warn({ socket: "device", type: message.type }, "control message dropped");
+      }
       switch (message.type) {
-        case "hello":
-          return;
+        case "offer":
+        case "candidate":
+          return hub.setup(deviceId, message);
         case "accept":
           return hub.accept(message.deviceId);
         case "reject":

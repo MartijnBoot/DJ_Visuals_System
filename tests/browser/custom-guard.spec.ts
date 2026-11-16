@@ -3,7 +3,7 @@
 // a lost WebGL context comes back drawing. Profiles are stored through the real API and picked
 // in the real panel; the context is lost through `WEBGL_lose_context`.
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { startControlServer } from "./control-server.ts";
+import { LAN_CONTEXT, startControlServer } from "./control-server.ts";
 import { createProfile, deleteAll, type Definition } from "./fixtures/profiles.ts";
 import { expectCanvasChanging, near, patch, record, start } from "./helpers.ts";
 
@@ -63,7 +63,10 @@ async function pairedController(page: Page, browser: Browser): Promise<Page> {
   await page.getByTestId("control-switch").click();
   await expect(page.getByTestId("control-switch")).toBeChecked();
   const url = (await page.getByTestId("control-url").textContent())!;
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    ...LAN_CONTEXT,
+  });
   const phone = await context.newPage();
   await phone.goto(url);
   await expect(phone.getByTestId("link-line")).toHaveText("Waiting for approval");

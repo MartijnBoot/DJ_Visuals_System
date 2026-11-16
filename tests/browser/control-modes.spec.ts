@@ -9,7 +9,7 @@ import {
   type BrowserContext,
   type Page,
 } from "@playwright/test";
-import { startControlServer, type ControlServer } from "./control-server.ts";
+import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-server.ts";
 import { createProfile, flat, type Definition, type Stored } from "./fixtures/profiles.ts";
 import { meanRgb, pixels } from "./helpers.ts";
 
@@ -45,7 +45,7 @@ async function controller(
   url: string,
   options: { viewport?: { width: number; height: number }; userAgent?: string } = {},
 ): Promise<Page> {
-  const context = await browser.newContext({ viewport: TABLET, ...options });
+  const context = await browser.newContext({ viewport: TABLET, ...LAN_CONTEXT, ...options });
   contexts.push(context);
   const phone = await context.newPage();
   await phone.goto(url);

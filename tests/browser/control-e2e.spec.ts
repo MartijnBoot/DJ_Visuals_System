@@ -10,7 +10,12 @@ import {
   type Page,
 } from "@playwright/test";
 import { connect } from "node:net";
-import { deviceClient, startControlServer, type ControlServer } from "./control-server.ts";
+import {
+  deviceClient,
+  LAN_CONTEXT,
+  startControlServer,
+  type ControlServer,
+} from "./control-server.ts";
 import { createProfile, flat, twelveEffects } from "./fixtures/profiles.ts";
 import { meanRgb, pixels, record, recorded, start } from "./helpers.ts";
 
@@ -54,7 +59,7 @@ async function context(
   browser: Browser,
   { dropSockets: keep = false, ...options }: ContextOptions = {},
 ): Promise<BrowserContext> {
-  const made = await browser.newContext({ viewport: PHONE, ...options });
+  const made = await browser.newContext({ viewport: PHONE, ...LAN_CONTEXT, ...options });
   contexts.push(made);
   if (keep) {
     await made.addInitScript(() => {

@@ -2,7 +2,10 @@
 // the link line, the code field when opened without a code or key, the DJ/VJ toggle, and the
 // controls. It talks only to the device socket; it never starts the engine or audio and never
 // asks for a camera or microphone. Every control is disabled while the link is locked (SD12),
-// and the page shows the screen's state, never its own guess (SD5).
+// and the page shows the screen's state, never its own guess (SD5). Remote input (B-06 SD8, AC14,
+// AC20, AC24): a sender's camera tile carries a remote mark and, like every tile, waits for Start;
+// "Main audio: laptop / screen machine" shows while an audio sender is approved. No control for
+// the screen machine's input or System audio.
 import type { ScreenState } from "@djv/shared";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
@@ -39,6 +42,18 @@ const DIALS = [
 ] as const;
 
 type DialName = (typeof DIALS)[number][0];
+
+/** B-06 SD8, SD22: the switch, in DJ and VJ mode while an audio sender is approved. */
+const MAIN_AUDIO = [
+  ["remote", "laptop"],
+  ["local", "screen machine"],
+] as const;
+
+/** The choice is the pressed button; this line is what plays (SD22's wording, as the overlay). */
+function mainAudioLine(main: NonNullable<ScreenState["mainAudio"]>): string {
+  if (main.playing === "remote") return `audio: remote (${main.label}) ok`;
+  return main.choice === "remote" ? "audio: local (fallback: remote lost)" : "audio: local";
+}
 
 export function Controller() {
   const [link] = useState(createLink);
@@ -221,10 +236,43 @@ export function Controller() {
                     onClick={() => link.send({ type: "camera", deviceId: c.deviceId })}
                   >
                     {c.label || `Camera ${i + 1}`}
+                    {c.remote && (
+                      <span data-testid="remote-mark" style={{ marginLeft: 6, fontSize: 12 }}>
+                        · remote
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
             </section>
+
+            {state.mainAudio && (
+              <section
+                aria-label="Main audio"
+                data-testid="main-audio"
+                style={{ display: "grid", gap: 8 }}
+              >
+                <div style={styles.row}>
+                  <h2 style={styles.heading}>Main audio</h2>
+                  {MAIN_AUDIO.map(([source, label]) => (
+                    <button
+                      key={source}
+                      type="button"
+                      data-testid={`main-audio-${source}`}
+                      aria-pressed={state.mainAudio?.choice === source}
+                      disabled={locked}
+                      style={state.mainAudio?.choice === source ? styles.active : styles.button}
+                      onClick={() => link.send({ type: "mainAudio", source })}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div data-testid="main-audio-line" style={styles.note}>
+                  {mainAudioLine(state.mainAudio)}
+                </div>
+              </section>
+            )}
 
             <section aria-label="Dials" style={{ display: "grid", gap: 12 }}>
               {DIALS.map(([dial, label]) => (

@@ -3,7 +3,7 @@
 // for the retry and mute clocks. Runs in Node, no jsdom.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadRemembered } from "./remembered.ts";
-import { createSession, type Session } from "./session.ts";
+import { createSession, type Session, type SessionDeps } from "./session.ts";
 
 class FakeTrack extends EventTarget {
   muted = false;
@@ -111,7 +111,7 @@ class FakeContext extends EventTarget {
 
 const LOUD = { level: 0.8, low: 0.9, mid: 0.3, high: 0.2, beat: 1, capturedAt: 100 };
 
-function rig() {
+function rig(extra: Partial<SessionDeps> = {}) {
   const media = fakeMediaDevices();
   const contexts: FakeContext[] = [];
   const sources: { stream: MediaStream; stop: ReturnType<typeof vi.fn> }[] = [];
@@ -137,6 +137,7 @@ function rig() {
     gestures,
     storage,
     log,
+    ...extra,
   });
   const logged = (kind: string, state: string) =>
     log.mock.calls.filter(([k, s]) => k === kind && s === state).length;
@@ -496,5 +497,125 @@ describe("camera requests while one is opening (B-04 AC25, PD7)", () => {
     const r = rig();
     await r.session.setCamera("cam-2");
     expect(r.getUserMedia).not.toHaveBeenCalled();
+  });
+});
+
+describe("the standby for remote audio (B-06 T11, SD7, AC21, AC27)", () => {
+  it("exposes the context once Start has made it", async () => {
+    const r = rig();
+    expect(r.session.context()).toBeNull();
+    await r.session.start({});
+    expect(r.session.context()).toBe(r.contexts[0]);
+  });
+
+  it("opens an input with remember: false and leaves djv.sources byte for byte", async () => {
+    const r = rig();
+    await r.session.start({ audio: { kind: "system" } });
+    const before = r.storage.getItem("djv.sources");
+    expect(before).toContain("system");
+    await r.session.setAudio({ kind: "input", deviceId: "mic-2" }, { remember: false });
+    expect(r.session.state()).toMatchObject({
+      audio: "ok",
+      audioChoice: { kind: "input", deviceId: "mic-2" },
+    });
+    expect(r.live("audio").map((t) => t.deviceId)).toEqual(["mic-2"]);
+    expect(r.storage.getItem("djv.sources")).toBe(before);
+  });
+
+  it("still saves with the default call", async () => {
+    const r = rig();
+    await r.session.start({ audio: { kind: "system" } });
+    await r.session.setAudio({ kind: "input", deviceId: "mic-2" });
+    expect(loadRemembered(r.storage).audio).toEqual({ kind: "input", deviceId: "mic-2" });
+  });
+
+  it("inputStandby asked while Start's share is still being picked opens the default input after it (review C3)", async () => {
+    const r = rig();
+    type Shared = ReturnType<typeof streamOf>;
+    let share: (s: Shared) => void = () => {};
+    r.getDisplayMedia.mockImplementationOnce(
+      () => new Promise<Shared>((resolve) => (share = resolve)),
+    );
+    const starting = r.session.start({ audio: { kind: "system" } });
+    await settle();
+    expect(r.session.state().audioChoice).toBeUndefined(); // the picker is open
+    const standby = r.session.inputStandby();
+    const shared = [new FakeTrack("video", "screen"), new FakeTrack("audio", "system")];
+    share(streamOf(...shared));
+    await starting;
+    await standby;
+    expect(r.session.state()).toMatchObject({ audio: "ok", audioChoice: { kind: "input" } });
+    expect(r.live("audio").map((t) => t.deviceId)).toEqual(["mic-1"]); // the default device
+    expect(shared[1]!.readyState).toBe("ended");
+    expect(loadRemembered(r.storage).audio).toEqual({ kind: "system" });
+  });
+
+  it("inputStandby after a cancelled share opens the default input (review C3)", async () => {
+    const r = rig();
+    r.next.display = "cancelled";
+    await r.session.start({ audio: { kind: "system" } });
+    expect(r.session.state().audio).toBe("none");
+    await r.session.inputStandby();
+    expect(r.session.state()).toMatchObject({ audio: "ok", audioChoice: { kind: "input" } });
+    expect(r.live("audio").map((t) => t.deviceId)).toEqual(["mic-1"]);
+  });
+
+  it("inputStandby leaves a chosen input as it is", async () => {
+    const r = rig();
+    await r.session.start({ audio: { kind: "input", deviceId: "mic-2" } });
+    r.getUserMedia.mockClear();
+    await r.session.inputStandby();
+    expect(r.getUserMedia).not.toHaveBeenCalled();
+    expect(r.session.state().audioChoice).toEqual({ kind: "input", deviceId: "mic-2" });
+  });
+
+  it("a retry of the unremembered standby does not remember it either (review R3, PD2)", async () => {
+    const r = rig();
+    await r.session.start({ audio: { kind: "system" } });
+    await r.session.inputStandby();
+    r.live("audio")[0]!.end();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(r.session.state().audio).toBe("ok");
+    expect(loadRemembered(r.storage).audio).toEqual({ kind: "system" });
+  });
+});
+
+describe("a camera switch waits for the new camera's first frame (B-06 T12, AC16, PD14)", () => {
+  it("keeps the old track and element until videoReady resolves, then swaps", async () => {
+    let ready: () => void = () => {};
+    const videoReady = vi.fn(
+      (_video: HTMLVideoElement) => new Promise<void>((resolve) => (ready = resolve)),
+    );
+    const r = rig({ videoReady });
+    const starting = r.session.start({});
+    await settle();
+    ready();
+    await starting;
+    const old = r.live("video")[0]!;
+    const oldVideo = r.session.state().video;
+    const switching = r.session.setCamera("cam-2");
+    await settle();
+    expect(videoReady).toHaveBeenCalledTimes(2);
+    expect(old.readyState).toBe("live");
+    expect(r.session.state().video).toBe(oldVideo);
+    expect(r.session.state().cameraId).toBe("cam-1");
+    ready();
+    await switching;
+    expect(old.readyState).toBe("ended");
+    expect(r.session.state().video).not.toBe(oldVideo);
+    expect(r.session.state().cameraId).toBe("cam-2");
+    expect(r.logged("camera", "lost")).toBe(0);
+  });
+
+  it("stopped while waiting: the new stream is stopped and nothing is published", async () => {
+    let ready: () => void = () => {};
+    const r = rig({ videoReady: () => new Promise<void>((resolve) => (ready = resolve)) });
+    const starting = r.session.start({});
+    await settle();
+    r.session.stop();
+    ready();
+    await starting;
+    expect(r.live("video")).toEqual([]);
+    expect(r.session.state().video).toBeNull();
   });
 });

@@ -7,7 +7,9 @@ import {
   deviceMessageSchema,
   MAX_DEVICE_MESSAGE,
   MAX_SCREEN_MESSAGE,
+  MAX_SETUP_MESSAGE,
   PAIRING_LIMITS,
+  REFUSAL_REASONS,
   screenMessageSchema,
   toDeviceSchema,
   toScreenSchema,
@@ -23,14 +25,30 @@ const state: ScreenState = {
   storedPalette: ["#000000", "#ffffff"],
   primary: 1,
   dials: { recognisability: 0.3, reactivity: 0.7 },
-  cameras: [{ deviceId: "cam-1", label: "Front camera" }],
+  cameras: [
+    { deviceId: "cam-1", label: "Front camera", remote: false },
+    { deviceId: "remote:d123", label: "Safari on iPhone — Device 2", remote: true },
+  ],
   cameraId: "cam-1",
   camera: "ok",
   audio: "idle",
   started: true,
   reason: null,
+  mainAudio: { choice: "remote", playing: "local", label: "Device 3" },
 };
-const entry = { deviceId: "d1", hint: "Safari on iPhone", label: "Device 1" };
+const entry = { deviceId: "d1", hint: "Safari on iPhone", label: "Device 1", sends: [] };
+const senderEntry = {
+  deviceId: "d3",
+  hint: "Chrome on Windows",
+  label: "Device 3",
+  sends: ["video", "audio"],
+};
+const SDP = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\n";
+const CANDIDATE = {
+  candidate: "candidate:1 1 udp 1 192.168.1.5 50000 typ host",
+  sdpMid: "0",
+  sdpMLineIndex: 0,
+};
 const status = {
   on: true,
   addresses: [{ address: "192.168.1.5", name: "Wi-Fi" }],
@@ -38,30 +56,44 @@ const status = {
   code: "ABC234",
   devices: [entry],
   pending: [],
+  senders: [{ ...senderEntry, online: true }],
+  fingerprint: "0123456789ABCDEF",
 };
 
 const examples = {
   device: [
     { type: "hello", code: "ABC234" },
     { type: "hello", key: KEY },
+    { type: "hello", code: "ABC234", sends: ["video"] },
+    { type: "hello", code: "ABC234", sends: ["audio", "video"] },
+    { type: "offer", sdp: SDP },
+    { type: "candidate", ...CANDIDATE },
+    { type: "candidate", candidate: "", sdpMid: null, sdpMLineIndex: null },
+    { type: "mainAudio", seq: 8, source: "local" },
     { type: "pick", seq: 1, id: "builtin" },
     { type: "dials", seq: 2, recognisability: 0.5 },
     { type: "dials", seq: 3, reactivity: 0, recognisability: 1 },
     { type: "colour", seq: 4, slot: 0, value: "#ff8800" },
     { type: "resetColour", seq: 5, slot: 5 },
     { type: "camera", seq: 6, deviceId: "cam-2" },
+    { type: "camera", seq: 6, deviceId: "remote:d123" },
     { type: "refresh", seq: 7 },
     { type: "accept", deviceId: "d2" },
     { type: "reject", deviceId: "d2" },
   ],
   toDevice: [
     { type: "waiting" },
-    { type: "approved", key: KEY, deviceId: "d1" },
+    { type: "approved", key: KEY, deviceId: "d1", sends: [] },
+    { type: "approved", key: KEY, deviceId: "d3", sends: ["audio"] },
     { type: "refused", reason: "wrong_code" },
+    { type: "refused", reason: "audio_taken" },
+    { type: "answer", sdp: SDP },
+    { type: "candidate", ...CANDIDATE },
+    { type: "stream", kind: "video", active: false },
     { type: "refused", reason: "rejected" },
     { type: "ended" },
     { type: "screen", connected: false },
-    { type: "pending", requests: [entry] },
+    { type: "pending", requests: [entry, senderEntry] },
     { type: "state", state },
     { type: "applied", seq: 9 },
   ],
@@ -74,11 +106,17 @@ const examples = {
     { type: "disconnect", deviceId: "d1" },
     { type: "accept", deviceId: "d1" },
     { type: "reject", deviceId: "d1" },
+    { type: "answer", deviceId: "d3", sdp: SDP },
+    { type: "candidate", deviceId: "d3", ...CANDIDATE },
+    { type: "stream", deviceId: "d3", kind: "audio", active: true },
   ],
   toScreen: [
     { type: "control", deviceId: "d1", control: { type: "pick", seq: 1, id: "x" } },
     { type: "status", status },
     { type: "status", status: { ...status, on: false, code: null, error: "no_address" } },
+    { type: "status", status: { ...status, on: false, fingerprint: null, error: "cert_store" } },
+    { type: "offer", deviceId: "d3", sdp: SDP },
+    { type: "candidate", deviceId: "d3", ...CANDIDATE },
     { type: "superseded" },
   ],
 } as const;
@@ -142,10 +180,66 @@ describe("the device union (AC17, SD20)", () => {
   });
 });
 
+describe("roles and setup messages (B-06 SD6, SD16, PD4)", () => {
+  const fails = (message: unknown) => deviceMessageSchema.safeParse(message).success === false;
+
+  it("takes sends only with a code: one or two kinds, no repeats", () => {
+    expect(fails({ type: "hello", key: KEY, sends: ["video"] })).toBe(true);
+    expect(fails({ type: "hello", code: "ABC234", sends: ["audio", "audio"] })).toBe(true);
+    expect(fails({ type: "hello", code: "ABC234", sends: [] })).toBe(true);
+    expect(fails({ type: "hello", code: "ABC234", sends: ["video", "audio", "video"] })).toBe(true);
+    expect(fails({ type: "hello", code: "ABC234", sends: ["screen"] })).toBe(true);
+  });
+
+  it("refuses an sdp over 16 000 characters and a candidate over 1 000", () => {
+    expect(fails({ type: "offer", sdp: "x".repeat(16_000) })).toBe(false);
+    expect(fails({ type: "offer", sdp: "x".repeat(16_001) })).toBe(true);
+    expect(fails({ ...CANDIDATE, type: "candidate", candidate: "c".repeat(1_001) })).toBe(true);
+    const answer = { type: "answer", deviceId: "d3", sdp: "x".repeat(16_001) };
+    expect(screenMessageSchema.safeParse(answer).success).toBe(false);
+  });
+
+  it("takes mainAudio with remote or local only", () => {
+    expect(fails({ type: "mainAudio", seq: 1, source: "remote" })).toBe(false);
+    expect(fails({ type: "mainAudio", seq: 1, source: "laptop" })).toBe(true);
+    expect(fails({ type: "mainAudio", source: "local" })).toBe(true);
+  });
+
+  it("takes a screen state whose main audio is null and refuses one without remote", () => {
+    const toDevice = (s: unknown) => toDeviceSchema.safeParse({ type: "state", state: s }).success;
+    expect(toDevice({ ...state, mainAudio: null })).toBe(true);
+    expect(
+      toDevice({ ...state, mainAudio: { choice: "laptop", playing: "local", label: "x" } }),
+    ).toBe(false);
+    expect(toDevice({ ...state, cameras: [{ deviceId: "cam-1", label: "Front camera" }] })).toBe(
+      false,
+    );
+  });
+
+  it("refuses a fingerprint that is not 16 hex characters", () => {
+    const parses = (fingerprint: unknown) =>
+      toScreenSchema.safeParse({ type: "status", status: { ...status, fingerprint } }).success;
+    expect(parses("0123456789abcdef")).toBe(false);
+    expect(parses("0123456789ABCDE")).toBe(false);
+    expect(parses(null)).toBe(true);
+  });
+
+  it("knows audio_taken as a refusal", () => {
+    expect(REFUSAL_REASONS).toContain("audio_taken");
+  });
+
+  it("typeOf names the setup messages", () => {
+    for (const type of ["offer", "answer", "candidate", "stream", "mainAudio"]) {
+      expect(typeOf(JSON.stringify({ type }))).toBe(type);
+    }
+  });
+});
+
 describe("the constants (SD19, SD20, SD21, PD3)", () => {
   it("are the spec's numbers", () => {
     expect(MAX_DEVICE_MESSAGE).toBe(4096);
     expect(MAX_SCREEN_MESSAGE).toBe(262144);
+    expect(MAX_SETUP_MESSAGE).toBe(16384);
     expect(DEVICE_RATE_PER_SECOND).toBe(120);
     expect(CODE_LENGTH).toBe(6);
     expect(PAIRING_LIMITS).toEqual({
@@ -155,6 +249,8 @@ describe("the constants (SD19, SD20, SD21, PD3)", () => {
       wrongCodes: 5,
       wrongCodeWindowMs: 60_000,
       throttleMs: 60_000,
+      videoSenders: 4,
+      audioSenders: 1,
     });
   });
 

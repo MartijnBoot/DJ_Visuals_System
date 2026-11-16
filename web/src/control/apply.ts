@@ -4,7 +4,9 @@
 // engine uses it in the first frame that starts after the page received it. Dials go to the
 // engine directly, not through a React state update whose timing is not the frame's. Every
 // applied control is acknowledged in that frame's one `applied` batch; a pick when it settles,
-// i.e. at the swap, in the batch of the frame after.
+// i.e. at the swap, in the batch of the frame after. B-06 (T13): a `camera` may name a remote
+// camera (`remote:<deviceId>`), which goes to the same choice; `mainAudio` sets the main-audio
+// choice (SD22).
 import type { AppliedEntry, Control } from "@djv/shared";
 import type { Dials } from "@djv/engine";
 
@@ -15,7 +17,10 @@ export interface ApplierDeps {
   setDials(dials: Dials): void;
   setColour(slot: number, value: string): void;
   resetColour(slot: number): void;
+  /** A local camera id or `remote:<deviceId>` (B-06 SD21). */
   setCamera(deviceId: string): void;
+  /** The main-audio choice (B-06 SD22). */
+  setMainAudio(source: "remote" | "local"): void;
   /** The panel picker's pick: prepared, hard cut, starting dials, remembered (AC18). */
   pick(id: string): Promise<void>;
   /** Lists the profiles again (SD22). */
@@ -56,6 +61,9 @@ export function createApplier(deps: ApplierDeps): Applier {
         break;
       case "refresh":
         deps.refresh();
+        break;
+      case "mainAudio":
+        deps.setMainAudio(control.source);
         break;
       case "pick": {
         const settle = () => void settled.push(ack);

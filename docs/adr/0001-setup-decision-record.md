@@ -44,6 +44,9 @@ Framing decisions, settled before the ten questions because they shape them:
 | 9 | Feature flags? | **No** | One user; unfinished work stays on its branch. Choice of transformer tools is profile configuration, not a flag. | — | Martijn Boot |
 | 10 | WAF / CDN? | **No** | No public surface (localhost, later LAN behind a pairing token); a CDN would add a hop to a bundle served from the same machine. | — | Martijn Boot |
 
+Partly superseded by [0002](0002-remote-input-over-the-lan.md) (question 2: audio may cross the
+LAN, opt-in).
+
 ### Constraints carried into specs
 
 These follow from the decisions above; each spec that touches the area must honour them.

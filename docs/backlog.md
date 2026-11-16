@@ -19,13 +19,12 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 | # | ID | Feature | Size | Status |
 |---|---|---|---|---|
 | 1 | B-14 | Image assets in profiles | M | idea |
-| 2 | B-06 | Remote input devices | L | idea |
-| 3 | B-07 | Scenes | M | idea |
-| 4 | B-09 | Transitions | M | idea |
-| 5 | B-10 | Global colour layer | S | idea |
-| 6 | B-11 | "No camera" as a feed option | S | idea |
-| 7 | B-12 | Hosted home on Oracle Cloud (free tier trial) | L | idea |
-| 8 | B-13 | Selling it | L | idea |
+| 2 | B-07 | Scenes | M | idea |
+| 3 | B-09 | Transitions | M | idea |
+| 4 | B-10 | Global colour layer | S | idea |
+| 5 | B-11 | "No camera" as a feed option | S | idea |
+| 6 | B-12 | Hosted home on Oracle Cloud (free tier trial) | L | idea |
+| 7 | B-13 | Selling it | L | idea |
 
 ## Items
 
@@ -208,7 +207,7 @@ source seam (spec SD1). Depends on B-01 and B-04. Split out of B-01 at its spec 
 
 ### B-06 — Remote input devices
 
-- **Status:** idea
+- **Status:** specced → `docs/specs/phase-b-06-remote-input-devices.md`
 - **Added:** 2026-11-12
 - **Size:** L
 

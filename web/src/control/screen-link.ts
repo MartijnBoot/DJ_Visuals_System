@@ -5,7 +5,9 @@
 // `beforeFrame`), and carries the panel's actions. A device id not seen before lists the profiles
 // (SD22: a controller connecting is a user action; nothing polls). It reconnects quietly with the
 // shared backoff; nothing else on the screen page depends on it. After `superseded` it does
-// nothing further (AC31).
+// nothing further (AC31). B-06 (T13): a sender's `offer` and `candidate` go to the page's
+// sources, which answer through `relay`; every status's senders go there too, so a sender that
+// left has its peer closed; and the state carries the remote cameras and the main audio.
 import {
   toScreenSchema,
   type AppliedEntry,
@@ -13,6 +15,7 @@ import {
   type ControlStatus,
   type ScreenMessage,
   type ScreenState,
+  type ToScreen,
 } from "@djv/shared";
 import type { DeviceOption } from "../capture/devices.ts";
 import type { SessionState } from "../capture/session.ts";
@@ -25,12 +28,20 @@ export type PanelAction = Extract<
   { type: "enable" | "disable" | "newCode" | "disconnect" | "accept" | "reject" }
 >;
 
+type FromSender = Extract<ToScreen, { type: "offer" | "candidate" }>;
+/** What the screen page sends a sender through the server (B-06 SD16). */
+export type ToSender = Extract<ScreenMessage, { type: "answer" | "candidate" | "stream" }>;
+
 export interface ScreenLinkDeps {
   url: string;
   connect(url: string): SocketLike;
   buildState(): ScreenState;
   onControl(deviceId: string, control: Control): void;
   onNewDevice(): void;
+  /** A sender's offer or candidate (B-06). */
+  onSetup?(message: FromSender): void;
+  /** The approved senders in each status (B-06). */
+  onSenders?(senders: ControlStatus["senders"]): void;
 }
 
 export interface ScreenLinkView {
@@ -48,6 +59,8 @@ export interface ScreenLink {
   /** From `beforeFrame`: this frame's acknowledgements, then the state if it changed. */
   flush(applied: AppliedEntry[]): void;
   send(action: PanelAction): boolean;
+  /** A setup message for a sender; false when the socket is not open (B-06). */
+  relay(message: ToSender): boolean;
   view(): ScreenLinkView;
   subscribe(listener: () => void): () => void;
 }
@@ -63,6 +76,12 @@ export interface ScreenFacts {
   capture: Pick<SessionState, "camera" | "audio" | "cameraId">;
   cameras: readonly DeviceOption[];
   started: boolean;
+  /** B-06: the remote cameras, a picked remote camera's id, the main audio. */
+  remote?: {
+    cameras: ScreenState["cameras"];
+    cameraId: string | null;
+    mainAudio: ScreenState["mainAudio"];
+  };
 }
 
 /**
@@ -71,7 +90,8 @@ export interface ScreenFacts {
  * Start, and the panel's profile reason word for word (AC26). Lists are cut to the schema's
  * bounds so a long list never makes the whole state invalid.
  */
-export function toScreenState({ profiles, dials, capture, cameras, started }: ScreenFacts) {
+export function toScreenState({ profiles, dials, capture, cameras, started, remote }: ScreenFacts) {
+  const local = cameras.map(({ deviceId, label }) => ({ deviceId, label, remote: false }));
   const state: ScreenState = {
     profiles: profiles.entries.slice(0, 1000).map(({ id, name }) => ({ id, name })),
     activeId: profiles.activeId,
@@ -79,12 +99,13 @@ export function toScreenState({ profiles, dials, capture, cameras, started }: Sc
     storedPalette: profiles.storedPalette,
     primary: profiles.primary,
     dials: { recognisability: dials.recognisability, reactivity: dials.reactivity },
-    cameras: cameras.slice(0, 64).map(({ deviceId, label }) => ({ deviceId, label })),
-    cameraId: capture.cameraId ?? null,
+    cameras: [...local, ...(remote?.cameras ?? [])].slice(0, 64),
+    cameraId: remote?.cameraId ?? capture.cameraId ?? null,
     camera: capture.camera,
     audio: capture.audio,
     started,
     reason: profiles.reason,
+    mainAudio: remote?.mainAudio ?? null,
   };
   return state;
 }
@@ -118,9 +139,11 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
     const message = result.data;
     if (message.type === "control") return deps.onControl(message.deviceId, message.control);
     if (message.type === "superseded") return update({ superseded: true });
+    if (message.type === "offer" || message.type === "candidate") return deps.onSetup?.(message);
     const fresh = message.status.devices.filter((d) => !seen.has(d.deviceId));
     for (const d of fresh) seen.add(d.deviceId);
     update({ status: message.status });
+    deps.onSenders?.(message.status.senders);
     if (fresh.length > 0) deps.onNewDevice();
   };
 
@@ -175,6 +198,11 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
     send(action) {
       if (!isOpen()) return false;
       write(action);
+      return true;
+    },
+    relay(message) {
+      if (!isOpen()) return false;
+      write(message);
       return true;
     },
     view: () => view,

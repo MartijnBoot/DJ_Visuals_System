@@ -3,16 +3,19 @@
 // two dials, the quality cap, the feature meters, the source states and one reason line. It is
 // scaffolding over the canvas that B-04's control surface replaces. Keyboard-operable: native
 // controls in tab order, each labelled. B-04 (SD24): an External control section at the end; the
-// panel scrolls when it is taller than the window, never sideways (T18, D-05).
+// panel scrolls when it is taller than the window, never sideways (T18, D-05). B-06 (UI "Panel",
+// SD8, SD22): senders' cameras in the camera picker, and a "main audio" row with the playing
+// source's line while an audio sender is approved.
 import type { AudioFeatures } from "@djv/audio";
 import type { Dials, RenderScale } from "@djv/engine";
 import { useEffect, useState } from "react";
 import type { DeviceOption } from "./capture/devices.ts";
 import type { AudioChoice } from "./capture/remembered.ts";
 import type { SessionState } from "./capture/session.ts";
-import { ExternalControl } from "./control/ExternalControl.tsx";
+import { ExternalControl, type SenderEntry, type SenderState } from "./control/ExternalControl.tsx";
 import type { PanelAction, ScreenLinkView } from "./control/screen-link.ts";
 import type { ActiveState } from "./profiles/active.ts";
+import type { AudioSource } from "./remote/main-audio.ts";
 import { FIT, Row, SourcePickers } from "./SourcePickers.tsx";
 
 const METERS = ["level", "low", "mid", "high", "beat"] as const;
@@ -28,6 +31,12 @@ export interface PanelProps {
   systemAudio: boolean;
   onCamera(deviceId: string): void;
   onAudio(choice: AudioChoice): void;
+  /** B-06 AC14: the senders' cameras, labelled "<hint> — Device n". */
+  remoteCameras: readonly DeviceOption[];
+  /** B-06 SD22: the choice and the `audio:` line; null while no audio sender is approved. */
+  mainAudio: { choice: AudioSource; line: string } | null;
+  onMainAudio(source: AudioSource): void;
+  senderState(entry: SenderEntry): SenderState;
   dials: Dials;
   onDials(dials: Dials): void;
   cap: RenderScale;
@@ -40,7 +49,7 @@ export interface PanelProps {
 }
 
 export function Panel(props: PanelProps) {
-  const { started, capture, dials, read } = props;
+  const { started, capture, dials, read, mainAudio } = props;
   const [features, setFeatures] = useState(() => read(performance.now()));
 
   // The meters follow the features once per animation frame, so a test reading them sees
@@ -92,7 +101,27 @@ export function Panel(props: PanelProps) {
         systemAudio={props.systemAudio}
         onCamera={props.onCamera}
         onAudio={props.onAudio}
+        remoteCameras={props.remoteCameras}
       />
+      {mainAudio && (
+        <>
+          <Row label="main audio">
+            {(id) => (
+              <select
+                id={id}
+                data-testid="panel-main-audio"
+                style={FIT}
+                value={mainAudio.choice}
+                onChange={(e) => props.onMainAudio(e.target.value as AudioSource)}
+              >
+                <option value="remote">remote</option>
+                <option value="local">local</option>
+              </select>
+            )}
+          </Row>
+          <div data-testid="panel-main-audio-line">{mainAudio.line}</div>
+        </>
+      )}
       <Row label="profile">
         {(id) => (
           <select
@@ -164,7 +193,11 @@ export function Panel(props: PanelProps) {
       <div data-testid="panel-camera-state">camera: {capture.camera}</div>
       <div data-testid="panel-audio-state">audio: {capture.audio}</div>
       {capture.reason && <div data-testid="panel-reason">{capture.reason}</div>}
-      <ExternalControl view={props.control} onAction={props.onControl} />
+      <ExternalControl
+        view={props.control}
+        onAction={props.onControl}
+        senderState={props.senderState}
+      />
     </section>
   );
 }

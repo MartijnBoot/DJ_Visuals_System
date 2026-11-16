@@ -58,11 +58,15 @@ server for profiles API, control WebSocket and WebRTC signalling (`server/`), SQ
 - `engine/` — the framework-free WebGL2 renderer; `audio/` — the framework-free AudioWorklet
   analysis; neither has a dependency of any kind and neither imports the other
   (`tests/meta/engine-boundary.test.ts`); `engine/` declares its own `Profile` and never
-  imports `shared/`. `web/` — the React + Vite app, three routes in one page: the screen at `/`,
-  the profile builder at `/builder` and the External control page at `/control`
-  (`web/src/main.tsx`, no router); imports `engine/`, `audio/` and `shared/`, never `server/`.
+  imports `shared/`. `web/` — the React + Vite app, four routes in one page: the screen at `/`,
+  the profile builder at `/builder`, the External control page at `/control` and the sending page
+  at `/send` (`web/src/main.tsx`, no router); the screen's remote sources in `web/src/remote/`
+  (peer connections, main audio, the picture), the sender in `web/src/send/`; imports `engine/`,
+  `audio/` and `shared/`, never `server/`.
   `server/` — Fastify, SQLite, migrations, static serving, the profile endpoints, External
-  control (`server/src/control/`: the screen socket, the LAN listener while switched on, pairing).
+  control (`server/src/control/`: the screen socket, the HTTPS LAN listener while switched on,
+  pairing, the WebRTC setup relay, `/trust`), the local CA (`server/src/tls/`: certificates under
+  `DATA_DIR/tls/`; `store.ts` is the only reader of a key file). Media never passes the server.
   `shared/` — zod schemas both sides validate against, including the profile and every control
   message (`shared/src/control.ts`).
   Profile data lives in the `profiles` table (`server/src/profiles/store.ts` is the only SQL for

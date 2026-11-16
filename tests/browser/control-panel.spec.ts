@@ -3,7 +3,15 @@
 // (PD13). A device here is a page on the LAN origin speaking the socket directly (PD1); the
 // controller page itself is T12's.
 import { expect, test, type Page } from "@playwright/test";
-import { deviceClient, startControlServer, type ControlServer } from "./control-server.ts";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  deviceClient,
+  LAN_CONTEXT,
+  lanRefused,
+  startControlServer,
+  type ControlServer,
+} from "./control-server.ts";
 import { expectCanvasChanging } from "./helpers.ts";
 
 const IPHONE =
@@ -33,7 +41,10 @@ async function switchOn(page: Page): Promise<string> {
 }
 
 async function phone(page: Page) {
-  const context = await page.context().browser()!.newContext({ userAgent: IPHONE });
+  const context = await page
+    .context()
+    .browser()!
+    .newContext({ userAgent: IPHONE, ...LAN_CONTEXT });
   return deviceClient(context, server);
 }
 
@@ -46,7 +57,7 @@ test("switching on shows the QR code, the URL with the code in its fragment, and
   );
   const code = await switchOn(page);
   await expect(page.getByTestId("control-url")).toHaveText(
-    `http://127.0.0.1:${server.controlPort}/control#code=${code}`,
+    `https://127.0.0.1:${server.controlPort}/control#code=${code}`,
   );
   await expect(page.getByTestId("control-address")).toHaveValue("127.0.0.1");
   const qr = page.getByTestId("control-qr");
@@ -65,11 +76,56 @@ test("with no private address, switching on says so and nothing listens (AC4)", 
   await page.getByTestId("control-switch").click();
   await expect(page.getByTestId("control-error")).toHaveText("No local network address found");
   await expect(page.getByTestId("control-switch")).not.toBeChecked();
-  const reached = await fetch(`${server.lanOrigin}/control`).then(
-    () => true,
-    () => false,
+  expect(await lanRefused(server.controlPort)).toBe(true);
+});
+
+test("the trust block comes first: QR, URL, Install once per device, the fingerprint /trust shows (B-06 AC6, SD24)", async ({
+  page,
+  browser,
+}) => {
+  await screen(page);
+  await switchOn(page);
+  const block = page.getByTestId("control-trust");
+  await expect(block).toBeVisible();
+  await expect(block).toContainText("Install once per device");
+  const trustUrl = `https://127.0.0.1:${server.controlPort}/trust`;
+  await expect(page.getByTestId("control-trust-url")).toHaveText(trustUrl);
+  await expect(page.getByTestId("control-trust-qr")).toBeVisible();
+  const fingerprint = (await page.getByTestId("control-trust-fingerprint").textContent()) ?? "";
+  expect(fingerprint).toMatch(/^[0-9A-F]{16}$/);
+  // First of the section's content: before the control page's QR code, URL and code.
+  const first = await page.evaluate(() => {
+    const trust = document.querySelector('[data-testid="control-trust"]')!;
+    return ["control-qr", "control-url", "control-code"].every(
+      (id) =>
+        trust.compareDocumentPosition(document.querySelector(`[data-testid="${id}"]`)!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+  expect(first).toBe(true);
+  // The same 16 characters on the page a device opens to trust the root.
+  const context = await browser.newContext(LAN_CONTEXT);
+  const device = await context.newPage();
+  await device.goto(trustUrl);
+  await expect(device.getByTestId("trust-fingerprint")).toHaveText(fingerprint);
+  await context.close();
+});
+
+test("an unreadable certificate store: switching on says so, the switch reads off, nothing listens (B-06 AC4)", async ({
+  page,
+}) => {
+  await screen(page);
+  await switchOn(page); // the first switch-on creates the root in this server's DATA_DIR
+  await page.getByTestId("control-switch").click();
+  await expect(page.getByTestId("control-switch")).not.toBeChecked();
+  const file = join(server.dataDir, "tls", "root.crt");
+  writeFileSync(file, readFileSync(file).subarray(0, 60));
+  await page.getByTestId("control-switch").click();
+  await expect(page.getByTestId("control-error")).toHaveText(
+    "Certificate store unreadable — see the runbook",
   );
-  expect(reached).toBe(false);
+  await expect(page.getByTestId("control-switch")).not.toBeChecked();
+  expect(await lanRefused(server.controlPort)).toBe(true);
 });
 
 test("a device presenting the code appears with its hint, and Accept approves it (AC8, AC10)", async ({

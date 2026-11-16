@@ -9,6 +9,8 @@ import { LIMITS } from "./profile.ts";
 export const MAX_DEVICE_MESSAGE = 4096;
 /** The screen socket's: same-origin and `127.0.0.1` only, and it carries the list (PD3). */
 export const MAX_SCREEN_MESSAGE = 262144;
+/** A WebRTC setup message's size limit on any socket (B-06 SD16, PD4): an SDP does not fit 4 KB. */
+export const MAX_SETUP_MESSAGE = 16384;
 /** Messages per sliding second a device socket may send; the excess is dropped (SD20). */
 export const DEVICE_RATE_PER_SECOND = 120;
 
@@ -24,6 +26,9 @@ export const PAIRING_LIMITS = {
   wrongCodes: 5,
   wrongCodeWindowMs: 60_000,
   throttleMs: 60_000,
+  /** B-06 SD12, SD8: a device sending both counts in both. */
+  videoSenders: 4,
+  audioSenders: 1,
 } as const;
 
 const unit = z.number().min(0).max(1);
@@ -43,6 +48,24 @@ const code = z
 /** 128 bits as base64url: 22 characters. */
 const key = z.string().regex(/^[A-Za-z0-9_-]{22}$/, "not a session key");
 
+/** What a sender sends (B-06 SD6, SD14): empty for a controller. */
+export const SEND_KINDS = ["video", "audio"] as const;
+export type SendKind = (typeof SEND_KINDS)[number];
+const sendKind = z.enum(SEND_KINDS);
+const unique = (list: readonly string[]) => new Set(list).size === list.length;
+/** A request's kinds: one or two, no repeats. */
+const sendsRequest = z.array(sendKind).min(1).max(2).refine(unique, "no repeated kind");
+/** A device's kinds as the server lists them: empty for a controller. */
+const sends = z.array(sendKind).max(2).refine(unique, "no repeated kind");
+
+/** WebRTC setup (B-06 SD16, PD4): the server relays these and reads nothing inside them. */
+const sdp = z.string().min(1).max(16_000);
+const candidateShape = {
+  candidate: z.string().max(1_000),
+  sdpMid: z.string().max(64).nullable(),
+  sdpMLineIndex: z.number().int().nonnegative().max(65535).nullable(),
+};
+
 const message = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
   z.strictObject({ type: z.literal(type), ...shape });
 
@@ -61,20 +84,32 @@ export const controlSchema = z.discriminatedUnion("type", [
   message("resetColour", { seq, slot }),
   message("camera", { seq, deviceId: z.string().min(1).max(500) }),
   message("refresh", { seq }),
+  /** B-06 SD22: the main-audio choice. */
+  message("mainAudio", { seq, source: z.enum(["remote", "local"]) }),
 ]);
 export type Control = z.infer<typeof controlSchema>;
 export type ControlType = Control["type"];
 
-// ---- Controller → server. `newCode` and `disconnect` are not here (AC17). ----
+// ---- Device → server. `newCode` and `disconnect` are not here (AC17). A sender may send only
+// `hello`, `offer` and `candidate`; the server enforces the role (B-06 SD6). ----
 
 export const deviceMessageSchema = z.discriminatedUnion("type", [
-  message("hello", { code: code.optional(), key: key.optional() }).refine(
-    (m) => (m.code === undefined) !== (m.key === undefined),
-    { message: "carries a code or a key" },
-  ),
+  message("hello", {
+    code: code.optional(),
+    key: key.optional(),
+    sends: sendsRequest.optional(),
+  })
+    .refine((m) => (m.code === undefined) !== (m.key === undefined), {
+      message: "carries a code or a key",
+    })
+    .refine((m) => m.sends === undefined || m.code !== undefined, {
+      message: "names what it sends only with a code",
+    }),
   ...controlSchema.options,
   message("accept", { deviceId }),
   message("reject", { deviceId }),
+  message("offer", { sdp }),
+  message("candidate", candidateShape),
 ]);
 export type DeviceMessage = z.infer<typeof deviceMessageSchema>;
 
@@ -93,7 +128,14 @@ export const screenStateSchema = z.strictObject({
   primary: slot,
   dials: z.strictObject({ recognisability: unit, reactivity: unit }),
   cameras: z
-    .array(z.strictObject({ deviceId: z.string().max(500), label: z.string().max(500) }))
+    .array(
+      z.strictObject({
+        deviceId: z.string().max(500),
+        label: z.string().max(500),
+        /** A sender's camera, id `remote:<deviceId>` (B-06 SD21). */
+        remote: z.boolean(),
+      }),
+    )
     .max(64),
   cameraId: z.string().max(500).nullable(),
   camera: sourceState,
@@ -101,6 +143,15 @@ export const screenStateSchema = z.strictObject({
   started: z.boolean(),
   /** The panel's profile reason, word for word (AC26); null when there is none. */
   reason: z.string().max(500).nullable(),
+  /** B-06 SD22: null while no audio sender is approved. */
+  mainAudio: z
+    .strictObject({
+      choice: z.enum(["remote", "local"]),
+      playing: z.enum(["remote", "local"]),
+      /** The audio sender's sequence label. */
+      label: z.string().max(40),
+    })
+    .nullable(),
 });
 export type ScreenState = z.infer<typeof screenStateSchema>;
 
@@ -109,6 +160,8 @@ export const deviceEntrySchema = z.strictObject({
   deviceId,
   hint: z.string().max(100),
   label: z.string().max(40),
+  /** B-06 SD6: what it sends; empty for a controller. */
+  sends,
 });
 export type DeviceEntry = z.infer<typeof deviceEntrySchema>;
 
@@ -119,20 +172,25 @@ export const REFUSAL_REASONS = [
   "ended",
   "expired",
   "rejected",
+  "audio_taken",
 ] as const;
 export type RefusalReason = (typeof REFUSAL_REASONS)[number];
 
-// ---- Server → controller. ----
+// ---- Server → device. A sender receives only the pairing messages, `screen`, and setup. ----
 
 export const toDeviceSchema = z.discriminatedUnion("type", [
   message("waiting", {}),
-  message("approved", { key, deviceId }),
+  message("approved", { key, deviceId, sends }),
   message("refused", { reason: z.enum(REFUSAL_REASONS) }),
   message("ended", {}),
   message("screen", { connected: z.boolean() }),
   message("pending", { requests: z.array(deviceEntrySchema).max(PAIRING_LIMITS.pending) }),
   message("state", { state: screenStateSchema }),
   message("applied", { seq }),
+  message("answer", { sdp }),
+  message("candidate", candidateShape),
+  /** B-06 SD12: pause (false) or resume (true) the sender's encoding of one kind. */
+  message("stream", { kind: sendKind, active: z.boolean() }),
 ]);
 export type ToDevice = z.infer<typeof toDeviceSchema>;
 
@@ -151,12 +209,15 @@ export const screenMessageSchema = z.discriminatedUnion("type", [
   message("disconnect", { deviceId }),
   message("accept", { deviceId }),
   message("reject", { deviceId }),
+  message("answer", { deviceId, sdp }),
+  message("candidate", { deviceId, ...candidateShape }),
+  message("stream", { deviceId, kind: sendKind, active: z.boolean() }),
 ]);
 export type ScreenMessage = z.infer<typeof screenMessageSchema>;
 
 // ---- Server → screen page. ----
 
-export const CONTROL_ERRORS = ["no_address", "port_in_use", "unavailable"] as const;
+export const CONTROL_ERRORS = ["no_address", "port_in_use", "unavailable", "cert_store"] as const;
 export type ControlError = (typeof CONTROL_ERRORS)[number];
 
 export const statusSchema = z.strictObject({
@@ -168,6 +229,13 @@ export const statusSchema = z.strictObject({
   code: code.nullable(),
   devices: z.array(deviceEntrySchema),
   pending: z.array(deviceEntrySchema),
+  /** B-06 PD5: approved senders; `online` while the sender's socket is open. */
+  senders: z.array(deviceEntrySchema.extend({ online: z.boolean() })),
+  /** The local root's fingerprint while on (B-06 SD24): 16 hex characters. */
+  fingerprint: z
+    .string()
+    .regex(/^[0-9A-F]{16}$/)
+    .nullable(),
   error: z.enum(CONTROL_ERRORS).optional(),
 });
 export type ControlStatus = z.infer<typeof statusSchema>;
@@ -176,6 +244,8 @@ export const toScreenSchema = z.discriminatedUnion("type", [
   message("control", { deviceId, control: controlSchema }),
   message("status", { status: statusSchema }),
   message("superseded", {}),
+  message("offer", { deviceId, sdp }),
+  message("candidate", { deviceId, ...candidateShape }),
 ]);
 export type ToScreen = z.infer<typeof toScreenSchema>;
 
