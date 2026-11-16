@@ -159,7 +159,12 @@ export function createPairing({ now, random }: PairingDeps): Pairing {
       if (approved.size >= PAIRING_LIMITS.approved || pending.size >= PAIRING_LIMITS.pending) {
         return { kind: "refused", reason: "too_many" };
       }
-      const entry: DeviceEntry = { deviceId: newId(), hint, label: `Device ${++sequence}` };
+      const entry: DeviceEntry = {
+        deviceId: newId(),
+        hint,
+        label: `Device ${++sequence}`,
+        sends: [],
+      };
       pending.set(entry.deviceId, { entry, ip, at });
       return { kind: "waiting", device: entry };
     },

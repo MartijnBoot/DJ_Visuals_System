@@ -57,6 +57,7 @@ const state: ScreenState = {
   audio: "idle",
   started: false,
   reason: null,
+  mainAudio: null,
 };
 
 const status = (devices: string[] = []): ControlStatus => ({
@@ -68,8 +69,11 @@ const status = (devices: string[] = []): ControlStatus => ({
     deviceId,
     hint: "Safari on iPhone",
     label: `Device ${i}`,
+    sends: [],
   })),
   pending: [],
+  senders: [],
+  fingerprint: null,
 });
 
 let link: ScreenLink;
@@ -281,12 +285,13 @@ describe("toScreenState (SD5, SD8, AC26)", () => {
       storedPalette: ["#000000", "#ffffff"],
       primary: 1,
       dials: { recognisability: 0.4, reactivity: 0.6 },
-      cameras: [{ deviceId: "cam-1", label: "Front" }],
+      cameras: [{ deviceId: "cam-1", label: "Front", remote: false }],
       cameraId: "cam-1",
       camera: "ok",
       audio: "lost",
       started: true,
       reason: null,
+      mainAudio: null,
     });
   });
 

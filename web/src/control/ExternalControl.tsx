@@ -19,6 +19,7 @@ const ERRORS: Record<NonNullable<ControlStatus["error"]>, (port: number) => stri
   no_address: () => "No local network address found",
   port_in_use: (port) => `Port ${port} is in use`,
   unavailable: () => "External control unavailable: the listener could not start",
+  cert_store: () => "Certificate store unreadable — see the runbook",
 };
 
 const QUIET = 4; // modules of white around the code, as scanners expect

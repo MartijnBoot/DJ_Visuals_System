@@ -100,7 +100,12 @@ describe("requests, approval and rejection (SD4, SD18, AC10)", () => {
 
   it("a right code waits, with the hint and a sequence label", () => {
     const device = waiting();
-    expect(device).toEqual({ deviceId: expect.any(String), hint: HINT, label: "Device 1" });
+    expect(device).toEqual({
+      deviceId: expect.any(String),
+      hint: HINT,
+      label: "Device 1",
+      sends: [],
+    });
     expect(pairing.pending()).toEqual([device]);
     expect(waiting(OTHER_IP).label).toBe("Device 2");
   });

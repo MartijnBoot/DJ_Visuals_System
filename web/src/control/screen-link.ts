@@ -79,12 +79,15 @@ export function toScreenState({ profiles, dials, capture, cameras, started }: Sc
     storedPalette: profiles.storedPalette,
     primary: profiles.primary,
     dials: { recognisability: dials.recognisability, reactivity: dials.reactivity },
-    cameras: cameras.slice(0, 64).map(({ deviceId, label }) => ({ deviceId, label })),
+    cameras: cameras
+      .slice(0, 64)
+      .map(({ deviceId, label }) => ({ deviceId, label, remote: false })),
     cameraId: capture.cameraId ?? null,
     camera: capture.camera,
     audio: capture.audio,
     started,
     reason: profiles.reason,
+    mainAudio: null,
   };
   return state;
 }
@@ -118,6 +121,7 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
     const message = result.data;
     if (message.type === "control") return deps.onControl(message.deviceId, message.control);
     if (message.type === "superseded") return update({ superseded: true });
+    if (message.type === "offer" || message.type === "candidate") return; // B-06 T13
     const fresh = message.status.devices.filter((d) => !seen.has(d.deviceId));
     for (const d of fresh) seen.add(d.deviceId);
     update({ status: message.status });

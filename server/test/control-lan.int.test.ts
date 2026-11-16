@@ -129,6 +129,8 @@ describe("switching on (AC3, AC5, PD8)", () => {
       code: expect.stringMatching(/^[A-Z2-9]{6}$/),
       devices: [],
       pending: [],
+      senders: [],
+      fingerprint: null,
     });
     expect(await refused("127.0.0.1", controlPort)).toBe(false);
   });
@@ -203,6 +205,8 @@ describe("switching off (AC6)", () => {
       code: null,
       devices: [],
       pending: [],
+      senders: [],
+      fingerprint: null,
     });
     expect(await refused("127.0.0.1", controlPort)).toBe(true);
   });

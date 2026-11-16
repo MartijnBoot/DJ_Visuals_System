@@ -104,7 +104,9 @@ describe("request expiry (SD18, AC10)", () => {
       (first.socket.sent as ToDevice[]).filter((m) => m.type === "pending").at(-1);
     expect(pendingOf()).toEqual({
       type: "pending",
-      requests: [{ deviceId: second.deviceId, hint: "Safari on iPhone", label: "Device 2" }],
+      requests: [
+        { deviceId: second.deviceId, hint: "Safari on iPhone", label: "Device 2", sends: [] },
+      ],
     });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(pendingOf()).toEqual({ type: "pending", requests: [] });

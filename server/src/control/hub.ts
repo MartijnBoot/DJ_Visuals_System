@@ -64,6 +64,8 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
     code: pairing.code(),
     devices: pairing.devices(),
     pending: pairing.pending(),
+    senders: [],
+    fingerprint: null,
     ...(error ? { error } : {}),
   });
 
@@ -136,7 +138,7 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
       log.info({ device: label }, "device accepted");
       if (link) {
         link.approved = true;
-        send(link.socket, { type: "approved", key: result.key, deviceId });
+        send(link.socket, { type: "approved", key: result.key, deviceId, sends: [] });
         welcome(link);
       }
     } else if (result.kind === "refused") {
@@ -225,6 +227,11 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
         return accept(message.deviceId);
       case "reject":
         return reject(message.deviceId);
+      case "answer":
+      case "candidate":
+      case "stream":
+        // Relayed from B-06 T8 on; until then dropped as before.
+        return log.warn({ socket: "screen", type: message.type }, "control message dropped");
     }
   };
 
@@ -306,7 +313,7 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
       const link: Link = { socket, approved: true, label };
       links.set(deviceId, link);
       log.info({ device: label }, "device reconnected");
-      send(socket, { type: "approved", key, deviceId });
+      send(socket, { type: "approved", key, deviceId, sends: [] });
       welcome(link);
       return deviceId;
     },

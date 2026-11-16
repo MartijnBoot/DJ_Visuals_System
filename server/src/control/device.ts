@@ -76,6 +76,10 @@ export function attachDevice(
           return hub.accept(message.deviceId);
         case "reject":
           return hub.reject(message.deviceId);
+        case "offer":
+        case "candidate":
+          // Relayed from B-06 T8 on, for senders only; until then dropped as before.
+          return log.warn({ socket: "device", type: message.type }, "control message dropped");
         default:
           return hub.control(deviceId, message);
       }

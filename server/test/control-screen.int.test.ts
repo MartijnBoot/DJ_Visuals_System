@@ -64,6 +64,7 @@ const state = (profiles: number): ScreenState => ({
   audio: "idle",
   started: false,
   reason: null,
+  mainAudio: null,
 });
 
 const warns = () => server!.lines().filter((l) => l.level === 40);
@@ -95,6 +96,8 @@ describe("the screen socket's Origin (AC16, SD25, PD2)", () => {
         code: null,
         devices: [],
         pending: [],
+        senders: [],
+        fingerprint: null,
       },
     });
   });

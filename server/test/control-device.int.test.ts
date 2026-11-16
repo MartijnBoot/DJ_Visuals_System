@@ -47,12 +47,13 @@ const state: ScreenState = {
   storedPalette: ["#000000", "#ffffff"],
   primary: 1,
   dials: { recognisability: 0.3, reactivity: 0.7 },
-  cameras: [{ deviceId: "cam-1", label: CAMERA_LABEL }],
+  cameras: [{ deviceId: "cam-1", label: CAMERA_LABEL, remote: false }],
   cameraId: "cam-1",
   camera: "ok",
   audio: "ok",
   started: true,
   reason: null,
+  mainAudio: null,
 };
 
 beforeEach(async () => {
@@ -201,7 +202,7 @@ describe("requests (AC8, AC9, AC15, AC34)", () => {
     const { client, deviceId } = await waiting();
     expect(client.messages).toEqual([{ type: "waiting" }]);
     const status = await statusWhere((s) => s.pending.length === 1);
-    expect(status.pending).toEqual([{ deviceId, hint: HINT, label: "Device 1" }]);
+    expect(status.pending).toEqual([{ deviceId, hint: HINT, label: "Device 1", sends: [] }]);
   });
 
   it("an approved controller is sent the pending list on every change", async () => {
@@ -210,7 +211,7 @@ describe("requests (AC8, AC9, AC15, AC34)", () => {
     const pending = await first.client.find((m) => m.type === "pending" && m.requests.length === 1);
     expect(pending).toEqual({
       type: "pending",
-      requests: [{ deviceId: second.deviceId, hint: HINT, label: "Device 2" }],
+      requests: [{ deviceId: second.deviceId, hint: HINT, label: "Device 2", sends: [] }],
     });
   });
 
@@ -324,7 +325,7 @@ describe("approval (AC10, AC11, SD5)", () => {
     const again = await device();
     again.send({ type: "hello", key });
     const first = await again.find(() => true);
-    expect(first).toEqual({ type: "approved", key, deviceId });
+    expect(first).toEqual({ type: "approved", key, deviceId, sends: [] });
     expect(await again.find(is("state"))).toEqual({ type: "state", state });
     expect(again.messages[1]?.type).toBe("state");
   });

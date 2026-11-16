@@ -20,6 +20,7 @@ const state: ScreenState = {
   audio: "idle",
   started: false,
   reason: null,
+  mainAudio: null,
 };
 
 class FakeSocket {
@@ -95,7 +96,7 @@ function live() {
   storage.set("key", KEY);
   make();
   latest().open();
-  latest().deliver({ type: "approved", key: KEY, deviceId: "d1" });
+  latest().deliver({ type: "approved", key: KEY, deviceId: "d1", sends: [] });
   latest().deliver({ type: "state", state });
   expect(link.view().locked).toBe(false);
 }
@@ -167,7 +168,7 @@ describe("pairing (AC8, AC10)", () => {
     latest().deliver({ type: "waiting" });
     expect(link.view()).toMatchObject({ status: "waiting", locked: true });
     expect(LINK_TEXT.waiting).toBe("Waiting for approval");
-    latest().deliver({ type: "approved", key: KEY, deviceId: "d1" });
+    latest().deliver({ type: "approved", key: KEY, deviceId: "d1", sends: [] });
     expect(storage.get("key")).toBe(KEY);
     expect(link.view()).toMatchObject({ locked: true, deviceId: "d1" });
     latest().deliver({ type: "state", state });
@@ -206,7 +207,7 @@ describe("pairing (AC8, AC10)", () => {
     live();
     latest().deliver({
       type: "pending",
-      requests: [{ deviceId: "d2", hint: "Chrome on Android", label: "Device 2" }],
+      requests: [{ deviceId: "d2", hint: "Chrome on Android", label: "Device 2", sends: [] }],
     });
     expect(link.view().pending).toHaveLength(1);
     latest().deliver({ type: "screen", connected: false });
@@ -237,7 +238,7 @@ describe("controls (AC27)", () => {
     expect(link.send({ type: "dials", reactivity: 0.1 })).toBeNull();
     vi.advanceTimersByTime(500);
     latest().open();
-    latest().deliver({ type: "approved", key: KEY, deviceId: "d1" });
+    latest().deliver({ type: "approved", key: KEY, deviceId: "d1", sends: [] });
     latest().deliver({ type: "state", state });
     expect(latest().sent).toEqual([{ type: "hello", key: KEY }]);
   });
@@ -321,7 +322,7 @@ describe("reconnecting (SD12, AC11, AC27, AC28)", () => {
     hash = `#code=${CODE}`;
     make({ load: () => null, save: () => {}, clear: () => {} });
     latest().open();
-    latest().deliver({ type: "approved", key: KEY, deviceId: "d1" });
+    latest().deliver({ type: "approved", key: KEY, deviceId: "d1", sends: [] });
     latest().drop();
     vi.advanceTimersByTime(500);
     latest().open();
@@ -341,7 +342,7 @@ describe("reconnecting (SD12, AC11, AC27, AC28)", () => {
     live();
     latest().deliver({
       type: "pending",
-      requests: [{ deviceId: "d2", hint: "Chrome on Android", label: "Device 2" }],
+      requests: [{ deviceId: "d2", hint: "Chrome on Android", label: "Device 2", sends: [] }],
     });
     latest().deliver({ type: "ended" });
     expect(link.view().pending).toEqual([]);
@@ -375,7 +376,7 @@ describe("subscribe", () => {
     const listener = vi.fn();
     link.subscribe(listener);
     latest().open();
-    latest().deliver({ type: "approved", key: KEY, deviceId: "d1" });
+    latest().deliver({ type: "approved", key: KEY, deviceId: "d1", sends: [] });
     latest().deliver({ type: "state", state });
     expect(listener.mock.calls.length).toBeGreaterThanOrEqual(2);
   });

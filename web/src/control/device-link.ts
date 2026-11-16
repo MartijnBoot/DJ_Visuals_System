@@ -31,6 +31,7 @@ export type LinkStatus =
   | "expired"
   | "wrong_code"
   | "too_many"
+  | "audio_taken"
   | "throttled"
   | "reconnecting"
   | "screen_off"
@@ -46,6 +47,7 @@ export const LINK_TEXT: Readonly<Record<LinkStatus, string>> = {
   expired: "Request expired — try again",
   wrong_code: "Wrong code",
   too_many: "Too many devices",
+  audio_taken: "Another device is sending audio",
   throttled: "Too many wrong codes — try again in a minute",
   reconnecting: "Reconnecting…",
   screen_off: "Screen not connected",
