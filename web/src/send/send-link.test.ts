@@ -4,7 +4,7 @@ import type { ToDevice } from "@djv/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakePeer, FakeTrack } from "./fake-peer.ts";
 import { UNREACHABLE_MS } from "./peer.ts";
-import { createSendLink, SEND_TEXT, type SendLink } from "./send-link.ts";
+import { createSendLink, GIVE_UP_MS, SEND_TEXT, type SendLink } from "./send-link.ts";
 
 const KEY = "AAAAAAAAAAAAAAAAAAAAAA";
 const CODE = "ABC234";
@@ -245,6 +245,32 @@ describe("pairing ended (SD18, AC26)", () => {
     socket().deliver({ type: "refused", reason: "ended" });
     expect([video.readyState, audio.readyState]).toEqual(["ended", "ended"]);
     expect(link.view().text).toBe("Pairing ended — scan the code again");
+  });
+
+  it("a server that stays unreachable for 30 s ends the pairing: capture stopped, key cleared (AC26 restart, review C7)", async () => {
+    await live();
+    socket().drop(); // the server stopped; nothing listens on CONTROL_PORT after it restarts
+    await vi.advanceTimersByTimeAsync(GIVE_UP_MS - 1);
+    expect(link.view().text).toBe("Reconnecting…");
+    expect([video.readyState, audio.readyState]).toEqual(["live", "live"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(link.view().text).toBe("Pairing ended — scan the code again");
+    expect([video.readyState, audio.readyState]).toEqual(["ended", "ended"]);
+    expect(storage.has("key")).toBe(false);
+    const sockets = FakeSocket.all.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeSocket.all.length).toBe(sockets); // it stops trying
+  });
+
+  it("a socket that opens again within the 30 s keeps the pairing and the capture (SD18)", async () => {
+    await live();
+    socket().drop();
+    await vi.advanceTimersByTimeAsync(GIVE_UP_MS - 5_000);
+    socket().open();
+    socket().deliver({ type: "approved", key: KEY, deviceId: "d1", sends: ["video", "audio"] });
+    await vi.advanceTimersByTimeAsync(GIVE_UP_MS);
+    expect(link.view().status).toBe("connecting");
+    expect([video.readyState, audio.readyState]).toEqual(["live", "live"]);
   });
 
   it("stop closes everything and stops the tracks", async () => {

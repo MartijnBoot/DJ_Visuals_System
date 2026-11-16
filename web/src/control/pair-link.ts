@@ -7,7 +7,9 @@
 //   reconnects without a new approval. After an approval only the key is used.
 // - A dropped socket reconnects at 0.5 s doubling to 5 s, and at once when the page becomes
 //   visible or the network comes back. A server that does not answer at all is retried for ever:
-//   a browser cannot tell a stopped server from a Wi-Fi drop (B-04 PD4).
+//   a browser cannot tell a stopped server from a Wi-Fi drop (B-04 PD4). A sender gives up
+//   instead (`giveUpMs`): no socket open for that long ends the pairing, so its capture stops
+//   after a server restart that leaves External control off (B-06 AC26, review C7).
 // - "Pairing ended" (ended, a key refused, or an approval for another role) removes the key and
 //   stops trying; any other refusal stops trying until a code is entered again.
 import {
@@ -73,6 +75,8 @@ export interface PairHandlers {
   onMessage(message: AfterPairing): void;
   /** The pairing ended, before the status says so. */
   onEnded?(): void;
+  /** Ends the pairing when no socket has opened for this long after a drop; absent: never. */
+  giveUpMs?: number;
 }
 
 export interface PairLink<S extends string = never> {
@@ -103,6 +107,8 @@ export function createPairLink<S extends string = never>(
   const backoff = createBackoff();
   let socket: SocketLike | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  /** Since the socket dropped with no new one open (`giveUpMs`). */
+  let giveUp: ReturnType<typeof setTimeout> | null = null;
   let status: PairStatus | S = "needs_code";
   let code: string | null = null;
   /**
@@ -126,7 +132,13 @@ export function createPairLink<S extends string = never>(
     current?.close();
   };
 
+  const clearGiveUp = () => {
+    if (giveUp) clearTimeout(giveUp);
+    giveUp = null;
+  };
+
   const end = () => {
+    clearGiveUp();
     deps.storage.clear();
     key = null;
     handlers.onEnded?.();
@@ -175,6 +187,7 @@ export function createPairLink<S extends string = never>(
     socket = ws;
     ws.onopen = () => {
       if (socket !== ws) return;
+      clearGiveUp();
       backoff.reset();
       ws.send(JSON.stringify(hello()));
     };
@@ -195,6 +208,12 @@ export function createPairLink<S extends string = never>(
       approved = false;
       if (halted) return;
       set("reconnecting");
+      if (handlers.giveUpMs !== undefined && giveUp === null) {
+        giveUp = setTimeout(() => {
+          giveUp = null;
+          if (!halted && socket?.readyState !== OPEN) end();
+        }, handlers.giveUpMs);
+      }
       timer = setTimeout(connect, backoff.next());
     };
   };
@@ -240,6 +259,7 @@ export function createPairLink<S extends string = never>(
     },
 
     stop() {
+      clearGiveUp();
       halted = true;
       if (timer) clearTimeout(timer);
       timer = null;

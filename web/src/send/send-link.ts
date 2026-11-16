@@ -20,6 +20,12 @@ export const SEND_TEXT: Readonly<Record<SendStatus, string>> = {
   live: "Connected",
 };
 
+/**
+ * No socket open for this long after a drop ends the pairing (AC26: a server restart leaves
+ * External control off, so nothing answers; review C7). Long enough for a Wi-Fi blip.
+ */
+export const GIVE_UP_MS = 30_000;
+
 /** AC13, SD10. */
 export const UNREACHABLE_TEXT =
   "Could not reach the screen machine — the network may block devices from talking to each other";
@@ -108,6 +114,7 @@ export function createSendLink(deps: SendLinkDeps): SendLink {
 
   const link = createPairLink<"screen_off" | "live">(deps, {
     sends: deps.sends,
+    giveUpMs: GIVE_UP_MS,
     onChange: () => {
       // Any refusal or an ended pairing stops the capture; a reconnect keeps it (SD18).
       const status = link.status();

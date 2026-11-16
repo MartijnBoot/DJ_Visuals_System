@@ -349,7 +349,10 @@ media passes it.
   `stream { kind, active }` go back to that sender. When the target screen (re)connects, each sender is
   told `screen { connected }` and offers again; a screen reload leaves the senders' capture
   running ("Screen reconnecting…"). New code, Disconnect, switching off or a restart end the
-  pairing: the sender stops its capture ("Pairing ended — scan the code again").
+  pairing: the sender stops its capture ("Pairing ended — scan the code again"). After a restart
+  External control is off and nothing answers, so a sender whose socket stays unopened for 30 s
+  ends the pairing itself (`GIVE_UP_MS`, `web/src/send/send-link.ts`); a controller keeps retrying
+  (B-04 PD4).
 - **Peer connections.** `RTCPeerConnection({ iceServers: [] })` on both sides: host candidates
   only, so a network that isolates clients cannot connect them (after 10 s without `connected`,
   "Could not reach the screen machine — the network may block devices from talking to each

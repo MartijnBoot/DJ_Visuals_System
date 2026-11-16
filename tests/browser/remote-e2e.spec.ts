@@ -16,6 +16,9 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-server.ts";
 import { record, start } from "./helpers.ts";
 
+/** `GIVE_UP_MS` in `web/src/send/send-link.ts`: a sender gives up on an unanswering server. */
+const GIVE_UP_MS = 30_000;
+
 let server: ControlServer;
 const contexts: BrowserContext[] = [];
 
@@ -183,7 +186,7 @@ const deviceLabels = (p: Page) =>
 test("the spec's scenario end to end: pair, approve, Start, audio and camera fallback, reload, New code, restart — and nothing private in any log (AC12, AC19, AC23, AC25, AC26, AC34)", async ({
   page,
 }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(300_000); // the restart step waits out GIVE_UP_MS
   const evidence: Evidence = { logs: [], console: [], peers: [], lan: [] };
   await watch(page.context(), evidence);
   const codes: string[] = [];
@@ -368,11 +371,13 @@ test("the spec's scenario end to end: pair, approve, Start, audio and camera fal
     await server.close();
     await expect(last.getByTestId("link-line")).toHaveText("Reconnecting…", { timeout: 15_000 });
     await server.restart();
+    // External control comes back off and nobody switches it on: nothing answers the sender,
+    // which gives up after GIVE_UP_MS (review C7).
     await expect(page.getByTestId("control-switch")).not.toBeChecked({ timeout: 15_000 });
-    await page.getByTestId("control-switch").click();
-    await expect(page.getByTestId("control-switch")).toBeChecked();
-    codes.push((await page.getByTestId("control-code").textContent())!);
-    await expect(last.getByTestId("link-line")).toHaveText(ENDED, { timeout: 15_000 });
+    await expect(last.getByTestId("link-line")).toHaveText(ENDED, {
+      timeout: GIVE_UP_MS + 15_000,
+    });
+    await expect(page.getByTestId("control-switch")).not.toBeChecked();
     await expect
       .poll(async () => (await tracks(last)).every((t) => t.endsWith(":ended")))
       .toBe(true);
