@@ -7,7 +7,6 @@
 // a sender's lines also name its role (B-06 SD25) and say "sender" where a controller's say
 // "device". Approved senders are listed apart, with whether their socket is open (B-06 PD5).
 import {
-  MAX_SCREEN_MESSAGE,
   screenMessageSchema,
   type Control,
   type ControlStatus,
@@ -19,7 +18,7 @@ import {
 } from "@djv/shared";
 import type { WebSocket } from "ws";
 import type { Logger } from "../log.ts";
-import { receive, send } from "./channel.ts";
+import { receive, screenMaxBytes, send } from "./channel.ts";
 import type { DeviceHub } from "./device.ts";
 import type { Lan } from "./lan.ts";
 import type { Pairing } from "./pairing.ts";
@@ -88,11 +87,22 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
   const toApproved = (message: ToDevice) => {
     for (const link of links.values()) if (link.approved) send(link.socket, message);
   };
+  /** The state and the requests reach controllers only: a sender receives neither (B-06 SD6). */
+  const toControllers = (message: ToDevice) => {
+    for (const link of links.values()) {
+      if (link.approved && link.sends.length === 0) send(link.socket, message);
+    }
+  };
+  const toSenders = (message: ToDevice) => {
+    for (const link of links.values()) {
+      if (link.approved && link.sends.length > 0) send(link.socket, message);
+    }
+  };
 
   /** The panel's status and every approved controller's pending list (SD18). */
   const changed = () => {
     toTarget({ type: "status", status: status() });
-    toApproved({ type: "pending", requests: pairing.pending() });
+    toControllers({ type: "pending", requests: pairing.pending() });
   };
 
   const entryOf = (deviceId: string) =>
@@ -126,8 +136,15 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
     socket.close(REFUSED, "refused");
   };
 
-  /** What a device receives first once approved: the full state, then the requests (SD5). */
+  /**
+   * What a device receives first once approved: a controller the full state, then the requests
+   * (SD5); a sender only whether the target screen is there (B-06 SD16), to offer to it.
+   */
   const welcome = (link: Link) => {
+    if (link.sends.length > 0) {
+      send(link.socket, { type: "screen", connected: target !== null });
+      return;
+    }
     send(
       link.socket,
       cached ? { type: "state", state: cached } : { type: "screen", connected: target !== null },
@@ -242,7 +259,7 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
     switch (message.type) {
       case "state":
         cached = message.state;
-        return toApproved({ type: "state", state: message.state });
+        return toControllers({ type: "state", state: message.state });
       case "applied":
         for (const { deviceId, seq } of message.entries) {
           const link = links.get(deviceId);
@@ -263,9 +280,18 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
         return reject(message.deviceId);
       case "answer":
       case "candidate":
-      case "stream":
-        // Relayed from B-06 T8 on; until then dropped as before.
-        return log.warn({ socket: "screen", type: message.type }, "control message dropped");
+      case "stream": {
+        // To that approved sender only, without the id (B-06 SD16); anyone else hears nothing.
+        const link = links.get(message.deviceId);
+        if (!link?.approved || link.sends.length === 0) return;
+        if (message.type === "answer")
+          return send(link.socket, { type: "answer", sdp: message.sdp });
+        if (message.type === "stream") {
+          return send(link.socket, { type: "stream", active: message.active });
+        }
+        const { candidate, sdpMid, sdpMLineIndex } = message;
+        return send(link.socket, { type: "candidate", candidate, sdpMid, sdpMLineIndex });
+      }
     }
   };
 
@@ -288,9 +314,10 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
       target = socket;
       cached = null; // a new page sends its own state; the old one is no longer true (SD13)
       log.info("screen connected");
+      toSenders({ type: "screen", connected: true }); // they offer to it (B-06 SD18)
       receive(socket, {
         schema: screenMessageSchema,
-        maxBytes: MAX_SCREEN_MESSAGE,
+        maxBytes: screenMaxBytes,
         ratePerSecond: null,
         now,
         log,
@@ -360,6 +387,14 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
 
     control(deviceId: string, control: Control) {
       toTarget({ type: "control", deviceId, control });
+    },
+
+    sendsOf: (deviceId) => pairing.sendsOf(deviceId),
+
+    setup(deviceId, message) {
+      // B-06 SD16: to the target screen with the sender's id; with none, the sender offers again
+      // when one connects. Read nothing inside.
+      toTarget({ ...message, deviceId });
     },
 
     accept: (deviceId) => run(() => accept(deviceId)),
