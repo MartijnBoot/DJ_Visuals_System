@@ -40,6 +40,11 @@ export interface SessionDeps {
   ) => Promise<FeatureSource>;
   moduleUrl: string;
   createVideo: (stream: MediaStream) => HTMLVideoElement;
+  /**
+   * Resolves once a new camera's element has its first frame (at most 2 s, B-06 PD14); the old
+   * camera stays open and on screen until then. Default: at once.
+   */
+  videoReady?: (video: HTMLVideoElement) => Promise<void>;
   /** Where a click to resume a suspended context is heard (the document). */
   gestures: Pick<EventTarget, "addEventListener" | "removeEventListener">;
   storage?: Pick<Storage, "getItem" | "setItem">;
@@ -231,8 +236,12 @@ export function createSession(deps: SessionDeps): Session {
     }
     const track = stream.getVideoTracks()[0];
     if (stopped || !track) return stopTracks(stream);
+    const next = deps.createVideo(stream);
+    // The old camera keeps running and on screen until the new one has a frame (AC16).
+    await (deps.videoReady?.(next) ?? Promise.resolve());
+    if (stopped) return stopTracks(stream);
     hold("camera", stream, track);
-    video = deps.createVideo(stream);
+    video = next;
     cameraId = track.getSettings().deviceId ?? id;
     saveRemembered({ cameraId }, deps.storage);
     setStatus("camera", "ok");

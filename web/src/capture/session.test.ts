@@ -3,7 +3,7 @@
 // for the retry and mute clocks. Runs in Node, no jsdom.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadRemembered } from "./remembered.ts";
-import { createSession, type Session } from "./session.ts";
+import { createSession, type Session, type SessionDeps } from "./session.ts";
 
 class FakeTrack extends EventTarget {
   muted = false;
@@ -111,7 +111,7 @@ class FakeContext extends EventTarget {
 
 const LOUD = { level: 0.8, low: 0.9, mid: 0.3, high: 0.2, beat: 1, capturedAt: 100 };
 
-function rig() {
+function rig(extra: Partial<SessionDeps> = {}) {
   const media = fakeMediaDevices();
   const contexts: FakeContext[] = [];
   const sources: { stream: MediaStream; stop: ReturnType<typeof vi.fn> }[] = [];
@@ -137,6 +137,7 @@ function rig() {
     gestures,
     storage,
     log,
+    ...extra,
   });
   const logged = (kind: string, state: string) =>
     log.mock.calls.filter(([k, s]) => k === kind && s === state).length;
@@ -526,5 +527,45 @@ describe("the standby for remote audio (B-06 T11, SD7, AC21, AC27)", () => {
     await r.session.start({ audio: { kind: "system" } });
     await r.session.setAudio({ kind: "input", deviceId: "mic-2" });
     expect(loadRemembered(r.storage).audio).toEqual({ kind: "input", deviceId: "mic-2" });
+  });
+});
+
+describe("a camera switch waits for the new camera's first frame (B-06 T12, AC16, PD14)", () => {
+  it("keeps the old track and element until videoReady resolves, then swaps", async () => {
+    let ready: () => void = () => {};
+    const videoReady = vi.fn(
+      (_video: HTMLVideoElement) => new Promise<void>((resolve) => (ready = resolve)),
+    );
+    const r = rig({ videoReady });
+    const starting = r.session.start({});
+    await settle();
+    ready();
+    await starting;
+    const old = r.live("video")[0]!;
+    const oldVideo = r.session.state().video;
+    const switching = r.session.setCamera("cam-2");
+    await settle();
+    expect(videoReady).toHaveBeenCalledTimes(2);
+    expect(old.readyState).toBe("live");
+    expect(r.session.state().video).toBe(oldVideo);
+    expect(r.session.state().cameraId).toBe("cam-1");
+    ready();
+    await switching;
+    expect(old.readyState).toBe("ended");
+    expect(r.session.state().video).not.toBe(oldVideo);
+    expect(r.session.state().cameraId).toBe("cam-2");
+    expect(r.logged("camera", "lost")).toBe(0);
+  });
+
+  it("stopped while waiting: the new stream is stopped and nothing is published", async () => {
+    let ready: () => void = () => {};
+    const r = rig({ videoReady: () => new Promise<void>((resolve) => (ready = resolve)) });
+    const starting = r.session.start({});
+    await settle();
+    r.session.stop();
+    ready();
+    await starting;
+    expect(r.live("video")).toEqual([]);
+    expect(r.session.state().video).toBeNull();
   });
 });
