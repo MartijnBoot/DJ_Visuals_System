@@ -68,7 +68,7 @@ const changed = (before: string, after: string) => {
   const a = before.split("\r\n");
   const b = after.split("\r\n");
   expect(b).toHaveLength(a.length);
-  return a.flatMap((line, i) => (line === b[i] ? [] : [[line, b[i]!]]));
+  return a.flatMap((line, i): [string, string][] => (line === b[i] ? [] : [[line, b[i]!]]));
 };
 
 const params = (fmtp: string) => fmtp.replace(/^a=fmtp:\d+ /, "").split(";");
