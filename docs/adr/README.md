@@ -15,4 +15,5 @@ next number, never reuse one.
 
 | # | Title | Status |
 |---|---|---|
-| [0001](0001-setup-decision-record.md) | Setup Decision Record | Approved |
+| [0001](0001-setup-decision-record.md) | Setup Decision Record | Approved; question 2 partly superseded by 0002 |
+| [0002](0002-remote-input-over-the-lan.md) | Remote input may cross the LAN, opt-in and peer to peer | Accepted |
