@@ -3,7 +3,7 @@
 import type { ScreenMessage } from "@djv/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MUTE_LOSS_MS } from "../capture/session.ts";
-import { createPeers, type Peers } from "./peers.ts";
+import { createPeers, STALL_POLL_MS, type Peers } from "./peers.ts";
 
 class FakeTrack extends EventTarget {
   muted = false;
@@ -338,5 +338,72 @@ describe("stats (PD15)", () => {
     // Nothing emitted since: no sample.
     expect(await peers.stats("d1", "audio")).toBeNull();
     expect(await peers.stats("d9", "audio")).toBeNull();
+  });
+});
+
+describe("a stalled feed (PD8 as amended: no packets for 1 s while streaming)", () => {
+  const inbound = (peer: FakePeer, kind: "audio" | "video", packetsReceived: number) =>
+    peer.stats.set(`IN-${kind}`, { id: `IN-${kind}`, type: "inbound-rtp", kind, packetsReceived });
+
+  it("is lost after 1 s without a new packet while active, and back when packets move", async () => {
+    peers.offer("d1", "v=0\r\n");
+    await settle();
+    const peer = latest();
+    peer.track("audio");
+    inbound(peer, "audio", 10);
+    peers.setActive("d1", true);
+    await vi.advanceTimersByTimeAsync(STALL_POLL_MS); // sees 10
+    inbound(peer, "audio", 20);
+    await vi.advanceTimersByTimeAsync(STALL_POLL_MS); // sees 20: the last change
+    await vi.advanceTimersByTimeAsync(MUTE_LOSS_MS - STALL_POLL_MS);
+    expect(feed("d1", "audio")?.lost).toBe(false);
+    await vi.advanceTimersByTimeAsync(STALL_POLL_MS);
+    expect(feed("d1", "audio")?.lost).toBe(true);
+    inbound(peer, "audio", 21);
+    await vi.advanceTimersByTimeAsync(STALL_POLL_MS);
+    expect(feed("d1", "audio")?.lost).toBe(false);
+  });
+
+  it("a paused sender is never stalled: it sends nothing by design", async () => {
+    peers.offer("d1", "v=0\r\n");
+    await settle();
+    latest().track("video");
+    inbound(latest(), "video", 5);
+    peers.setActive("d1", false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(feed("d1", "video")?.lost).toBe(false);
+  });
+
+  it("the second counts from the moment the screen asked it to stream", async () => {
+    peers.offer("d1", "v=0\r\n");
+    await settle();
+    latest().track("video");
+    inbound(latest(), "video", 5);
+    await vi.advanceTimersByTimeAsync(10_000); // paused all along
+    peers.setActive("d1", true);
+    await vi.advanceTimersByTimeAsync(MUTE_LOSS_MS - STALL_POLL_MS);
+    expect(feed("d1", "video")?.lost).toBe(false);
+    inbound(latest(), "video", 6); // the first frames after the resume
+    await vi.advanceTimersByTimeAsync(MUTE_LOSS_MS);
+    expect(feed("d1", "video")?.lost).toBe(false);
+  });
+
+  it("a feed with no inbound statistics while active is lost after the second", async () => {
+    peers.offer("d1", "v=0\r\n");
+    await settle();
+    latest().track("audio");
+    peers.setActive("d1", true);
+    await vi.advanceTimersByTimeAsync(MUTE_LOSS_MS + STALL_POLL_MS);
+    expect(feed("d1", "audio")?.lost).toBe(true);
+  });
+
+  it("tells the page when a feed stalls", async () => {
+    peers.offer("d1", "v=0\r\n");
+    await settle();
+    latest().track("audio");
+    peers.setActive("d1", true);
+    const before = changes;
+    await vi.advanceTimersByTimeAsync(MUTE_LOSS_MS + STALL_POLL_MS);
+    expect(changes).toBeGreaterThan(before);
   });
 });

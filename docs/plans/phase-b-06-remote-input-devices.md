@@ -88,6 +88,14 @@ the browser step instead of trusting the test root, SD27), PD14 (AC16 extended t
 between two local cameras, with the session waiting up to 2 s for the new camera's first frame)
 and H8's wording (Risks).
 
+**PD8, amended by the owner, 2026-11-16 (during T13):** in headless Chromium a sender stopping its
+track gives the receiver no `ended`, no `mute`, and the peer stays `connected` (probed for 8 s,
+audio and video), so the three conditions never see a stopped share or a frozen sender. A fourth
+condition is added: a feed whose inbound `packetsReceived` has not moved for 1 s (`MUTE_LOSS_MS`),
+counted only while the screen has asked that sender to stream (`setActive(true)`), is lost; it is
+back once the count moves. The screen reads the statistics every 250 ms. It lands in
+`web/src/remote/peers.ts` (T10's file) as a commit on T13's branch.
+
 ## Files
 
 | Path | Create/Modify | Purpose |

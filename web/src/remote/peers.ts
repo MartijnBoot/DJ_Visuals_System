@@ -3,7 +3,11 @@
 // host candidates, nothing needs internet, no media passes the server (SD10). A new offer from a
 // device replaces its connection (the sender offers again whenever the screen reconnects). Each
 // received track is a feed, lost at once when it ends or the peer becomes `disconnected` or
-// `failed`, and after `MUTE_LOSS_MS` of mute (PD8). `setActive` asks the sender to pause or
+// `failed`, and after `MUTE_LOSS_MS` of mute (PD8); and, as the owner amended PD8 (2026-11-16),
+// when its inbound `packetsReceived` has not moved for `MUTE_LOSS_MS` while the sender was asked
+// to stream — Chromium gives a receiver no ended, mute or state change when the sender stops its
+// track, so the statistics are the only sign. Read every `STALL_POLL_MS`. `setActive` asks the
+// sender to pause or
 // resume its encoding, once per change (SD12). Logs carry the device id and an event, never an
 // SDP or a candidate (SD25); the caller maps the id to the sequence label.
 import type { ScreenMessage } from "@djv/shared";
@@ -12,6 +16,9 @@ import { opusMusic } from "./sdp.ts";
 import { legMs, type LegSample } from "./stats.ts";
 
 export type FeedKind = "audio" | "video";
+
+/** How often the statistics are read for a stalled feed (PD8 as amended). */
+export const STALL_POLL_MS = 250;
 
 export interface Feed {
   deviceId: string;
@@ -58,6 +65,11 @@ interface FeedState {
   feed: Omit<Feed, "lost">;
   ended: boolean;
   mutedLong: boolean;
+  /** No new packet for `MUTE_LOSS_MS` while streaming (PD8 as amended). */
+  stalled: boolean;
+  /** The last `packetsReceived` seen, and when it last moved (or streaming began). */
+  packets: number | null;
+  movedAt: number;
   release(): void;
 }
 
@@ -67,6 +79,8 @@ interface Entry {
   peerDown: boolean;
   connected: boolean;
   active: boolean | null;
+  /** When the screen last asked this sender to stream. */
+  activeSince: number;
   samples: Partial<Record<FeedKind, LegSample | null>>;
 }
 
@@ -99,6 +113,9 @@ export function createPeers(deps: PeersDeps): Peers {
       feed: { deviceId, kind, track, stream },
       ended: track.readyState === "ended",
       mutedLong: false,
+      stalled: false,
+      packets: null,
+      movedAt: deps.now(),
       release: () => {
         track.removeEventListener("ended", onEnded);
         track.removeEventListener("mute", onMute);
@@ -156,6 +173,40 @@ export function createPeers(deps: PeersDeps): Peers {
     }
   };
 
+  /** One read of each streaming connection's inbound packet counts (PD8 as amended). */
+  const checkStalls = async () => {
+    for (const [deviceId, entry] of [...entries]) {
+      if (entry.active !== true || entry.feeds.size === 0) continue;
+      let report: RTCStatsReport;
+      try {
+        report = await entry.pc.getStats();
+      } catch {
+        continue;
+      }
+      if (entries.get(deviceId) !== entry) continue;
+      const now = deps.now();
+      for (const [kind, state] of entry.feeds) {
+        let packets: number | null = null;
+        for (const stat of (report as Map<string, Record<string, unknown>>).values()) {
+          if (stat.type === "inbound-rtp" && stat.kind === kind) {
+            packets = typeof stat.packetsReceived === "number" ? stat.packetsReceived : null;
+          }
+        }
+        if (packets !== null && packets !== state.packets) {
+          state.packets = packets;
+          state.movedAt = now;
+        }
+        const since = Math.max(state.movedAt, entry.activeSince);
+        const stalled = now - since >= MUTE_LOSS_MS;
+        if (stalled === state.stalled) continue;
+        state.stalled = stalled;
+        deps.log(stalled ? `${kind} stalled` : `${kind} flowing`, deviceId);
+        changed();
+      }
+    }
+  };
+  const poll = setInterval(() => void checkStalls(), STALL_POLL_MS);
+
   return {
     offer(deviceId, sdp) {
       close(deviceId);
@@ -167,6 +218,7 @@ export function createPeers(deps: PeersDeps): Peers {
         peerDown: false,
         connected: false,
         active: null, // a new connection starts paused at the sender: say it again
+        activeSince: deps.now(),
         samples: {},
       };
       entries.set(deviceId, entry);
@@ -219,6 +271,7 @@ export function createPeers(deps: PeersDeps): Peers {
       const entry = entries.get(deviceId);
       if (!entry || entry.active === active) return;
       entry.active = active;
+      if (active) entry.activeSince = deps.now();
       deps.send({ type: "stream", deviceId, active });
     },
 
@@ -226,7 +279,8 @@ export function createPeers(deps: PeersDeps): Peers {
       const out: Feed[] = [];
       for (const entry of entries.values()) {
         for (const state of entry.feeds.values()) {
-          out.push({ ...state.feed, lost: state.ended || state.mutedLong || entry.peerDown });
+          const lost = state.ended || state.mutedLong || state.stalled || entry.peerDown;
+          out.push({ ...state.feed, lost });
         }
       }
       return out;
@@ -259,6 +313,7 @@ export function createPeers(deps: PeersDeps): Peers {
     devices: () => [...entries.keys()],
 
     close() {
+      clearInterval(poll);
       for (const deviceId of [...entries.keys()]) close(deviceId);
       firstOffer.clear();
     },
