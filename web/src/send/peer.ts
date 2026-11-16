@@ -2,9 +2,9 @@
 // T17): one at a time, made when the target screen is connected, with no ICE server. Each track
 // goes `sendonly`; video carries `contentHint = "motion"`, audio is held to 128 kb/s, and the
 // offer's Opus line asks for stereo music. A new connection starts paused; the screen's `stream`
-// sets every encoding's `active` (SD12). No `connected` within 10 s of the offer is the AC13
+// sets `active` on the encodings of its kind (SD12), so a sender of both pauses its video apart. No `connected` within 10 s of the offer is the AC13
 // state. `close` keeps the tracks (a screen reload, SD18); `end` stops them (the pairing ended).
-import type { DeviceMessage } from "@djv/shared";
+import type { DeviceMessage, SendKind } from "@djv/shared";
 import { opusMusic } from "../remote/sdp.ts";
 
 /** No peer connection reached within this long: the AC13 message (SD10). */
@@ -30,9 +30,9 @@ export interface SenderPeer {
   connect(): void;
   answer(sdp: string): Promise<void>;
   candidate(init: RTCIceCandidateInit): Promise<void>;
-  setActive(active: boolean): Promise<void>;
-  /** Whether the screen asked for the stream (SD12). */
-  active(): boolean;
+  setActive(kind: SendKind, active: boolean): Promise<void>;
+  /** Whether the screen asked for this kind's stream (SD12). */
+  active(kind: SendKind): boolean;
   state(): SenderPeerState;
   /** Closes the connection; the tracks keep running. */
   close(): void;
@@ -46,7 +46,8 @@ export function createSenderPeer(deps: SenderPeerDeps): SenderPeer {
   const createPeer = deps.createPeer ?? defaultPeer;
   let pc: RTCPeerConnection | null = null;
   let state: SenderPeerState = "idle";
-  let active = false;
+  const paused = (): Record<SendKind, boolean> => ({ video: false, audio: false });
+  let active = paused();
   let timer: ReturnType<typeof setTimeout> | null = null;
   const changed = () => deps.onChange?.();
 
@@ -65,15 +66,17 @@ export function createSenderPeer(deps: SenderPeerDeps): SenderPeer {
     clearTimer();
     pc?.close();
     pc = null;
-    active = false;
+    active = paused();
   };
 
-  /** Every encoding of every sender to `active`; a sender not ready yet takes it at the answer. */
+  /** Every encoding of every sender to its kind's `active`; one not ready takes it at the answer. */
   const apply = async (connection: RTCPeerConnection) => {
     for (const sender of connection.getSenders()) {
+      const kind = sender.track?.kind;
+      if (kind !== "video" && kind !== "audio") continue;
       const parameters = sender.getParameters();
       if (!parameters.encodings || parameters.encodings.length === 0) continue;
-      for (const encoding of parameters.encodings) encoding.active = active;
+      for (const encoding of parameters.encodings) encoding.active = active[kind];
       try {
         await sender.setParameters(parameters);
       } catch {
@@ -146,13 +149,13 @@ export function createSenderPeer(deps: SenderPeerDeps): SenderPeer {
       await pc?.addIceCandidate(init).catch(() => {});
     },
 
-    async setActive(next) {
-      active = next;
+    async setActive(kind, next) {
+      active = { ...active, [kind]: next };
       changed();
       if (pc) await apply(pc);
     },
 
-    active: () => active,
+    active: (kind) => active[kind],
     state: () => state,
 
     close() {

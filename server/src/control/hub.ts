@@ -287,7 +287,7 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
         if (message.type === "answer")
           return send(link.socket, { type: "answer", sdp: message.sdp });
         if (message.type === "stream") {
-          return send(link.socket, { type: "stream", active: message.active });
+          return send(link.socket, { type: "stream", kind: message.kind, active: message.active });
         }
         const { candidate, sdpMid, sdpMLineIndex } = message;
         return send(link.socket, { type: "candidate", candidate, sdpMid, sdpMLineIndex });

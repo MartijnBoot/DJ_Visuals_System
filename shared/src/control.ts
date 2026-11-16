@@ -189,8 +189,8 @@ export const toDeviceSchema = z.discriminatedUnion("type", [
   message("applied", { seq }),
   message("answer", { sdp }),
   message("candidate", candidateShape),
-  /** B-06 SD12: pause (false) or resume (true) the sender's encoding. */
-  message("stream", { active: z.boolean() }),
+  /** B-06 SD12: pause (false) or resume (true) the sender's encoding of one kind. */
+  message("stream", { kind: sendKind, active: z.boolean() }),
 ]);
 export type ToDevice = z.infer<typeof toDeviceSchema>;
 
@@ -211,7 +211,7 @@ export const screenMessageSchema = z.discriminatedUnion("type", [
   message("reject", { deviceId }),
   message("answer", { deviceId, sdp }),
   message("candidate", { deviceId, ...candidateShape }),
-  message("stream", { deviceId, active: z.boolean() }),
+  message("stream", { deviceId, kind: sendKind, active: z.boolean() }),
 ]);
 export type ScreenMessage = z.infer<typeof screenMessageSchema>;
 

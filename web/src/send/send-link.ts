@@ -58,8 +58,8 @@ export function createSendLink(deps: SendLinkDeps): SendLink {
     const unreachable = status === "live" && peer.state() === "unreachable";
     const lines: Partial<Record<SendKind, string>> = {};
     if (status === "live" && !unreachable) {
-      const on = peer.active();
       for (const kind of deps.sends) {
+        const on = peer.active(kind);
         lines[kind] = !on ? "Standing by" : kind === "video" ? "On screen" : "Sending audio";
       }
     }
@@ -99,7 +99,7 @@ export function createSendLink(deps: SendLinkDeps): SendLink {
           sdpMLineIndex: message.sdpMLineIndex,
         });
       case "stream":
-        if (screen) void peer.setActive(message.active);
+        if (screen) void peer.setActive(message.kind, message.active);
         return;
       default:
         return; // a controller's messages are never sent to a sender

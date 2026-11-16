@@ -76,30 +76,41 @@ describe("connect (SD10, SD20, PD11)", () => {
 });
 
 describe("pause and resume (SD12)", () => {
-  it("stream false sets active false on every encoding, true sets it true", async () => {
+  it("stream sets active on the encodings of its kind only (review C2)", async () => {
     peer.connect();
     await settle();
-    await peer.setActive(true);
-    expect(latest().senders.flatMap((s) => s.parameters.encodings.map((e) => e.active))).toEqual([
-      true,
-      true,
+    const actives = () =>
+      latest().senders.map((s) => [s.track.kind, s.parameters.encodings[0]!.active]);
+    await peer.setActive("audio", true);
+    expect(actives()).toEqual([
+      ["video", false],
+      ["audio", true],
     ]);
-    await peer.setActive(false);
-    expect(latest().senders.flatMap((s) => s.parameters.encodings.map((e) => e.active))).toEqual([
-      false,
-      false,
+    await peer.setActive("video", true);
+    expect(actives()).toEqual([
+      ["video", true],
+      ["audio", true],
     ]);
+    await peer.setActive("video", false);
+    expect(actives()).toEqual([
+      ["video", false],
+      ["audio", true],
+    ]);
+    expect(peer.active("video")).toBe(false);
+    expect(peer.active("audio")).toBe(true);
     expect(latest().senders[1]!.parameters.encodings[0]!.maxBitrate).toBe(128_000);
   });
 
   it("a new connection starts paused again", async () => {
     peer.connect();
     await settle();
-    await peer.setActive(true);
+    await peer.setActive("video", true);
+    await peer.setActive("audio", true);
     peer.connect();
     await settle();
     expect(latest().senders.every((s) => s.parameters.encodings[0]!.active === false)).toBe(true);
-    expect(peer.active()).toBe(false);
+    expect(peer.active("video")).toBe(false);
+    expect(peer.active("audio")).toBe(false);
   });
 });
 

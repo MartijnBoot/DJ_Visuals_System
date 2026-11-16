@@ -8,13 +8,16 @@
 //   the audio sender's track is fed, through a muted <audio> element (PD12), into a feature source
 //   on the session's own AudioContext (PD6), so the local input's source keeps running beside it
 //   and the fallback is instant; once ready, that sender becomes main (SD8).
-// - With System audio as the local choice, the share is stopped and the default input opened as
-//   the standby, without remembering it (PD2, AC21).
+// - At each arrival the session is asked for an input standby: with System audio as the local
+//   choice (running, still being picked at Start, or cancelled) it opens the default input in its
+//   place, without remembering it (PD2, AC21).
 // - A remote camera is listed once its peer is connected and its track is in, as
 //   "<hint> — Device n", id `remote:<deviceId>` (SD21); it is drawn only once picked and only
-//   once its element has a frame (AC16). A `remote:` id never reaches the session.
-// - Senders stream per PD7: the audio sender from Start on; a video sender while `picture`
-//   lists it active.
+//   once its element has a frame (AC16). A sender that offers again keeps its last picture until
+//   the new element has a frame (AC22). A camera whose element is gone is the no-camera look
+//   (B-01 AC13), never its last frame. A `remote:` id never reaches the session.
+// - Senders stream per PD7, each kind apart: the audio sender's audio from Start on; a sender's
+//   video while `picture` lists it active (a sender of both keeps its video paused until picked).
 import type { AudioFeatures, FeatureSource } from "@djv/audio";
 import type { DeviceEntry } from "@djv/shared";
 import type { Session } from "../capture/session.ts";
@@ -23,10 +26,9 @@ import type { Feed, Peers } from "./peers.ts";
 import { createPicture } from "./picture.ts";
 
 const REMOTE = "remote:";
-const DEFAULT_INPUT = { kind: "input", deviceId: "default" } as const;
 
 export interface SourcesDeps {
-  session: Pick<Session, "read" | "state" | "context" | "setCamera" | "setAudio">;
+  session: Pick<Session, "read" | "state" | "context" | "setCamera" | "inputStandby">;
   peers: Pick<Peers, "feeds" | "connection" | "setActive" | "drop" | "devices">;
   createFeatureSource(
     context: AudioContext,
@@ -91,7 +93,11 @@ export function createSources(deps: SourcesDeps): Sources {
   /** The first switch to remote is the arrival, not a restoration: no "restored remote". */
   let logsRestored = false;
   let standbyAsked = false;
-  const videos = new Map<string, { track: MediaStreamTrack; element: HTMLVideoElement }>();
+  /** Per sender: its element, and the one before it until the new one has a frame (AC22). */
+  const videos = new Map<
+    string,
+    { track: MediaStreamTrack; element: HTMLVideoElement; previous: HTMLVideoElement | null }
+  >();
   let shownVideo: HTMLVideoElement | null = null;
   let shownId: string | null = null;
   let signature = "";
@@ -160,10 +166,10 @@ export function createSources(deps: SourcesDeps): Sources {
       if (!ready || lost) return;
       arrived = true;
       main.arrived(sender.label);
-      // PD2, AC21: a running System audio share cannot be the standby; the default input is.
-      if (!standbyAsked && deps.session.state().audioChoice?.kind === "system") {
+      // PD2, AC21: a System audio share cannot be the standby; the session opens the default input.
+      if (!standbyAsked) {
         standbyAsked = true;
-        void deps.session.setAudio(DEFAULT_INPUT, { remember: false });
+        void deps.session.inputStandby();
       }
     } else if (lost && !wasLost) {
       main.lost();
@@ -188,7 +194,11 @@ export function createSources(deps: SourcesDeps): Sources {
     for (const feed of feeds) {
       const held = videos.get(feed.deviceId);
       if (held?.track !== feed.track) {
-        videos.set(feed.deviceId, { track: feed.track, element: deps.createVideo(feed.stream) });
+        videos.set(feed.deviceId, {
+          track: feed.track,
+          element: deps.createVideo(feed.stream),
+          previous: held ? (deps.hasFrame(held.element) ? held.element : held.previous) : null,
+        });
       }
       const id = `${REMOTE}${feed.deviceId}`;
       if (feed.lost) picture.lost(id, now);
@@ -207,16 +217,27 @@ export function createSources(deps: SourcesDeps): Sources {
       const element = elementOf(id);
       return element !== null && deps.hasFrame(element);
     };
+    /** What the engine draws for `id`: a remote one's previous element until the new has a frame. */
+    const drawn = (id: string): HTMLVideoElement | null => {
+      if (!id.startsWith(REMOTE)) return elementOf(id);
+      const held = videos.get(id.slice(REMOTE.length));
+      if (!held) return null;
+      if (held.previous && !deps.hasFrame(held.element)) return held.previous;
+      held.previous = null;
+      return held.element;
+    };
     shownId = picture.shown(now, ready);
-    shownVideo = shownId === null ? null : (elementOf(shownId) ?? shownVideo);
+    shownVideo = shownId === null ? null : drawn(shownId);
   };
 
   const frameActive = () => {
-    const streaming = new Set(started ? picture.active() : []);
-    const sender = audioSender();
-    if (started && sender) streaming.add(sender.deviceId);
+    const video = new Set(started ? picture.active() : []);
+    const audioId = started ? audioSender()?.deviceId : undefined;
     for (const deviceId of deps.peers.devices()) {
-      deps.peers.setActive(deviceId, streaming.has(deviceId));
+      for (const kind of senders.get(deviceId)?.sends ?? []) {
+        const on = kind === "video" ? video.has(deviceId) : deviceId === audioId;
+        deps.peers.setActive(deviceId, kind, on);
+      }
     }
   };
 
@@ -230,6 +251,7 @@ export function createSources(deps: SourcesDeps): Sources {
         if (audio?.deviceId === deviceId) dropAudio();
         if (senders.get(deviceId)?.sends.includes("audio")) {
           main.gone();
+          standbyAsked = false;
           arrived = false;
           wasLost = false;
           lastPlaying = "local";

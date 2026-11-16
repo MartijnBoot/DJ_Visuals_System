@@ -351,8 +351,11 @@ describe("remote sources (B-06 T13, SD16, SD21, SD22)", () => {
     expect(link.relay(answer)).toBe(false);
     latest().open();
     expect(link.relay(answer)).toBe(true);
-    expect(link.relay({ type: "stream", deviceId: "d3", active: true })).toBe(true);
-    expect(latest().sent).toEqual([answer, { type: "stream", deviceId: "d3", active: true }]);
+    expect(link.relay({ type: "stream", deviceId: "d3", kind: "video", active: true })).toBe(true);
+    expect(latest().sent).toEqual([
+      answer,
+      { type: "stream", deviceId: "d3", kind: "video", active: true },
+    ]);
   });
 });
 

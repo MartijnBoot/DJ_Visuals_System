@@ -61,6 +61,12 @@ export interface Session {
    * of a System audio share while a remote audio is main (PD2, AC21, AC27).
    */
   setAudio(choice: AudioChoice, options?: { remember: boolean }): Promise<void>;
+  /**
+   * While a remote audio is main (B-06 PD2, AC21): when the wanted local audio is System audio —
+   * running, still being picked at Start, or cancelled — the default input takes its place,
+   * opened after any running request and never remembered. A chosen input stays as it is.
+   */
+  inputStandby(): Promise<void>;
   /** The AudioContext Start made, for a remote feature source (B-06 PD6); null before Start. */
   context(): AudioContext | null;
   stop(): void;
@@ -108,6 +114,8 @@ export function createSession(deps: SessionDeps): Session {
   let cameraId: string | undefined;
   let audioChoice: AudioChoice | undefined;
   let wantedAudio: AudioChoice | undefined;
+  /** Whether the running audio was opened to be remembered: its retries keep that (PD2). */
+  let rememberAudio = true;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   const state = (): SessionState => {
@@ -292,6 +300,7 @@ export function createSession(deps: SessionDeps): Session {
       ? { kind: "system" }
       : { kind: "input", deviceId: track.getSettings().deviceId ?? "default" };
     wantedAudio = audioChoice;
+    rememberAudio = remember;
     if (remember) saveRemembered({ audio: audioChoice }, deps.storage);
     setStatus("audio", "ok");
   };
@@ -323,7 +332,7 @@ export function createSession(deps: SessionDeps): Session {
     }
     if (retryable("audio")) {
       log("audio", "retry");
-      tasks.push(attempt("audio", () => openAudio(wantedAudio)));
+      tasks.push(attempt("audio", () => openAudio(wantedAudio, false, rememberAudio)));
     }
     await Promise.all(tasks);
   };
@@ -391,6 +400,12 @@ export function createSession(deps: SessionDeps): Session {
     },
     async setAudio(choice, options = { remember: true }) {
       if (started) await attempt("audio", () => openAudio(choice, false, options.remember));
+    },
+    async inputStandby() {
+      if (!started) return;
+      while (running.audio) await running.audio.catch(() => {});
+      if (wantedAudio?.kind !== "system") return;
+      await attempt("audio", () => openAudio(undefined, false, false));
     },
     context: () => context,
     stop() {

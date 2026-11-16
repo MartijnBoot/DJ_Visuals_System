@@ -139,10 +139,10 @@ describe("approval", () => {
     expect(link.approved()).toBe(true);
     expect(link.deviceId()).toBe("d7");
     latest().deliver({ type: "screen", connected: true });
-    latest().deliver({ type: "stream", active: false });
+    latest().deliver({ type: "stream", kind: "video", active: false });
     expect(received).toEqual([
       { type: "screen", connected: true },
-      { type: "stream", active: false },
+      { type: "stream", kind: "video", active: false },
     ]);
   });
 

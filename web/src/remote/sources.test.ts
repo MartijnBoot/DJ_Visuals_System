@@ -55,8 +55,8 @@ let attached: MediaStream[];
 let frames: Set<string>;
 let logs: [string, string][];
 let changes: number;
-let setAudio: Mock<(choice: AudioChoice, options?: { remember: boolean }) => Promise<void>>;
 let setCamera: Mock<(deviceId: string) => Promise<void>>;
+let inputStandby: Mock<() => Promise<void>>;
 let sources: Sources;
 
 function feed(deviceId: string, kind: "audio" | "video", lost = false): Feed {
@@ -83,12 +83,12 @@ function make(overrides: Partial<SourcesDeps> = {}) {
       }),
       context: () => context,
       setCamera,
-      setAudio,
+      inputStandby,
     },
     peers: {
       feeds: () => feeds,
       connection: (id) => connections.get(id) ?? null,
-      setActive: (id, on) => void active.set(id, on),
+      setActive: (id, kind, on) => void active.set(`${id}:${kind}`, on),
       drop: (id) => void dropped.push(id),
       devices: () => [...connections.keys()],
     },
@@ -138,8 +138,8 @@ beforeEach(() => {
   frames = new Set(["local"]);
   logs = [];
   changes = 0;
-  setAudio = vi.fn(async (_choice: AudioChoice, _options?: { remember: boolean }) => {});
   setCamera = vi.fn(async (_deviceId: string) => {});
+  inputStandby = vi.fn(async () => {});
   make();
 });
 
@@ -162,8 +162,8 @@ describe("before Start (SD17, AC24)", () => {
     connected("dA");
     feeds = [feed("dV", "video"), feed("dA", "audio")];
     sources.frame(1000);
-    expect(active.get("dV")).toBe(false);
-    expect(active.get("dA")).toBe(false);
+    expect(active.get("dV:video")).toBe(false);
+    expect(active.get("dA:audio")).toBe(false);
     expect(made).toEqual([]);
     expect(sources.read(1000)).toBe(LOCAL);
     expect(sources.facts(1000).mainAudio).toBeNull();
@@ -181,8 +181,7 @@ describe("main audio (SD7, SD8, SD22, AC17 to AC20, PD6, PD12)", () => {
       playing: "remote",
       label: "Device 3",
     });
-    expect(active.get("dA")).toBe(true); // streaming from Start on (PD7)
-    expect(setAudio).not.toHaveBeenCalled(); // a remembered input is the standby as it is
+    expect(active.get("dA:audio")).toBe(true); // streaming from Start on (PD7)
   });
 
   it("a loss plays local in the same frame it is seen, and logs it with the label", async () => {
@@ -229,14 +228,24 @@ describe("main audio (SD7, SD8, SD22, AC17 to AC20, PD6, PD12)", () => {
     expect(sources.read(12_000)).toBe(REMOTE);
   });
 
-  it("with System audio remembered, the share stops and the default input is the standby (AC21, PD2)", async () => {
-    audioChoice = { kind: "system" };
+  it("at the arrival the session is asked for an input standby, whatever its audio is yet (AC21, PD2, review C3)", async () => {
+    audioChoice = undefined; // Start's share picker still open: no choice to read yet
     await audioMain();
-    expect(setAudio).toHaveBeenCalledTimes(1);
-    expect(setAudio).toHaveBeenCalledWith(
-      { kind: "input", deviceId: "default" },
-      { remember: false },
-    );
+    expect(inputStandby).toHaveBeenCalledTimes(1);
+    sources.frame(2000);
+    expect(inputStandby).toHaveBeenCalledTimes(1); // once per arrival
+  });
+
+  it("a new audio sender after the first left asks for the standby again (review C3)", async () => {
+    await audioMain();
+    sources.setSenders([]);
+    sources.frame(2000);
+    sources.setSenders([AUDIO]);
+    feeds = [{ ...feed("dA", "audio"), track: track("dA-audio-2"), stream: stream("dA-audio-2") }];
+    sources.frame(2016);
+    await sourceReady();
+    sources.frame(2032);
+    expect(inputStandby).toHaveBeenCalledTimes(2);
   });
 
   it("a new track from the same sender (it offered again) is analysed in place of the old one", async () => {
@@ -284,8 +293,8 @@ describe("remote cameras (SD8, SD9, SD12, SD21, AC14 to AC16, AC22)", () => {
       { deviceId: "remote:dW", label: "Chrome on Android — Device 4", remote: true },
     ]);
     expect(sources.video()).toBe(sessionVideo);
-    expect(active.get("dV")).toBe(false);
-    expect(active.get("dW")).toBe(false);
+    expect(active.get("dV:video")).toBe(false);
+    expect(active.get("dW:video")).toBe(false);
   });
 
   it("picking one streams it alone and draws it once it has a frame (AC15, AC16)", () => {
@@ -294,8 +303,8 @@ describe("remote cameras (SD8, SD9, SD12, SD21, AC14 to AC16, AC22)", () => {
     sources.setCamera("remote:dV");
     expect(setCamera).not.toHaveBeenCalled(); // a remote id never reaches the session
     sources.frame(1016);
-    expect(active.get("dV")).toBe(true);
-    expect(active.get("dW")).toBe(false);
+    expect(active.get("dV:video")).toBe(true);
+    expect(active.get("dW:video")).toBe(false);
     expect(sources.video()).toBe(sessionVideo); // no frame yet: the local one stays
     frames.add("video:dV-video");
     sources.frame(1032);
@@ -313,7 +322,7 @@ describe("remote cameras (SD8, SD9, SD12, SD21, AC14 to AC16, AC22)", () => {
     expect(setCamera).toHaveBeenCalledWith("cam-2");
     sources.frame(1016);
     expect(sources.video()).toBe(sessionVideo);
-    expect(active.get("dV")).toBe(false);
+    expect(active.get("dV:video")).toBe(false);
   });
 
   it("a remote camera lost for 1 s falls back to the local one (AC22)", () => {
@@ -326,7 +335,63 @@ describe("remote cameras (SD8, SD9, SD12, SD21, AC14 to AC16, AC22)", () => {
     expect((sources.video() as unknown as { name: string }).name).toBe("video:dV-video");
     sources.frame(2500);
     expect(sources.video()).toBe(sessionVideo);
-    expect(active.get("dV")).toBe(true); // waiting to return
+    expect(active.get("dV:video")).toBe(true); // waiting to return
+  });
+
+  it("a lost local camera is the no-camera look, not its last frame (B-01 AC13, review C1)", () => {
+    sources.frame(1000);
+    expect(sources.video()).toBe(sessionVideo);
+    sessionVideo = null; // the session's camera was lost; its id is kept for the retry
+    sources.frame(1016);
+    expect(sources.video()).toBeNull();
+  });
+
+  it("a remote camera that leaves with no local camera running is the no-camera look (AC22, review C1)", () => {
+    videoSenders();
+    sources.setCamera("remote:dV");
+    frames.add("video:dV-video");
+    sources.frame(1000);
+    sessionVideo = null;
+    sources.setSenders([OTHER] as Entry[]);
+    feeds = [feed("dW", "video")];
+    sources.frame(1016);
+    expect(sources.video()).toBeNull();
+  });
+
+  it("a new track from the sender on screen keeps its last picture until the new one has a frame (AC22, review C4)", () => {
+    videoSenders();
+    sources.setCamera("remote:dV");
+    frames.add("video:dV-video");
+    sources.frame(1000);
+    const name = () => (sources.video() as unknown as { name: string } | null)?.name;
+    expect(name()).toBe("video:dV-video");
+    feeds = [
+      { ...feed("dV", "video"), track: track("dV-video-2"), stream: stream("dV-video-2") },
+      feed("dW", "video"),
+    ];
+    sources.frame(1016);
+    expect(name()).toBe("video:dV-video"); // not the frameless new element
+    frames.add("video:dV-video-2");
+    sources.frame(1032);
+    expect(name()).toBe("video:dV-video-2");
+  });
+
+  it("a sender of both streams its audio from Start and its video only once picked (AC15, SD12, review C2)", async () => {
+    const BOTH = { ...AUDIO, sends: ["video", "audio"] as Kind[] };
+    sources.setSenders([BOTH]);
+    connected("dA");
+    feeds = [feed("dA", "video"), feed("dA", "audio")];
+    context = {} as AudioContext;
+    sources.start();
+    sources.frame(1000);
+    await sourceReady();
+    sources.frame(1016);
+    expect(active.get("dA:audio")).toBe(true);
+    expect(active.get("dA:video")).toBe(false);
+    sources.setCamera("remote:dA");
+    sources.frame(1032);
+    expect(active.get("dA:video")).toBe(true);
+    expect(active.get("dA:audio")).toBe(true);
   });
 
   it("a video sender without a connected peer is not listed", () => {

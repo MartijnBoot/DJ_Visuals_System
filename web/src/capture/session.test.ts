@@ -528,6 +528,56 @@ describe("the standby for remote audio (B-06 T11, SD7, AC21, AC27)", () => {
     await r.session.setAudio({ kind: "input", deviceId: "mic-2" });
     expect(loadRemembered(r.storage).audio).toEqual({ kind: "input", deviceId: "mic-2" });
   });
+
+  it("inputStandby asked while Start's share is still being picked opens the default input after it (review C3)", async () => {
+    const r = rig();
+    type Shared = ReturnType<typeof streamOf>;
+    let share: (s: Shared) => void = () => {};
+    r.getDisplayMedia.mockImplementationOnce(
+      () => new Promise<Shared>((resolve) => (share = resolve)),
+    );
+    const starting = r.session.start({ audio: { kind: "system" } });
+    await settle();
+    expect(r.session.state().audioChoice).toBeUndefined(); // the picker is open
+    const standby = r.session.inputStandby();
+    const shared = [new FakeTrack("video", "screen"), new FakeTrack("audio", "system")];
+    share(streamOf(...shared));
+    await starting;
+    await standby;
+    expect(r.session.state()).toMatchObject({ audio: "ok", audioChoice: { kind: "input" } });
+    expect(r.live("audio").map((t) => t.deviceId)).toEqual(["mic-1"]); // the default device
+    expect(shared[1]!.readyState).toBe("ended");
+    expect(loadRemembered(r.storage).audio).toEqual({ kind: "system" });
+  });
+
+  it("inputStandby after a cancelled share opens the default input (review C3)", async () => {
+    const r = rig();
+    r.next.display = "cancelled";
+    await r.session.start({ audio: { kind: "system" } });
+    expect(r.session.state().audio).toBe("none");
+    await r.session.inputStandby();
+    expect(r.session.state()).toMatchObject({ audio: "ok", audioChoice: { kind: "input" } });
+    expect(r.live("audio").map((t) => t.deviceId)).toEqual(["mic-1"]);
+  });
+
+  it("inputStandby leaves a chosen input as it is", async () => {
+    const r = rig();
+    await r.session.start({ audio: { kind: "input", deviceId: "mic-2" } });
+    r.getUserMedia.mockClear();
+    await r.session.inputStandby();
+    expect(r.getUserMedia).not.toHaveBeenCalled();
+    expect(r.session.state().audioChoice).toEqual({ kind: "input", deviceId: "mic-2" });
+  });
+
+  it("a retry of the unremembered standby does not remember it either (review R3, PD2)", async () => {
+    const r = rig();
+    await r.session.start({ audio: { kind: "system" } });
+    await r.session.inputStandby();
+    r.live("audio")[0]!.end();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(r.session.state().audio).toBe("ok");
+    expect(loadRemembered(r.storage).audio).toEqual({ kind: "system" });
+  });
 });
 
 describe("a camera switch waits for the new camera's first frame (B-06 T12, AC16, PD14)", () => {

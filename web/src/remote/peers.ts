@@ -8,7 +8,8 @@
 // to stream — Chromium gives a receiver no ended, mute or state change when the sender stops its
 // track, so the statistics are the only sign. Read every `STALL_POLL_MS`. `setActive` asks the
 // sender to pause or
-// resume its encoding, once per change (SD12). Logs carry the device id and an event, never an
+// resume its encoding of one kind, once per change (SD12): a sender of both has its audio and its
+// video paused apart. Logs carry the device id and an event, never an
 // SDP or a candidate (SD25); the caller maps the id to the sequence label.
 import type { ScreenMessage } from "@djv/shared";
 import { MUTE_LOSS_MS } from "../capture/session.ts";
@@ -51,7 +52,7 @@ export interface Peers {
   offer(deviceId: string, sdp: string): void;
   candidate(deviceId: string, init: RTCIceCandidateInit): void;
   drop(deviceId: string): void;
-  setActive(deviceId: string, active: boolean): void;
+  setActive(deviceId: string, kind: FeedKind, active: boolean): void;
   feeds(): Feed[];
   connection(deviceId: string): PeerConnectionView | null;
   /** The network leg in ms for one statistics poll, or null (PD15). */
@@ -78,9 +79,10 @@ interface Entry {
   feeds: Map<FeedKind, FeedState>;
   peerDown: boolean;
   connected: boolean;
-  active: boolean | null;
-  /** When the screen last asked this sender to stream. */
-  activeSince: number;
+  /** Per kind; null until said on this connection. */
+  active: Partial<Record<FeedKind, boolean>>;
+  /** When the screen last asked this sender to stream a kind. */
+  activeSince: Partial<Record<FeedKind, number>>;
   samples: Partial<Record<FeedKind, LegSample | null>>;
 }
 
@@ -176,7 +178,7 @@ export function createPeers(deps: PeersDeps): Peers {
   /** One read of each streaming connection's inbound packet counts (PD8 as amended). */
   const checkStalls = async () => {
     for (const [deviceId, entry] of [...entries]) {
-      if (entry.active !== true || entry.feeds.size === 0) continue;
+      if (!Object.values(entry.active).includes(true) || entry.feeds.size === 0) continue;
       let report: RTCStatsReport;
       try {
         report = await entry.pc.getStats();
@@ -196,7 +198,8 @@ export function createPeers(deps: PeersDeps): Peers {
           state.packets = packets;
           state.movedAt = now;
         }
-        const since = Math.max(state.movedAt, entry.activeSince);
+        if (entry.active[kind] !== true) continue; // a paused kind sends nothing by design
+        const since = Math.max(state.movedAt, entry.activeSince[kind] ?? now);
         const stalled = now - since >= MUTE_LOSS_MS;
         if (stalled === state.stalled) continue;
         state.stalled = stalled;
@@ -217,8 +220,8 @@ export function createPeers(deps: PeersDeps): Peers {
         feeds: new Map(),
         peerDown: false,
         connected: false,
-        active: null, // a new connection starts paused at the sender: say it again
-        activeSince: deps.now(),
+        active: {}, // a new connection starts paused at the sender: say it again
+        activeSince: {},
         samples: {},
       };
       entries.set(deviceId, entry);
@@ -267,12 +270,17 @@ export function createPeers(deps: PeersDeps): Peers {
       changed();
     },
 
-    setActive(deviceId, active) {
+    setActive(deviceId, kind, active) {
       const entry = entries.get(deviceId);
-      if (!entry || entry.active === active) return;
-      entry.active = active;
-      if (active) entry.activeSince = deps.now();
-      deps.send({ type: "stream", deviceId, active });
+      if (!entry || entry.active[kind] === active) return;
+      entry.active[kind] = active;
+      if (active) entry.activeSince[kind] = deps.now();
+      const feed = entry.feeds.get(kind);
+      if (!active && feed?.stalled) {
+        feed.stalled = false; // paused, it sends nothing by design: not a loss
+        changed();
+      }
+      deps.send({ type: "stream", deviceId, kind, active });
     },
 
     feeds() {

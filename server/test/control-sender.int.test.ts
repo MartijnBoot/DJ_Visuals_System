@@ -302,17 +302,27 @@ describe("the screen's answers (T8, SD16, AC11, AC12)", () => {
     const c = await controller();
     screen.send({ type: "answer", deviceId: a.deviceId, sdp: SDP(100) });
     screen.send({ type: "candidate", deviceId: a.deviceId, ...CANDIDATE });
-    screen.send({ type: "stream", deviceId: a.deviceId, active: true });
+    screen.send({ type: "stream", deviceId: a.deviceId, kind: "video", active: true });
     // Markers sent after, one each: once they arrive, anything before them would have too.
-    screen.send({ type: "stream", deviceId: b.deviceId, active: false });
+    screen.send({ type: "stream", deviceId: b.deviceId, kind: "video", active: false });
     screen.send({ type: "applied", entries: [{ deviceId: c.deviceId, seq: 7 }] });
     expect(await a.client.find(is("answer"))).toEqual({ type: "answer", sdp: SDP(100) });
     expect(await a.client.find(is("candidate"))).toEqual({ type: "candidate", ...CANDIDATE });
-    expect(await a.client.find(is("stream"))).toEqual({ type: "stream", active: true });
-    expect(await b.client.find(is("stream"))).toEqual({ type: "stream", active: false });
+    expect(await a.client.find(is("stream"))).toEqual({
+      type: "stream",
+      kind: "video",
+      active: true,
+    });
+    expect(await b.client.find(is("stream"))).toEqual({
+      type: "stream",
+      kind: "video",
+      active: false,
+    });
     await c.client.find(is("applied"));
     const setup = (m: ToDevice) => ["answer", "candidate", "stream"].includes(m.type);
-    expect(b.client.messages.filter(setup)).toEqual([{ type: "stream", active: false }]);
+    expect(b.client.messages.filter(setup)).toEqual([
+      { type: "stream", kind: "video", active: false },
+    ]);
     expect(c.client.messages.filter(setup)).toEqual([]);
   });
 

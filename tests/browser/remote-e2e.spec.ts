@@ -302,14 +302,13 @@ test("the spec's scenario end to end: pair, approve, Start, audio and camera fal
     });
     await expect(video.getByTestId("send-line-video")).toHaveText("On screen");
 
-    const stalled = screenLog(["video stalled", "Device 2"], before)!;
+    // Unpicked, Device 2's video is paused while its audio streams on (SD12, review C2).
+    await expect(both.getByTestId("send-line-video")).toHaveText("Standing by");
+    await expect(both.getByTestId("send-line-audio")).toHaveText("Sending audio");
     await setSending(both, "video", true);
-    const back = await logged(["video flowing", "Device 2"], stalled.t);
+    const back = Date.now();
     // Past the 3 s after which the lost camera would have returned had nothing been picked.
-    await page.waitForFunction(
-      (t) => performance.timeOrigin + performance.now() > t + 3500,
-      back.t,
-    );
+    await page.waitForFunction((t) => performance.timeOrigin + performance.now() > t + 3500, back);
     await expect(page.getByTestId("overlay-camera")).toHaveText("camera: remote (Device 3) ok");
     await expect(remoteTile(3)).toHaveAttribute("aria-pressed", "true");
     await expect(remoteTile(2)).toHaveAttribute("aria-pressed", "false");

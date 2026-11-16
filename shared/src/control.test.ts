@@ -89,7 +89,7 @@ const examples = {
     { type: "refused", reason: "audio_taken" },
     { type: "answer", sdp: SDP },
     { type: "candidate", ...CANDIDATE },
-    { type: "stream", active: false },
+    { type: "stream", kind: "video", active: false },
     { type: "refused", reason: "rejected" },
     { type: "ended" },
     { type: "screen", connected: false },
@@ -108,7 +108,7 @@ const examples = {
     { type: "reject", deviceId: "d1" },
     { type: "answer", deviceId: "d3", sdp: SDP },
     { type: "candidate", deviceId: "d3", ...CANDIDATE },
-    { type: "stream", deviceId: "d3", active: true },
+    { type: "stream", deviceId: "d3", kind: "audio", active: true },
   ],
   toScreen: [
     { type: "control", deviceId: "d1", control: { type: "pick", seq: 1, id: "x" } },

@@ -346,7 +346,7 @@ media passes it.
 - **The relay** (`control/hub.ts`, `control/device.ts`). A sender's socket may send `hello`,
   `offer` and `candidate`, nothing else (a control from it is dropped with one `warn`). They go
   to the target screen with the sender's `deviceId`; the screen's `answer`, `candidate` and
-  `stream { active }` go back to that sender. When the target screen (re)connects, each sender is
+  `stream { kind, active }` go back to that sender. When the target screen (re)connects, each sender is
   told `screen { connected }` and offers again; a screen reload leaves the senders' capture
   running ("Screen reconnecting…"). New code, Disconnect, switching off or a restart end the
   pairing: the sender stops its capture ("Pairing ended — scan the code again").
@@ -357,8 +357,9 @@ media passes it.
   `contentHint = "motion"` on video and 128 kb/s on audio; both sides pass their description
   through `opusMusic` (`web/src/remote/sdp.ts`: stereo, 128 kb/s, no DTX). The screen answers
   `recvonly` (`web/src/remote/peers.ts`). Senders start paused; the screen asks a sender to stream
-  with `stream { active }`: the audio sender from Start on, a video sender only while it is the
-  picked camera or a lost picked camera waiting to return, so at most one remote video decodes.
+  with `stream { kind, active }`, each kind apart: the audio sender's audio from Start on, a
+  sender's video only while it is the picked camera or a lost picked camera waiting to return, so
+  at most one remote video decodes (a sender of both keeps its video paused until picked).
 - **Loss.** A feed is lost when its track ends, it is muted for 1 s, the peer is `disconnected`
   or `failed`, or (PD8 as amended) its inbound `packetsReceived` has not moved for 1 s while it
   was asked to stream — read from `getStats()` every 250 ms, since Chromium gives a receiver no

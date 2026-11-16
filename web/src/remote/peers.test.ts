@@ -276,29 +276,31 @@ describe("setActive (SD12)", () => {
     peers.offer("d1", "v=0\r\n");
     await settle();
     sent = [];
-    peers.setActive("d1", false);
-    peers.setActive("d1", false);
-    peers.setActive("d1", true);
-    peers.setActive("d1", true);
+    peers.setActive("d1", "video", false);
+    peers.setActive("d1", "video", false);
+    peers.setActive("d1", "video", true);
+    peers.setActive("d1", "video", true);
+    peers.setActive("d1", "audio", true);
     expect(sent).toEqual([
-      { type: "stream", deviceId: "d1", active: false },
-      { type: "stream", deviceId: "d1", active: true },
+      { type: "stream", deviceId: "d1", kind: "video", active: false },
+      { type: "stream", deviceId: "d1", kind: "video", active: true },
+      { type: "stream", deviceId: "d1", kind: "audio", active: true },
     ]);
   });
 
   it("sends again after a new offer: a new connection starts paused at the sender", async () => {
     peers.offer("d1", "v=0\r\n");
     await settle();
-    peers.setActive("d1", true);
+    peers.setActive("d1", "video", true);
     peers.offer("d1", "v=0\r\n");
     await settle();
     sent = [];
-    peers.setActive("d1", true);
-    expect(sent).toEqual([{ type: "stream", deviceId: "d1", active: true }]);
+    peers.setActive("d1", "video", true);
+    expect(sent).toEqual([{ type: "stream", deviceId: "d1", kind: "video", active: true }]);
   });
 
   it("does nothing for a device without a connection", () => {
-    peers.setActive("d9", true);
+    peers.setActive("d9", "video", true);
     expect(sent).toEqual([]);
   });
 });
@@ -351,7 +353,7 @@ describe("a stalled feed (PD8 as amended: no packets for 1 s while streaming)", 
     const peer = latest();
     peer.track("audio");
     inbound(peer, "audio", 10);
-    peers.setActive("d1", true);
+    peers.setActive("d1", "audio", true);
     await vi.advanceTimersByTimeAsync(STALL_POLL_MS); // sees 10
     inbound(peer, "audio", 20);
     await vi.advanceTimersByTimeAsync(STALL_POLL_MS); // sees 20: the last change
@@ -369,7 +371,7 @@ describe("a stalled feed (PD8 as amended: no packets for 1 s while streaming)", 
     await settle();
     latest().track("video");
     inbound(latest(), "video", 5);
-    peers.setActive("d1", false);
+    peers.setActive("d1", "video", false);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(feed("d1", "video")?.lost).toBe(false);
   });
@@ -380,7 +382,7 @@ describe("a stalled feed (PD8 as amended: no packets for 1 s while streaming)", 
     latest().track("video");
     inbound(latest(), "video", 5);
     await vi.advanceTimersByTimeAsync(10_000); // paused all along
-    peers.setActive("d1", true);
+    peers.setActive("d1", "video", true);
     await vi.advanceTimersByTimeAsync(MUTE_LOSS_MS - STALL_POLL_MS);
     expect(feed("d1", "video")?.lost).toBe(false);
     inbound(latest(), "video", 6); // the first frames after the resume
@@ -392,16 +394,28 @@ describe("a stalled feed (PD8 as amended: no packets for 1 s while streaming)", 
     peers.offer("d1", "v=0\r\n");
     await settle();
     latest().track("audio");
-    peers.setActive("d1", true);
+    peers.setActive("d1", "audio", true);
     await vi.advanceTimersByTimeAsync(MUTE_LOSS_MS + STALL_POLL_MS);
     expect(feed("d1", "audio")?.lost).toBe(true);
+  });
+
+  it("a paused video beside a streaming audio from the same sender is not stalled (review C2)", async () => {
+    peers.offer("d1", "v=0\r\n");
+    await settle();
+    latest().track("audio");
+    latest().track("video");
+    peers.setActive("d1", "audio", true);
+    peers.setActive("d1", "video", false);
+    await vi.advanceTimersByTimeAsync(MUTE_LOSS_MS + STALL_POLL_MS);
+    expect(feed("d1", "audio")?.lost).toBe(true);
+    expect(feed("d1", "video")?.lost).toBe(false);
   });
 
   it("tells the page when a feed stalls", async () => {
     peers.offer("d1", "v=0\r\n");
     await settle();
     latest().track("audio");
-    peers.setActive("d1", true);
+    peers.setActive("d1", "audio", true);
     const before = changes;
     await vi.advanceTimersByTimeAsync(MUTE_LOSS_MS + STALL_POLL_MS);
     expect(changes).toBeGreaterThan(before);

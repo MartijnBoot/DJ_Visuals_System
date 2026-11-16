@@ -190,7 +190,10 @@ describe("what it shows while sending (AC15, AC32, PD3)", () => {
   it("one line per kind: Standing by, then On screen and Sending audio on stream true", async () => {
     await live();
     expect(link.view().lines).toEqual({ video: "Standing by", audio: "Standing by" });
-    socket().deliver({ type: "stream", active: true });
+    socket().deliver({ type: "stream", kind: "audio", active: true });
+    await settle();
+    expect(link.view().lines).toEqual({ video: "Standing by", audio: "Sending audio" });
+    socket().deliver({ type: "stream", kind: "video", active: true });
     await settle();
     expect(link.view().lines).toEqual({ video: "On screen", audio: "Sending audio" });
     expect(peer().senders.every((s) => s.parameters.encodings[0]!.active === true)).toBe(true);
@@ -198,9 +201,13 @@ describe("what it shows while sending (AC15, AC32, PD3)", () => {
 
   it("stream false sets active false on every encoding", async () => {
     await live();
-    socket().deliver({ type: "stream", active: true });
+    socket().deliver({ type: "stream", kind: "video", active: true });
+    socket().deliver({ type: "stream", kind: "audio", active: true });
     await settle();
-    socket().deliver({ type: "stream", active: false });
+    socket().deliver({ type: "stream", kind: "video", active: false });
+    await settle();
+    expect(link.view().lines).toEqual({ video: "Standing by", audio: "Sending audio" });
+    socket().deliver({ type: "stream", kind: "audio", active: false });
     await settle();
     expect(peer().senders.every((s) => s.parameters.encodings[0]!.active === false)).toBe(true);
     expect(link.view().lines).toEqual({ video: "Standing by", audio: "Standing by" });

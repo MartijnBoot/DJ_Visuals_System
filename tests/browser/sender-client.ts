@@ -101,17 +101,18 @@ export async function senderClient(
         const state: SenderWindow["__sender"] = { ws, messages: [], pcs: [], tracks, block: false };
         (window as unknown as SenderWindow).__sender = state;
         let pc: RTCPeerConnection | null = null;
-        let active = false;
+        let active: Record<string, boolean> = {};
         const apply = async () => {
           for (const sender of pc?.getSenders() ?? []) {
             const parameters = sender.getParameters();
-            for (const e of parameters.encodings ?? []) e.active = active;
+            const on = active[sender.track?.kind ?? ""] === true;
+            for (const e of parameters.encodings ?? []) e.active = on;
             await sender.setParameters(parameters).catch(() => {});
           }
         };
         const offer = async () => {
           pc?.close();
-          active = false;
+          active = {};
           const next = new RTCPeerConnection({ iceServers: [] });
           pc = next;
           state.pcs.push(next);
@@ -154,7 +155,7 @@ export async function senderClient(
             const { candidate, sdpMid, sdpMLineIndex } = message;
             void pc?.addIceCandidate({ candidate, sdpMid, sdpMLineIndex }).catch(() => {});
           } else if (message.type === "stream") {
-            active = message.active;
+            active = { ...active, [message.kind]: message.active };
             void apply();
           }
         };
