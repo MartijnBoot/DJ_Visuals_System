@@ -4,7 +4,7 @@
 // handshake. The root is made in this test's temporary DATA_DIR, never in the repository.
 import { toDeviceSchema, toScreenSchema, type ControlStatus, type ToScreen } from "@djv/shared";
 import { generateKeyPairSync, X509Certificate } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect as tcpConnect } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -15,7 +15,7 @@ import { boot, type Booted } from "../src/boot.ts";
 import type { ControlAddress } from "../src/control/addresses.ts";
 import { loadConfig } from "../src/config.ts";
 import { rootCertificate, toPem } from "../src/tls/certificate.ts";
-import { closeAll, connect, refused, testRoot, type Client } from "./control-client.ts";
+import { closeAll, connect, lanGet, refused, testRoot, type Client } from "./control-client.ts";
 import { freePort, repoRoot } from "./spawn-server.ts";
 
 const ONE: ControlAddress = { address: "127.0.0.1", name: "loopback (test)" };
@@ -32,12 +32,8 @@ let screen: Client<ToScreen>;
 const dataDir = () => join(tmp, "data");
 const root = () => testRoot(dataDir());
 
-beforeEach(async () => {
-  tmp = mkdtempSync(join(tmpdir(), "djv-tls-"));
-  lines = [];
-  seam = [ONE];
-  port = await freePort();
-  controlPort = await freePort();
+/** Boots in process; `staticDir` absent is `--api-only`, as every test here but one. */
+async function bootServer(staticDir?: string) {
   booted = await boot(
     loadConfig({
       APP_ENV: "test",
@@ -46,7 +42,11 @@ beforeEach(async () => {
       CONTROL_PORT: String(controlPort),
       DATA_DIR: dataDir(),
     }),
-    { migrationsDir: resolve(repoRoot, "server/migrations"), controlAddresses: () => seam },
+    {
+      migrationsDir: resolve(repoRoot, "server/migrations"),
+      controlAddresses: () => seam,
+      ...(staticDir === undefined ? {} : { staticDir }),
+    },
     pino(
       { level: "debug" },
       { write: (line: string) => void lines.push(JSON.parse(line) as Record<string, unknown>) },
@@ -56,6 +56,15 @@ beforeEach(async () => {
     origin: `http://127.0.0.1:${port}`,
   });
   await screen.find((m) => m.type === "status");
+}
+
+beforeEach(async () => {
+  tmp = mkdtempSync(join(tmpdir(), "djv-tls-"));
+  lines = [];
+  seam = [ONE];
+  port = await freePort();
+  controlPort = await freePort();
+  await bootServer();
 });
 
 afterEach(async () => {
@@ -228,5 +237,63 @@ describe("keys (AC35)", () => {
     seam = [ONE];
     await act("enable");
     for (const line of lines) expect(JSON.stringify(line)).not.toContain("PRIVATE KEY");
+  });
+});
+
+describe("the trust step (B-06 T6, AC5, AC6, AC35, PD1)", () => {
+  const lan = (path: string) => lanGet(`https://127.0.0.1:${controlPort}${path}`, root());
+
+  it("/trust?download answers the root as application/x-x509-ca-cert, and no key", async () => {
+    await act("enable");
+    const response = await lan("/trust?download");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/x-x509-ca-cert");
+    const body = Buffer.from(await response.arrayBuffer());
+    expect(new X509Certificate(body).raw.equals(new X509Certificate(root()).raw)).toBe(true);
+    expect(body.toString("latin1")).not.toContain("PRIVATE KEY");
+  });
+
+  it("/trust is a page with the same 16 characters as the status, steps per OS, a download", async () => {
+    const status = await act("enable");
+    const response = await lan("/trust");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toMatch(/^text\/html/);
+    const page = await response.text();
+    expect(page).toContain(status.fingerprint!);
+    expect(page).toContain("Install once per device");
+    for (const os of ["iPhone and iPad", "Android", "Windows", "macOS"]) expect(page).toContain(os);
+    expect(page).toContain('href="/trust?download"');
+    expect(page).not.toMatch(/<script|src=/);
+    expect(page).not.toContain("PRIVATE KEY");
+  });
+
+  it("works under --api-only (this server has no built app)", async () => {
+    await act("enable");
+    expect((await lan("/control")).status).toBe(404);
+    expect((await lan("/trust")).status).toBe(200);
+  });
+
+  it("no path answers a file from DATA_DIR/tls/, with the built app served too", async () => {
+    await booted!.close();
+    const site = join(tmp, "site");
+    mkdirSync(join(site, "assets"), { recursive: true });
+    writeFileSync(join(site, "index.html"), "<!doctype html><title>site</title>");
+    await bootServer(site);
+    await act("enable");
+    for (const path of [
+      "/tls/root.key",
+      "/assets/../tls/root.key",
+      "/assets/%2e%2e/tls/root.key",
+      "/trust/root.key",
+      "/trust/root.crt",
+      "/trust/",
+      "/root.key",
+      "/server.key",
+      "/data/tls/root.key",
+    ]) {
+      const response = await lan(path);
+      expect(response.status, path).toBe(404);
+      expect(await response.text(), path).not.toContain("PRIVATE KEY");
+    }
   });
 });

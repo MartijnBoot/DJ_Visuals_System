@@ -58,6 +58,46 @@ function Device({
   );
 }
 
+/** A QR code as SVG, with the quiet zone scanners expect. */
+function QrCode({ url, testId, label }: { url: string; testId: string; label: string }) {
+  const qr = useMemo(() => qrPath(url), [url]);
+  return (
+    <svg
+      data-testid={testId}
+      role="img"
+      aria-label={label}
+      viewBox={`${-QUIET} ${-QUIET} ${qr.size + 2 * QUIET} ${qr.size + 2 * QUIET}`}
+      width={200}
+      height={200}
+      shapeRendering="crispEdges"
+      style={{ justifySelf: "center", background: "#fff" }}
+    >
+      <path d={qr.path} fill="#000" />
+    </svg>
+  );
+}
+
+/** B-06 SD24: the first step on a new device — trust the screen machine's root once. */
+function Trust({ url, fingerprint }: { url: string; fingerprint: string | null }) {
+  return (
+    <div data-testid="control-trust" style={{ display: "grid", gap: 6 }}>
+      <div>Install once per device</div>
+      <QrCode url={url} testId="control-trust-qr" label="QR code for the trust page" />
+      <div data-testid="control-trust-url" style={{ wordBreak: "break-all" }}>
+        {url}
+      </div>
+      {fingerprint && (
+        <div>
+          fingerprint{" "}
+          <span data-testid="control-trust-fingerprint" style={{ fontFamily: "monospace" }}>
+            {fingerprint}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ExternalControl({ view, onAction }: ExternalControlProps) {
   const [store] = useState(() => addressStore());
   const [chosen, setChosen] = useState<string | null>(null);
@@ -68,7 +108,7 @@ export function ExternalControl({ view, onAction }: ExternalControlProps) {
     status?.on && status.code && address
       ? `https://${address.address}:${status.port}/control#code=${status.code}`
       : null;
-  const qr = useMemo(() => (url ? qrPath(url) : null), [url]);
+  const trustUrl = status?.on && address ? `https://${address.address}:${status.port}/trust` : null;
 
   let body;
   if (view.superseded) {
@@ -119,20 +159,8 @@ export function ExternalControl({ view, onAction }: ExternalControlProps) {
                 ))}
               </select>
             </label>
-            {qr && (
-              <svg
-                data-testid="control-qr"
-                role="img"
-                aria-label="QR code for the control page"
-                viewBox={`${-QUIET} ${-QUIET} ${qr.size + 2 * QUIET} ${qr.size + 2 * QUIET}`}
-                width={200}
-                height={200}
-                shapeRendering="crispEdges"
-                style={{ justifySelf: "center", background: "#fff" }}
-              >
-                <path d={qr.path} fill="#000" />
-              </svg>
-            )}
+            {trustUrl && <Trust url={trustUrl} fingerprint={status.fingerprint} />}
+            {url && <QrCode url={url} testId="control-qr" label="QR code for the control page" />}
             <div data-testid="control-url" style={{ wordBreak: "break-all" }}>
               {url}
             </div>

@@ -2,8 +2,9 @@
 // AC4, AC5): one small Fastify instance per private IPv4 address, on `CONTROL_PORT`, created when
 // the operator switches on and closed when they switch off. HTTPS only, with the server
 // certificate the store issues for exactly the addresses bound (B-06 T5); a store that cannot be
-// read binds nothing (`cert_store`), and no plain-HTTP listener exists. It answers `GET /control` (the page), `GET /assets/*` (the built
-// assets, nothing else of `web/dist`) and the device socket (T7); every other path is Fastify's
+// read binds nothing (`cert_store`), and no plain-HTTP listener exists. It answers `GET /control`
+// (the page), `GET /assets/*` (the built assets, nothing else of `web/dist`), `GET /trust` (B-06
+// T6) and the device socket (T7); every other path is Fastify's
 // 404. No body parser hook and no CORS header: there is nothing here to write to. Binding is all
 // or nothing: if one address fails, every one already bound is closed and the switch stays off.
 // Under `--api-only` there is no built page, so only the device socket answers.
@@ -14,6 +15,7 @@ import { join } from "node:path";
 import type { Logger } from "../log.ts";
 import type { Certificates } from "../tls/store.ts";
 import type { ControlAddress } from "./addresses.ts";
+import { registerTrust } from "./trust.ts";
 
 const lanApp = (log: Logger, tls: { key: string; cert: string }) =>
   Fastify({ loggerInstance: log, https: tls });
@@ -59,6 +61,8 @@ export function createLan({
   // Wrapped: a Fastify instance is thenable, so an async function returning it would await it.
   const instance = async (address: ControlAddress, tls: Certificates): Promise<{ app: LanApp }> => {
     const app = lanApp(log, { key: tls.key, cert: tls.cert });
+    // The trust step (B-06 SD24): the root and its fingerprint only, also under --api-only.
+    registerTrust(app, { root: tls.root, fingerprint: tls.fingerprint });
     if (staticDir !== undefined) {
       // `root` is the assets folder itself, so no other file of the build is reachable.
       await app.register(fastifyStatic, {

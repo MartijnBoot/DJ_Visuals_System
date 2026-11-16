@@ -79,6 +79,38 @@ test("with no private address, switching on says so and nothing listens (AC4)", 
   expect(await lanRefused(server.controlPort)).toBe(true);
 });
 
+test("the trust block comes first: QR, URL, Install once per device, the fingerprint /trust shows (B-06 AC6, SD24)", async ({
+  page,
+  browser,
+}) => {
+  await screen(page);
+  await switchOn(page);
+  const block = page.getByTestId("control-trust");
+  await expect(block).toBeVisible();
+  await expect(block).toContainText("Install once per device");
+  const trustUrl = `https://127.0.0.1:${server.controlPort}/trust`;
+  await expect(page.getByTestId("control-trust-url")).toHaveText(trustUrl);
+  await expect(page.getByTestId("control-trust-qr")).toBeVisible();
+  const fingerprint = (await page.getByTestId("control-trust-fingerprint").textContent()) ?? "";
+  expect(fingerprint).toMatch(/^[0-9A-F]{16}$/);
+  // First of the section's content: before the control page's QR code, URL and code.
+  const first = await page.evaluate(() => {
+    const trust = document.querySelector('[data-testid="control-trust"]')!;
+    return ["control-qr", "control-url", "control-code"].every(
+      (id) =>
+        trust.compareDocumentPosition(document.querySelector(`[data-testid="${id}"]`)!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+  expect(first).toBe(true);
+  // The same 16 characters on the page a device opens to trust the root.
+  const context = await browser.newContext(LAN_CONTEXT);
+  const device = await context.newPage();
+  await device.goto(trustUrl);
+  await expect(device.getByTestId("trust-fingerprint")).toHaveText(fingerprint);
+  await context.close();
+});
+
 test("an unreadable certificate store: switching on says so, the switch reads off, nothing listens (B-06 AC4)", async ({
   page,
 }) => {
