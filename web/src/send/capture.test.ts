@@ -106,6 +106,18 @@ describe("the camera picker (AC31)", () => {
       ]),
     ).toEqual([]);
   });
+
+  it("offers Front and Back on a phone before the first permission, when no label can tell (review C6)", () => {
+    const front = [
+      { deviceId: "front", label: "Front" },
+      { deviceId: "back", label: "Back" },
+    ];
+    expect(cameraChoices([{ deviceId: "", label: "" }], true)).toEqual(front);
+    expect(cameraChoices([], true)).toEqual(front);
+    // Not on a desktop, and not once the labels are known.
+    expect(cameraChoices([{ deviceId: "", label: "" }], false)).toEqual([]);
+    expect(cameraChoices([{ deviceId: "a", label: "Integrated Webcam" }], true)).toEqual([]);
+  });
 });
 
 describe("openCapture (B-01's reasons)", () => {

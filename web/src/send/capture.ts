@@ -38,21 +38,24 @@ export function sendAudioConstraints(
   return source?.kind === "system" ? systemAudioConstraints() : audioConstraints(inputId(source));
 }
 
+const FRONT_BACK: DeviceOption[] = [
+  { deviceId: "front", label: "Front" },
+  { deviceId: "back", label: "Back" },
+];
+
 /**
  * The camera picker (AC31): Front and Back where the labels show both (iOS "Front Camera", Android
  * "facing front"); else the cameras by name when there are two or more; else none. Labels and ids
- * are empty until the first permission, so a phone shows the picker from its second Send on.
+ * are empty until the first permission, and there is no second Send after an approval (SD14), so
+ * a phone (`phone`: a coarse pointer) is offered Front and Back until then: they ask by facing
+ * mode, which needs no label (review C6).
  */
-export function cameraChoices(cameras: readonly DeviceOption[]): DeviceOption[] {
+export function cameraChoices(cameras: readonly DeviceOption[], phone = false): DeviceOption[] {
   const known = cameras.filter((c) => c.deviceId !== "");
+  if (known.length === 0) return phone ? FRONT_BACK : [];
   const front = known.some((c) => /front/i.test(c.label));
   const back = known.some((c) => /\b(back|rear)\b/i.test(c.label));
-  if (front && back) {
-    return [
-      { deviceId: "front", label: "Front" },
-      { deviceId: "back", label: "Back" },
-    ];
-  }
+  if (front && back) return FRONT_BACK;
   return known.length >= 2 ? [...known] : [];
 }
 

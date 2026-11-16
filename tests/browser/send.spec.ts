@@ -208,6 +208,22 @@ test("External control off ends the pairing and the capture (AC26)", async ({ pa
   await expect(sender.getByTestId("send-button")).toBeVisible(); // the choice is offered again
 });
 
+test("the code field takes a whole typed code, and Send requests with it (review C5)", async ({
+  page,
+}) => {
+  const { code } = await r.screen(page);
+  const context = await page.context().browser()!.newContext({ ignoreHTTPSErrors: true });
+  closing.push(() => context.close());
+  const sender = await context.newPage();
+  await record(sender);
+  await sender.goto(`${server.lanOrigin}/send`); // opened without the QR code's link
+  const field = sender.getByTestId("send-code");
+  await field.pressSequentially(code); // one key at a time, as a person types
+  await expect(field).toHaveValue(code);
+  await sender.getByTestId("send-button").click();
+  await expect(sender.getByTestId("link-line")).toHaveText("Waiting for approval");
+});
+
 test("/send is served on the LAN listener only (AC5)", async ({ page }) => {
   await r.screen(page);
   const context = await page.context().browser()!.newContext({ ignoreHTTPSErrors: true });

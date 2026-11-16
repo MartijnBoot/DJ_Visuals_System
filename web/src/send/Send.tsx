@@ -59,6 +59,8 @@ export function Send() {
   const [choices] = useState(() => sendChoiceStore());
   const [keys] = useState(() => sendKeyStore());
   const [code, setCode] = useState(takeCode);
+  /** No code from the link, or the last attempt used it up: the field stays while it is typed. */
+  const [askCode, setAskCode] = useState(() => takeCode() === "");
   const [choice, setChoice] = useState<SendChoice>(
     () => choices.load() ?? { video: true, audio: false },
   );
@@ -96,7 +98,7 @@ export function Send() {
     if (over) void wakeLock.release();
   }, [over, wakeLock]);
 
-  const cameras = cameraChoices(devices.cameras);
+  const cameras = cameraChoices(devices.cameras, matchMedia("(pointer: coarse)").matches);
   const cameraId = cameras.some((c) => c.deviceId === choice.cameraId)
     ? choice.cameraId
     : cameras[0]?.deviceId;
@@ -128,6 +130,7 @@ export function Send() {
     choices.save(asked);
     const presented = code.trim();
     setCode("");
+    setAskCode(true);
     const link = createSendLink({
       url: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/control/device`,
       connect: openSocket,
@@ -152,7 +155,7 @@ export function Send() {
     refreshDevices(); // labels and ids are readable once permission is granted
   };
 
-  const needsCode = !live && code === "" && keys.load() === null;
+  const needsCode = !live && askCode && keys.load() === null;
 
   return (
     <main data-testid="sender" style={styles.page}>
