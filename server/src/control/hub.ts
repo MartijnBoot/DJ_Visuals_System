@@ -3,7 +3,9 @@
 // sent, and the status the panel shows. The screen page is the single source of truth: the server
 // keeps its last `state` only to hand a (re)connecting controller first, and relays. The last
 // screen to connect is the target; the one before gets `superseded` and nothing further (AC31).
-// Logs name a device by its sequence label only, never its hint, key or anything it sent (SD27).
+// Logs name a device by its sequence label only, never its hint, key or anything it sent (SD27);
+// a sender's lines also name its role (B-06 SD25) and say "sender" where a controller's say
+// "device". Approved senders are listed apart, with whether their socket is open (B-06 PD5).
 import {
   MAX_SCREEN_MESSAGE,
   screenMessageSchema,
@@ -11,6 +13,7 @@ import {
   type ControlStatus,
   type ScreenMessage,
   type ScreenState,
+  type SendKind,
   type ToDevice,
   type ToScreen,
 } from "@djv/shared";
@@ -42,11 +45,15 @@ interface Link {
   socket: WebSocket;
   approved: boolean;
   label: string;
+  /** What it sends; empty for a controller (B-06). */
+  sends: readonly SendKind[];
 }
 
 /** Close codes: the message before the close says which. */
 const ENDED = 4000;
 const REFUSED = 4001;
+/** `WebSocket.OPEN`. */
+const OPEN = 1;
 
 export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub {
   const screens = new Set<WebSocket>();
@@ -57,6 +64,11 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
   // Panel actions run one at a time: two quick `enable`s must not bind twice.
   let actions: Promise<unknown> = Promise.resolve();
 
+  const online = (deviceId: string) => {
+    const link = links.get(deviceId);
+    return link !== undefined && link.approved && link.socket.readyState === OPEN;
+  };
+
   const status = (error?: ControlStatus["error"]): ControlStatus => ({
     on: pairing.isOn(),
     addresses: lan.addresses(),
@@ -64,7 +76,7 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
     code: pairing.code(),
     devices: pairing.devices(),
     pending: pairing.pending(),
-    senders: [],
+    senders: pairing.senders().map((entry) => ({ ...entry, online: online(entry.deviceId) })),
     fingerprint: lan.fingerprint(),
     ...(error ? { error } : {}),
   });
@@ -83,9 +95,22 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
     toApproved({ type: "pending", requests: pairing.pending() });
   };
 
-  const labelOf = (deviceId: string) =>
-    links.get(deviceId)?.label ??
-    [...pairing.devices(), ...pairing.pending()].find((d) => d.deviceId === deviceId)?.label;
+  const entryOf = (deviceId: string) =>
+    [...pairing.devices(), ...pairing.senders(), ...pairing.pending()].find(
+      (d) => d.deviceId === deviceId,
+    );
+  const labelOf = (deviceId: string) => links.get(deviceId)?.label ?? entryOf(deviceId)?.label;
+  const sendsOf = (deviceId: string) => links.get(deviceId)?.sends ?? entryOf(deviceId)?.sends;
+
+  /** One info line about a device: "sender <event>" with its role, or "device <event>". */
+  const note = (
+    label: string | undefined,
+    sends: readonly SendKind[] | undefined,
+    event: string,
+  ) =>
+    sends && sends.length > 0
+      ? log.info({ device: label, sends: [...sends] }, `sender ${event}`)
+      : log.info({ device: label }, `device ${event}`);
 
   /** Sends `message` and closes the device's socket. */
   const end = (deviceId: string, message: ToDevice = { type: "ended" }) => {
@@ -120,7 +145,8 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
         expiry = null;
         const gone = pairing.expire();
         for (const deviceId of gone) {
-          log.info({ device: links.get(deviceId)?.label }, "device request expired");
+          const link = links.get(deviceId);
+          note(link?.label, link?.sends, "request expired");
           end(deviceId, { type: "refused", reason: "expired" });
         }
         if (gone.length > 0) changed();
@@ -132,13 +158,19 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
 
   const accept = (deviceId: string) => {
     const label = labelOf(deviceId);
+    const sends = sendsOf(deviceId);
     const result = pairing.accept(deviceId);
     if (result.kind === "approved") {
       const link = links.get(deviceId);
-      log.info({ device: label }, "device accepted");
+      note(label, sends, "accepted");
       if (link) {
         link.approved = true;
-        send(link.socket, { type: "approved", key: result.key, deviceId, sends: [] });
+        send(link.socket, {
+          type: "approved",
+          key: result.key,
+          deviceId,
+          sends: result.device.sends,
+        });
         welcome(link);
       }
     } else if (result.kind === "refused") {
@@ -151,8 +183,9 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
 
   const reject = (deviceId: string) => {
     const label = labelOf(deviceId);
+    const sends = sendsOf(deviceId);
     if (pairing.reject(deviceId)) {
-      log.info({ device: label }, "device rejected");
+      note(label, sends, "rejected");
       end(deviceId, { type: "refused", reason: "rejected" });
     }
     scheduleExpiry();
@@ -197,8 +230,9 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
 
   const disconnect = (deviceId: string) => {
     const label = labelOf(deviceId);
+    const sends = sendsOf(deviceId);
     if (pairing.disconnect(deviceId)) {
-      log.info({ device: label }, "device disconnected");
+      note(label, sends, "disconnected");
       end(deviceId);
     }
     changed();
@@ -278,16 +312,16 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
 
     state: () => cached,
 
-    request(socket, ip, code, hint) {
-      const result = pairing.request(ip, code, hint);
+    request(socket, ip, code, hint, sends) {
+      const result = pairing.request(ip, code, hint, sends);
       if (result.kind === "refused") {
         log.info({ reason: result.reason }, "device refused");
         refuse(socket, result.reason);
         return null;
       }
       const { deviceId, label } = result.device;
-      links.set(deviceId, { socket, approved: false, label });
-      log.info({ device: label }, "device requested");
+      links.set(deviceId, { socket, approved: false, label, sends: result.device.sends });
+      note(label, result.device.sends, "requested");
       send(socket, { type: "waiting" });
       scheduleExpiry();
       changed();
@@ -299,7 +333,7 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
       if (result.kind === "refused") {
         if (result.dropped !== undefined) {
           // A key from another IP: that approval ends (AC12).
-          log.info({ device: labelOf(result.dropped) }, "device disconnected");
+          note(labelOf(result.dropped), sendsOf(result.dropped), "disconnected");
           end(result.dropped);
           changed();
         }
@@ -307,14 +341,15 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
         refuse(socket, result.reason);
         return null;
       }
-      const { deviceId, label } = result.device;
+      const { deviceId, label, sends } = result.device;
       const previous = links.get(deviceId);
       if (previous && previous.socket !== socket) previous.socket.terminate();
-      const link: Link = { socket, approved: true, label };
+      const link: Link = { socket, approved: true, label, sends };
       links.set(deviceId, link);
-      log.info({ device: label }, "device reconnected");
-      send(socket, { type: "approved", key, deviceId, sends: [] });
+      note(label, sends, sends.length > 0 ? "connected" : "reconnected");
+      send(socket, { type: "approved", key, deviceId, sends });
       welcome(link);
+      if (sends.length > 0) changed(); // the panel shows it online again (PD5)
       return deviceId;
     },
 
@@ -338,6 +373,9 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
       if (!link.approved && pairing.reject(deviceId)) {
         scheduleExpiry();
         changed();
+      } else if (link.approved && link.sends.length > 0) {
+        note(link.label, link.sends, "disconnected");
+        changed(); // offline in the panel (PD5)
       }
     },
 

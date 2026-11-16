@@ -3,7 +3,18 @@
 // bound to the approved IP, the limits, the wrong-code throttle and request expiry. No socket and
 // no timer: the clock and the random source are injected, and the caller asks `expire()` when
 // `nextExpiry()` comes due. Everything dies with the process (spec, Data).
-import { CODE_ALPHABET, CODE_LENGTH, PAIRING_LIMITS, type DeviceEntry } from "@djv/shared";
+// B-06 (SD6, SD8, SD12, SD15, PD4; T7): a request names what the device sends — nothing for a
+// controller — and the role is stored on the entry. Limits by role, at request and again at
+// accept: 8 controllers, 4 video senders, 1 audio sender (a device sending both counts in both),
+// 4 pending shared by every role. A second audio sender is `audio_taken`, checked before
+// `too_many` when both apply.
+import {
+  CODE_ALPHABET,
+  CODE_LENGTH,
+  PAIRING_LIMITS,
+  type DeviceEntry,
+  type SendKind,
+} from "@djv/shared";
 
 export interface PairingDeps {
   now(): number;
@@ -13,11 +24,11 @@ export interface PairingDeps {
 
 export type RequestResult =
   | { kind: "waiting"; device: DeviceEntry }
-  | { kind: "refused"; reason: "wrong_code" | "throttled" | "too_many" | "ended" };
+  | { kind: "refused"; reason: "wrong_code" | "throttled" | "too_many" | "audio_taken" | "ended" };
 
 export type AcceptResult =
   | { kind: "approved"; device: DeviceEntry; key: string }
-  | { kind: "refused"; reason: "too_many" }
+  | { kind: "refused"; reason: "too_many" | "audio_taken" }
   | { kind: "unknown" };
 
 export type ResumeResult =
@@ -34,7 +45,8 @@ export interface Pairing {
   disable(): string[];
   /** A new code; every pending request and approval ends. Returns the devices to close. */
   newCode(): string[];
-  request(ip: string, code: string, hint: string): RequestResult;
+  /** `sends`: what the device sends; empty (the default) for a controller. */
+  request(ip: string, code: string, hint: string, sends?: readonly SendKind[]): RequestResult;
   accept(deviceId: string): AcceptResult;
   reject(deviceId: string): boolean;
   /** Removes the requests unanswered for 60 s and returns their ids. */
@@ -44,7 +56,12 @@ export interface Pairing {
   resume(ip: string, key: string): ResumeResult;
   disconnect(deviceId: string): boolean;
   isApproved(deviceId: string): boolean;
+  /** Approved controllers. */
   devices(): DeviceEntry[];
+  /** Approved senders (B-06). */
+  senders(): DeviceEntry[];
+  /** An approved device's role, or null for none. */
+  sendsOf(deviceId: string): SendKind[] | null;
   pending(): DeviceEntry[];
 }
 
@@ -94,6 +111,25 @@ export function createPairing({ now, random }: PairingDeps): Pairing {
     do id = `d${base64url(random(9))}`;
     while (pending.has(id) || approved.has(id));
     return id;
+  };
+
+  /** The role limit a device of `sends` would break with the approvals as they are, if any. */
+  const roleRefusal = (sends: readonly SendKind[]): "audio_taken" | "too_many" | null => {
+    const roles = [...approved.values()].map((d) => d.entry.sends);
+    const count = (kind: SendKind) => roles.filter((r) => r.includes(kind)).length;
+    if (sends.includes("audio") && count("audio") >= PAIRING_LIMITS.audioSenders) {
+      return "audio_taken";
+    }
+    if (sends.includes("video") && count("video") >= PAIRING_LIMITS.videoSenders) {
+      return "too_many";
+    }
+    if (
+      sends.length === 0 &&
+      roles.filter((r) => r.length === 0).length >= PAIRING_LIMITS.approved
+    ) {
+      return "too_many";
+    }
+    return null;
   };
 
   const endAll = (): string[] => {
@@ -146,7 +182,7 @@ export function createPairing({ now, random }: PairingDeps): Pairing {
       return ids;
     },
 
-    request(ip, presented, hint) {
+    request(ip, presented, hint, sends = []) {
       if (!on || code === null) return { kind: "refused", reason: "ended" };
       const at = now();
       const until = throttledUntil.get(ip);
@@ -156,14 +192,14 @@ export function createPairing({ now, random }: PairingDeps): Pairing {
         wrongCode(ip, at);
         return { kind: "refused", reason: "wrong_code" };
       }
-      if (approved.size >= PAIRING_LIMITS.approved || pending.size >= PAIRING_LIMITS.pending) {
-        return { kind: "refused", reason: "too_many" };
-      }
+      const refusal = roleRefusal(sends);
+      if (refusal) return { kind: "refused", reason: refusal };
+      if (pending.size >= PAIRING_LIMITS.pending) return { kind: "refused", reason: "too_many" };
       const entry: DeviceEntry = {
         deviceId: newId(),
         hint,
         label: `Device ${++sequence}`,
-        sends: [],
+        sends: [...sends],
       };
       pending.set(entry.deviceId, { entry, ip, at });
       return { kind: "waiting", device: entry };
@@ -173,7 +209,8 @@ export function createPairing({ now, random }: PairingDeps): Pairing {
       const request = pending.get(deviceId);
       if (!request) return { kind: "unknown" };
       pending.delete(deviceId);
-      if (approved.size >= PAIRING_LIMITS.approved) return { kind: "refused", reason: "too_many" };
+      const refusal = roleRefusal(request.entry.sends);
+      if (refusal) return { kind: "refused", reason: refusal };
       const key = base64url(random(16));
       approved.set(deviceId, { entry: request.entry, ip: request.ip, key });
       byKey.set(key, deviceId);
@@ -213,7 +250,12 @@ export function createPairing({ now, random }: PairingDeps): Pairing {
 
     disconnect: drop,
     isApproved: (deviceId) => approved.has(deviceId),
-    devices: () => [...approved.values()].map((d) => d.entry),
+    devices: () => [...approved.values()].map((d) => d.entry).filter((e) => e.sends.length === 0),
+    senders: () => [...approved.values()].map((d) => d.entry).filter((e) => e.sends.length > 0),
+    sendsOf: (deviceId) => {
+      const device = approved.get(deviceId);
+      return device ? [...device.entry.sends] : null;
+    },
     pending: () => [...pending.values()].map((p) => p.entry),
   };
 }

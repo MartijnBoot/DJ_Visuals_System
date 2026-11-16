@@ -76,9 +76,9 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-function request(ip = "192.168.1.20") {
+function request(ip = "192.168.1.20", sends: ("video" | "audio")[] = []) {
   const socket = new FakeSocket();
-  const deviceId = hub.request(asSocket(socket), ip, lastStatus().code!, "Safari on iPhone");
+  const deviceId = hub.request(asSocket(socket), ip, lastStatus().code!, "Safari on iPhone", sends);
   expect(deviceId).not.toBeNull();
   return { socket, deviceId: deviceId! };
 }
@@ -132,5 +132,77 @@ describe("request expiry (SD18, AC10)", () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(socket.closedWith).toBeNull();
     expect(lastStatus().devices.map((d) => d.deviceId)).toEqual([deviceId]);
+  });
+});
+
+describe("senders (B-06 T7, SD6, SD15, SD25, PD5)", () => {
+  it("lists a sender's request with its role, and approved senders apart with online", async () => {
+    const { socket, deviceId } = request("192.168.1.30", ["video"]);
+    expect(lastStatus().pending).toEqual([
+      { deviceId, hint: "Safari on iPhone", label: "Device 1", sends: ["video"] },
+    ]);
+    screen.receive({ type: "accept", deviceId });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent).toContainEqual({
+      type: "approved",
+      key: expect.any(String),
+      deviceId,
+      sends: ["video"],
+    });
+    expect(lastStatus().devices).toEqual([]);
+    expect(lastStatus().senders).toEqual([
+      { deviceId, hint: "Safari on iPhone", label: "Device 1", sends: ["video"], online: true },
+    ]);
+    socket.close(1000);
+    hub.closed(deviceId, asSocket(socket)); // what device.ts does on the socket's close
+    expect(lastStatus().senders[0]!.online).toBe(false);
+  });
+
+  it("a controller's approval carries empty sends and lists it among devices", async () => {
+    const { socket, deviceId } = request();
+    screen.receive({ type: "accept", deviceId });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent).toContainEqual({
+      type: "approved",
+      key: expect.any(String),
+      deviceId,
+      sends: [],
+    });
+    expect(lastStatus().devices.map((d) => d.deviceId)).toEqual([deviceId]);
+    expect(lastStatus().senders).toEqual([]);
+  });
+
+  it("logs sender requested, accepted, rejected and expired with the label and role only", async () => {
+    const a = request("192.168.1.31", ["audio"]);
+    screen.receive({ type: "accept", deviceId: a.deviceId });
+    const b = request("192.168.1.32", ["video", "audio"]);
+    await vi.advanceTimersByTimeAsync(0);
+    screen.receive({ type: "reject", deviceId: b.deviceId });
+    request("192.168.1.33", ["video"]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(info).toHaveBeenCalledWith({ device: "Device 1", sends: ["audio"] }, "sender requested");
+    expect(info).toHaveBeenCalledWith({ device: "Device 1", sends: ["audio"] }, "sender accepted");
+    expect(info).toHaveBeenCalledWith(
+      { device: "Device 2", sends: ["video", "audio"] },
+      "sender rejected",
+    );
+    expect(info).toHaveBeenCalledWith(
+      { device: "Device 3", sends: ["video"] },
+      "sender request expired",
+    );
+    expect(JSON.stringify(info.mock.calls)).not.toContain("Safari");
+  });
+
+  it("refuses a second audio sender with audio_taken", async () => {
+    const a = request("192.168.1.31", ["audio"]);
+    screen.receive({ type: "accept", deviceId: a.deviceId });
+    await vi.advanceTimersByTimeAsync(0);
+    const socket = new FakeSocket();
+    expect(
+      hub.request(asSocket(socket), "192.168.1.40", lastStatus().code!, "Chrome on Windows", [
+        "audio",
+      ]),
+    ).toBeNull();
+    expect(socket.sent).toEqual([{ type: "refused", reason: "audio_taken" }]);
   });
 });

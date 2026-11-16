@@ -10,6 +10,7 @@ import {
   deviceMessageSchema,
   MAX_DEVICE_MESSAGE,
   type Control,
+  type SendKind,
 } from "@djv/shared";
 import type { IncomingMessage } from "node:http";
 import type { WebSocket } from "ws";
@@ -20,7 +21,13 @@ import { hint } from "./hint.ts";
 /** What a device socket asks of the hub. */
 export interface DeviceHub {
   /** A code presented: returns the new request's id, or null when refused (the hub answers). */
-  request(socket: WebSocket, ip: string, code: string, hint: string): string | null;
+  request(
+    socket: WebSocket,
+    ip: string,
+    code: string,
+    hint: string,
+    sends: readonly SendKind[],
+  ): string | null;
   /** A key presented: returns the device's id, or null when refused (the hub answers). */
   resume(socket: WebSocket, ip: string, key: string): string | null;
   /** True while `socket` is the approved socket of `deviceId`. */
@@ -64,7 +71,7 @@ export function attachDevice(
         greeted = true;
         deviceId =
           message.code !== undefined
-            ? hub.request(socket, ip, message.code, deviceHint)
+            ? hub.request(socket, ip, message.code, deviceHint, message.sends ?? [])
             : hub.resume(socket, ip, message.key!);
         return;
       }
