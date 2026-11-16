@@ -29,7 +29,12 @@ export interface BodyLines {
  */
 const ERROR_LINE = /ERROR:\s*\d+:(\d+):\s*([^\n]*)/g;
 
-/** Each distinct error of `log`, placed in the body that owns its line. */
+/**
+ * Each distinct error of `log`, placed in the body that owns its line. A body owns its own lines
+ * and its function's signature just before them and closing brace just after (`shader.ts`,
+ * `customLink`): the compiler reports a missing `return` at the signature and a missing `;` on
+ * the last line at the brace, and both belong to the author's text, at its first or last line.
+ */
 export function locateErrors(log: string, bodies: readonly BodyLines[]): CompileIssue[] {
   const seen = new Set<string>();
   const issues: CompileIssue[] = [];
@@ -39,13 +44,13 @@ export function locateErrors(log: string, bodies: readonly BodyLines[]): Compile
     const key = `${line}:${message}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const body = bodies.find((b) => line >= b.firstLine && line < b.firstLine + b.lineCount);
+    const body = bodies.find((b) => line >= b.firstLine - 1 && line <= b.firstLine + b.lineCount);
     issues.push(
       body
         ? {
             effectIndex: body.effectIndex,
             label: body.label,
-            line: line - body.firstLine + 1,
+            line: Math.min(Math.max(line - body.firstLine + 1, 1), body.lineCount),
             message,
           }
         : { effectIndex: -1, label: "", line, message },

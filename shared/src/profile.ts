@@ -66,8 +66,9 @@ const named = (max: number, what: string) =>
 
 /**
  * The code checks of B-03 SD16 (plan PD6): one message per rule the code breaks. They keep a
- * body inside its function; the compiler is the real check. A backslash-newline is joined
- * first, as the GLSL compiler joins it, so a continued line cannot hide anything from them.
+ * body inside its function; the compiler is the real check. Line ends are read as the GLSL
+ * compiler reads them (CR, LF or CRLF, so a lone CR ends a `//` comment), and a backslash before
+ * one is joined first, as the compiler joins it, so a continued line cannot hide anything.
  */
 export function customCodeIssues(code: string): string[] {
   const issues: string[] = [];
@@ -75,7 +76,7 @@ export function customCodeIssues(code: string): string[] {
     issues.push(`code is at most ${CUSTOM_LIMITS.codeBytes} bytes`);
   }
   if (code.includes("#")) issues.push("code may not contain # (no preprocessor)");
-  const joined = code.replace(/\\\r?\n/g, "");
+  const joined = code.replace(/\r\n?/g, "\n").replace(/\\\n/g, "");
   if (/\buniform\b/.test(joined)) issues.push("code may not use the word uniform");
   if (/^[ \t]*(?:in|out|inout)\s/m.test(joined)) {
     issues.push("code may not declare in, out or inout at the start of a line");

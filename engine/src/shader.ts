@@ -248,8 +248,10 @@ function assemble(entries: readonly FragmentEntry[]): { source: string; bodies: 
   const placed: { text: string; code?: { at: number; effectIndex: number; lineCount: number } }[] =
     entries.map((entry, i) => {
       if (typeof entry !== "string") {
-        const link = customLink(entry.code, i + 1, slot++);
-        const lineCount = entry.code.split("\n").length;
+        // GLSL ends a line at CR, LF or CRLF; one form keeps the layout's count the compiler's.
+        const code = entry.code.replace(/\r\n?/g, "\n");
+        const link = customLink(code, i + 1, slot++);
+        const lineCount = code.split("\n").length;
         return { text: link.text, code: { at: link.codeAt, effectIndex: i, lineCount } };
       }
       const snippet = SNIPPETS[entry] ?? passThrough;

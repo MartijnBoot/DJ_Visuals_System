@@ -32,7 +32,12 @@ export type CompileState =
   | { kind: "ok" }
   | { kind: "failed"; issues: readonly CompileIssue[] }
   /** The preview has no WebGL2: nothing can be checked. */
-  | { kind: "unavailable" };
+  | { kind: "unavailable" }
+  /**
+   * The engine took the draft while its WebGL context was lost, so nothing compiled; after the
+   * restore it draws without the code until the code is edited (B-03 review, finding 3).
+   */
+  | { kind: "unchecked" };
 
 /** A compile result and the program key it belongs to; `null` belongs to every draft. */
 export interface CompileReport {
@@ -54,7 +59,14 @@ const CODE_DEBOUNCE_MS = 150;
 const GUARD_TEXT = {
   slow: "custom effects are off: this look is too heavy for this GPU; edit the code to retry",
   lost: "the graphics context was lost and restored",
+  lostCustom:
+    "the graphics context was lost and restored; custom effects are off; edit the code to retry",
 } as const;
+
+const guardText = (event: GuardEvent): string => {
+  if (event.kind === "slow") return GUARD_TEXT.slow;
+  return event.customBypassed ? GUARD_TEXT.lostCustom : GUARD_TEXT.lost;
+};
 
 export interface PreviewProps {
   draft: Profile;
@@ -91,9 +103,7 @@ export function Preview({ draft, onCompile }: PreviewProps) {
     }
     engineRef.current = engine;
     // B-03 SD8, AC16: why custom effects are off, and the frame time about four times a second.
-    const stopGuard = engine.onGuard((event: GuardEvent) =>
-      setGuard(event.kind === "slow" ? GUARD_TEXT.slow : GUARD_TEXT.lost),
-    );
+    const stopGuard = engine.onGuard((event: GuardEvent) => setGuard(guardText(event)));
     const frameTimer = setInterval(() => setFrameMs(engine.stats().frameTimeMs), 250);
     // The same session the output screen creates (`Screen.tsx`): nothing is requested until Start.
     const session = createSession({
@@ -143,19 +153,33 @@ export function Preview({ draft, onCompile }: PreviewProps) {
   // A new program key (code or stack) waits a moment first, and each result is reported with
   // the key it belongs to (B-03 PD10).
   const sentKey = useRef<string | null>(null);
+  /**
+   * The key the engine took while its context was lost: not compiled, and after the restore the
+   * engine keeps it without its code until another key (finding 3). Read the loss from the
+   * context itself, which knows it at once, before any event listener has run.
+   */
+  const uncheckedKey = useRef<string | null>(null);
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
     engine.setDials(draft.dials);
     const key = programKey(draft);
+    const contextLost = () => canvasRef.current?.getContext("webgl2")?.isContextLost() ?? false;
+    const report = (state: CompileState) => {
+      if (contextLost()) uncheckedKey.current = key;
+      else if (uncheckedKey.current !== key) uncheckedKey.current = null;
+      onCompile({ key, state: uncheckedKey.current === key ? { kind: "unchecked" } : state });
+    };
     const send = () => {
       engine.setProfile(sharedToEngine(draft)).then(
-        () => onCompile({ key, state: { kind: "ok" } }),
+        () => report({ kind: "ok" }),
         (e: unknown) => {
           if (e instanceof ProfileSupersededError) return;
-          if (!(e instanceof ProfileCompileError)) console.warn("preview profile not applied", e);
           const issues = e instanceof ProfileCompileError ? e.issues : [];
-          onCompile({ key, state: { kind: "failed", issues } });
+          if (!(e instanceof ProfileCompileError) && !contextLost()) {
+            console.warn("preview profile not applied", e);
+          }
+          report({ kind: "failed", issues });
         },
       );
     };

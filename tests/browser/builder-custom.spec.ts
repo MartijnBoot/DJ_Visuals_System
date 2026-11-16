@@ -226,6 +226,65 @@ test("with two custom effects and one broken, only that row shows the error (AC1
   );
 });
 
+// B-03 review, finding 1: the compiler reports these two at the wrapper's brace and signature.
+test("a missing ; on the last line and a missing return show on the row, at a line of its code (AC14)", async ({
+  page,
+  request,
+}) => {
+  await withCustom(page, request, "vec3 c = source(uv);\nreturn c");
+  await expect(page.getByTestId("custom-compile-custom-0")).toHaveText(/^line 2: .*syntax error/);
+  await expect(page.getByTestId("editor-save-reason")).toHaveText(
+    'custom effect "Custom" does not compile',
+  );
+  await page.getByTestId("custom-code-custom-0").fill("vec3 c = source(uv);");
+  await expect(page.getByTestId("custom-compile-custom-0")).toHaveText(/^line 1: .*return/);
+});
+
+/** Loses the preview's WebGL context; the returned call restores it. */
+async function losePreviewContext(page: Page): Promise<() => Promise<void>> {
+  await page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>("[data-testid=preview]")!;
+    const ext = canvas.getContext("webgl2")!.getExtension("WEBGL_lose_context")!;
+    (window as unknown as { __lose: WEBGL_lose_context }).__lose = ext;
+    ext.loseContext();
+  });
+  return () =>
+    page.evaluate(() =>
+      (window as unknown as { __lose: WEBGL_lose_context }).__lose.restoreContext(),
+    );
+}
+
+// B-03 review, finding 3: while the context is lost nothing compiles, so nothing is "ok"; after
+// the restore the code typed meanwhile is still unchecked until it is edited again.
+test("code typed while the preview's context is lost is not reported compiled, and Save stays off (AC14, PD10)", async ({
+  page,
+  request,
+}) => {
+  await withCustom(page, request, "return source(uv);");
+  await expect(page.getByTestId("custom-compile-custom-0")).toHaveText("ok");
+  const restore = await losePreviewContext(page);
+
+  await page.getByTestId("custom-code-custom-0").fill("return source(uv) * missing;");
+  await expect(page.getByTestId("custom-compile-custom-0")).toHaveText(/^not checked/);
+  await expect(page.getByTestId("editor-save")).toBeDisabled();
+  await page.waitForTimeout(800); // past the debounce: the engine has answered, still not ok
+  await expect(page.getByTestId("custom-compile-custom-0")).toHaveText(/^not checked/);
+
+  await restore();
+  await expect(page.getByTestId("preview-guard")).toHaveText(/custom effects are off/);
+  await page.getByTestId("effect-amount-custom-0").fill("0.9"); // same code: still unchecked
+  await page.waitForTimeout(800);
+  await expect(page.getByTestId("custom-compile-custom-0")).toHaveText(/^not checked/);
+  await expect(page.getByTestId("editor-save")).toBeDisabled();
+
+  // An edit to the code checks it again.
+  await page.getByTestId("custom-code-custom-0").fill("return source(uv) * missing2;");
+  await expect(page.getByTestId("custom-compile-custom-0")).toHaveText(/^line 1: .*missing2/);
+  await page.getByTestId("custom-code-custom-0").fill("return source(uv) * 0.5;");
+  await expect(page.getByTestId("custom-compile-custom-0")).toHaveText("ok");
+  await expect(page.getByTestId("editor-save")).toBeEnabled();
+});
+
 test("one character typed into code that compiled disables Save until its compile result arrives (PD10)", async ({
   page,
   request,

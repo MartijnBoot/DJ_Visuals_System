@@ -53,6 +53,10 @@ function compileOf(
   return { kind: "pending" };
 }
 
+/** Code the preview took while its graphics context was lost (B-03 review, finding 3). */
+const UNCHECKED_WHY = "the graphics context was lost; edit the code to check it again";
+const UNCHECKED = `the custom code is not checked: ${UNCHECKED_WHY}`;
+
 /** Why Save is off for a draft with custom code, or null (PD10). */
 function codeReason(draft: Profile, state: ReturnType<typeof compileOf>): string | null {
   if (!draft.effects.some((e) => e.type === "custom")) return null; // never waits without code
@@ -60,6 +64,7 @@ function codeReason(draft: Profile, state: ReturnType<typeof compileOf>): string
   if (state.kind === "pending") return "checking the code…";
   if (state.kind === "unavailable")
     return "custom effects cannot be checked: the preview has no WebGL2";
+  if (state.kind === "unchecked") return UNCHECKED;
   const located = state.issues.find((i) => i.effectIndex >= 0);
   const effect = located ? draft.effects[located.effectIndex] : undefined;
   return effect?.type === "custom"
@@ -71,6 +76,7 @@ function codeReason(draft: Profile, state: ReturnType<typeof compileOf>): string
 function rowCompile(state: ReturnType<typeof compileOf>, index: number): string {
   if (state.kind === "pending") return "checking…";
   if (state.kind === "unavailable") return "not checked: the preview has no WebGL2";
+  if (state.kind === "unchecked") return `not checked: ${UNCHECKED_WHY}`;
   if (state.kind === "ok") return "ok";
   const mine = state.issues.filter((i) => i.effectIndex === index);
   return mine.length === 0 ? "ok" : mine.map((i) => `line ${i.line}: ${i.message}`).join("\n");

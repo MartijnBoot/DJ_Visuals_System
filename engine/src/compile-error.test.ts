@@ -28,9 +28,26 @@ describe("locateErrors (PD9)", () => {
     ]);
   });
 
-  it("treats a body's first and last lines as its own, and the next line as not", () => {
+  it("treats a body's first and last lines as its own, and lines beyond its function as not", () => {
     const at = (line: number) => locateErrors(`ERROR: 0:${line}: m`, bodies)[0]!.effectIndex;
-    expect([97, 98, 100, 101].map(at)).toEqual([-1, 1, 1, -1]);
+    expect([96, 98, 100, 102].map(at)).toEqual([-1, 1, 1, -1]);
+  });
+
+  // B-03 review, finding 1: ANGLE reports a missing `;` on a body's last line at its function's
+  // closing brace, and a missing `return` at its signature. Both are the body's errors.
+  it("places an error on the body's own signature at its first line, on its closing brace at its last", () => {
+    const log =
+      "ERROR: 0:97: 'fx2Custom' : Function does not return a value\n" +
+      "ERROR: 0:101: '}' : syntax error\n";
+    expect(locateErrors(log, bodies)).toEqual([
+      {
+        effectIndex: 1,
+        label: "Swirl",
+        line: 1,
+        message: "'fx2Custom' : Function does not return a value",
+      },
+      { effectIndex: 1, label: "Swirl", line: 3, message: "'}' : syntax error" },
+    ]);
   });
 
   it("finds an error that follows the program's log on the same line", () => {
@@ -65,6 +82,27 @@ describe("fragmentLayout (PD9)", () => {
     expect(lines[layout[0]!.firstLine - 1]).toBe("vec3 a = source(uv);");
     expect(lines[layout[0]!.firstLine]).toBe("return a;");
     expect(lines[layout[1]!.firstLine - 1]).toBe("return source(uv);");
+    // The body's own function wraps it directly: `locateErrors` counts these two lines as the
+    // body's (B-03 review, finding 1).
+    expect(lines[layout[0]!.firstLine - 2]).toBe("vec3 fx2Custom(vec2 uv) {");
+    expect(lines[layout[0]!.firstLine + 1]).toBe("}");
+    expect(lines[layout[1]!.firstLine - 2]).toBe("vec3 fx4Custom(vec2 uv) {");
+    expect(lines[layout[1]!.firstLine]).toBe("}");
+  });
+
+  // B-03 review, finding 2: GLSL ends a line at a carriage return too, so a lone `\r` must
+  // count as one, or every line after it is reported in the wrong place.
+  it("counts a lone carriage return and a CRLF as one line end each, as the compiler does", () => {
+    const entries = [
+      { type: "custom", code: "vec3 a = source(uv);\rvec3 b = a;\r\nreturn b;" },
+    ] as const;
+    const source = buildFragment([...entries]);
+    const [body] = fragmentLayout([...entries]);
+    expect(body!.lineCount).toBe(3);
+    const lines = source.split(/\r\n|\r|\n/);
+    expect(lines[body!.firstLine - 1]).toBe("vec3 a = source(uv);");
+    expect(lines[body!.firstLine + 1]).toBe("return b;");
+    expect(lines[body!.firstLine + 2]).toBe("}");
   });
 
   it("is empty for a built-in-only list", () => {

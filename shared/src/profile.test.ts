@@ -514,6 +514,22 @@ describe("the custom effect (B-03)", () => {
     expect(failingCode("/* never closed\nreturn source(uv);")).toEqual(["effects.0.code"]);
   });
 
+  // B-03 review, finding 2: the compiler ends a `//` comment at a carriage return as well, so a
+  // brace after a lone `\r` is code, and must be counted.
+  it("ends a // comment at a lone carriage return, as the compiler does (PD6)", () => {
+    expect(
+      failingCode("return source(uv); // hidden\r} vec3 escaped(vec2 q) { return vec3(0.0);"),
+    ).toEqual(["effects.0.code"]);
+    expect(failingCode("vec3 c = source(uv);\r  out vec4 o;\rreturn c;")).toEqual([
+      "effects.0.code",
+    ]);
+    expect(failingCode("/* *\\\r/ } vec3 more() { /* */\r\nreturn source(uv);")).toEqual([
+      "effects.0.code",
+    ]);
+    const crlf = "// a comment\r\nif (true) { return source(uv); }\r\nreturn source(uv);";
+    expect(profileSchema.safeParse(withEffects([custom({ code: crlf })])).success).toBe(true);
+  });
+
   it("gives one issue per broken rule, each naming its rule (PD6)", () => {
     expect(customCodeIssues("return source(uv);")).toEqual([]);
     const issues = customCodeIssues("#x\nuniform float u;\n}");
