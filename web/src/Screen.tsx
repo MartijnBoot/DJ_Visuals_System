@@ -18,9 +18,11 @@ import {
   DEFAULT_DIALS,
   type Dials,
   type Engine,
+  type LatencyReading,
   type RenderScale,
 } from "@djv/engine";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createLatencyWindow } from "../../engine/src/latency.ts";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "./capture/devices.ts";
 import { loadRemembered, type AudioChoice } from "./capture/remembered.ts";
 import { createSession, type Session, type SessionState } from "./capture/session.ts";
@@ -53,6 +55,31 @@ function attachAudio(stream: MediaStream) {
       element.pause();
       element.srcObject = null;
     },
+  };
+}
+
+/**
+ * B-06 PD15: one remote leg, read from the receiver's statistics on each overlay poll and kept
+ * for 10 s like B-01's latency. Null — the line absent — while no sender's leg is in use; a new
+ * sender starts a new window.
+ */
+function legReader(
+  inUse: () => string | null,
+  stats: (deviceId: string) => Promise<number | null>,
+): () => Promise<LatencyReading | null> {
+  let device: string | null = null;
+  let window = createLatencyWindow();
+  return async () => {
+    const id = inUse();
+    if (id !== device) {
+      device = id;
+      window = createLatencyWindow();
+    }
+    if (id === null) return null;
+    const ms = await stats(id);
+    if (inUse() !== id) return null; // fell back while the statistics were read
+    if (ms !== null) window.record(ms, performance.now());
+    return window.read(performance.now());
   };
 }
 
@@ -289,6 +316,30 @@ export function Screen() {
   const latency = useCallback(() => engineRef.current?.latency() ?? null, []);
   const lockState = useCallback(() => wakeLock.state(), [wakeLock]);
   const read = useCallback((now: number) => sourcesRef.current?.read(now) ?? ZERO_FEATURES, []);
+  // B-06 AC28, AC29, SD22: the overlay's remote lines, from what the sources analyse and draw.
+  const [legs] = useState(() => {
+    const inUse = () => sourcesRef.current?.analysing(performance.now()) ?? null;
+    return {
+      network: legReader(
+        () => inUse()?.audio ?? null,
+        (id) => control.peers.stats(id, "audio"),
+      ),
+      video: legReader(
+        () => inUse()?.video ?? null,
+        (id) => control.peers.stats(id, "video"),
+      ),
+    };
+  });
+  const remoteLines = useCallback(() => {
+    const now = performance.now();
+    const sources = sourcesRef.current;
+    const drawn = sources?.analysing(now).video ?? null;
+    const label = control.senders().find((s) => s.deviceId === drawn)?.label;
+    return {
+      audio: sources?.audioLine(now) ?? null,
+      camera: label === undefined ? null : `camera: remote (${label}) ok`,
+    };
+  }, [control]);
 
   return (
     <>
@@ -314,6 +365,9 @@ export function Screen() {
           audio={capture.audio}
           camera={capture.camera}
           profileName={profiles.activeName}
+          network={legs.network}
+          video={legs.video}
+          remote={remoteLines}
         />
       )}
       {panel && !error && (

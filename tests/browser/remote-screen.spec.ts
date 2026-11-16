@@ -227,3 +227,72 @@ test("an audio sender becomes main at Start, falls back to the local input when 
   );
   for (const config of await peerConfigs(page)) expect(config.iceServers ?? []).toEqual([]);
 });
+
+// B-06 T14 (AC28 to AC30, SD3, SD11, SD22; plan PD15): the overlay's remote lines. The numbers
+// are asserted finite and non-negative only — no bound on a millisecond enters the gate (SD27).
+const LEG = (name: string) =>
+  new RegExp(`^${name} ms \\d+\\.\\d / p95 \\d+\\.\\d / worst \\d+\\.\\d$`);
+
+test("the overlay shows network ms only while the remote audio is analysed, and the audio line follows the fallback (AC28, AC30, SD22)", async ({
+  page,
+}) => {
+  const code = await screen(page);
+  const audio = await pairedSender(page, code, ["audio"]); // Device 1
+  const controller = await pairedController(page, code);
+  await start(page, { reopen: false });
+  await page.keyboard.press("o");
+  await expect(page.getByTestId("overlay-audio")).toHaveText("audio: remote (Device 1) ok", {
+    timeout: 20_000,
+  });
+  await expect(page.getByTestId("overlay-network")).toHaveText(LEG("network"), { timeout: 10_000 });
+  await expect(page.getByTestId("overlay-video")).toHaveCount(0);
+  // B-01's in-app latency, still from the screen machine's AudioContext (B-08's assertion).
+  await expect(page.getByTestId("overlay-latency")).toHaveText(LEG("latency"));
+
+  // Main audio local: nothing remote is analysed, so no network line.
+  await controller.send({ type: "mainAudio", seq: 1, source: "local" });
+  await expect(page.getByTestId("overlay-audio")).toHaveText("audio: local");
+  await expect(page.getByTestId("overlay-network")).toHaveCount(0);
+  await controller.send({ type: "mainAudio", seq: 2, source: "remote" });
+  await expect(page.getByTestId("overlay-audio")).toHaveText("audio: remote (Device 1) ok", {
+    timeout: 10_000,
+  });
+  await expect(page.getByTestId("overlay-network")).toHaveText(LEG("network"), { timeout: 10_000 });
+
+  // The sender's track stops: the fallback line, and the network line goes.
+  await audio.sender.stopTrack("audio");
+  await expect(page.getByTestId("overlay-audio")).toHaveText(
+    "audio: local (fallback: remote lost)",
+    { timeout: 10_000 },
+  );
+  await expect(page.getByTestId("overlay-network")).toHaveCount(0);
+  await expect(page.getByTestId("overlay-latency")).toHaveText(LEG("latency"));
+});
+
+test("the overlay shows video ms and the remote label only while a remote camera is on screen (AC29, AC30)", async ({
+  page,
+}) => {
+  const code = await screen(page);
+  const video = await pairedSender(page, code, ["video"]); // Device 1
+  const controller = await pairedController(page, code);
+  await start(page, { reopen: false });
+  await page.keyboard.press("o");
+  await expect(page.getByTestId("overlay-camera")).toHaveText("camera: ok");
+  await expect(page.getByTestId("overlay-video")).toHaveCount(0);
+  await expect(page.getByTestId("overlay-network")).toHaveCount(0);
+
+  const listed = await stateWhere(controller, (s) =>
+    s.cameras.some((c) => c.deviceId === `remote:${video.deviceId}`),
+  );
+  const local = listed.cameraId!;
+  await controller.send({ type: "camera", seq: 1, deviceId: `remote:${video.deviceId}` });
+  await expect(page.getByTestId("overlay-camera")).toHaveText("camera: remote (Device 1) ok", {
+    timeout: 20_000,
+  });
+  await expect(page.getByTestId("overlay-video")).toHaveText(LEG("video"), { timeout: 10_000 });
+  await expect(page.getByTestId("overlay-latency")).toHaveText(LEG("latency"));
+
+  await controller.send({ type: "camera", seq: 2, deviceId: local });
+  await expect(page.getByTestId("overlay-camera")).toHaveText("camera: ok", { timeout: 10_000 });
+  await expect(page.getByTestId("overlay-video")).toHaveCount(0);
+});

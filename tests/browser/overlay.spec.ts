@@ -36,6 +36,9 @@ test("after Start the overlay shows latency, scale, both sources ok and the lock
   // Phase 0's lines are still there.
   await expect(page.getByTestId("overlay-fps")).toHaveText(/^fps \d+\.\d$/);
   await expect(page.getByTestId("overlay-server")).toHaveText("server: ok");
+  // B-06 AC28, AC29: nothing remote is analysed or drawn, so neither remote line is shown.
+  await expect(page.getByTestId("overlay-network")).toHaveCount(0);
+  await expect(page.getByTestId("overlay-video")).toHaveCount(0);
 });
 
 test("without the Wake Lock API the overlay says unavailable (AC16, PD16)", async ({ page }) => {
