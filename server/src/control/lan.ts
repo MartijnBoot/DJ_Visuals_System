@@ -3,8 +3,8 @@
 // the operator switches on and closed when they switch off. HTTPS only, with the server
 // certificate the store issues for exactly the addresses bound (B-06 T5); a store that cannot be
 // read binds nothing (`cert_store`), and no plain-HTTP listener exists. It answers `GET /control`
-// (the page), `GET /assets/*` (the built assets, nothing else of `web/dist`), `GET /trust` (B-06
-// T6) and the device socket (T7); every other path is Fastify's
+// and `GET /send` (the page, B-06 T18), `GET /assets/*` (the built assets, nothing else of
+// `web/dist`), `GET /trust` (B-06 T6) and the device socket (T7); every other path is Fastify's
 // 404. No body parser hook and no CORS header: there is nothing here to write to. Binding is all
 // or nothing: if one address fails, every one already bound is closed and the switch stays off.
 // Under `--api-only` there is no built page, so only the device socket answers.
@@ -71,9 +71,14 @@ export function createLan({
         index: false,
         wildcard: true,
       });
-      app.get("/control", async (_request, reply) =>
-        reply.type("text/html; charset=utf-8").send(await readFile(join(staticDir, "index.html"))),
-      );
+      // The controller's page and the sender's (B-06 T18): both the one built page.
+      for (const page of ["/control", "/send"]) {
+        app.get(page, async (_request, reply) =>
+          reply
+            .type("text/html; charset=utf-8")
+            .send(await readFile(join(staticDir, "index.html"))),
+        );
+      }
     }
     prepare?.(app, address);
     return { app };

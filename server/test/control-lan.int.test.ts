@@ -144,6 +144,11 @@ describe("switching on (AC3, AC5, PD8)", () => {
     expect(page.status).toBe(200);
     expect(page.headers.get("content-type")).toMatch(/text\/html/);
     expect(await page.text()).toContain("control-fixture-page");
+    // B-06 T18: the sending page is the same built page.
+    const send = await lan("/send");
+    expect(send.status).toBe(200);
+    expect(send.headers.get("content-type")).toMatch(/text\/html/);
+    expect(await send.text()).toContain("control-fixture-page");
     const asset = await lan("/assets/app-1234.js");
     expect(asset.status).toBe(200);
     expect(await asset.text()).toContain("console.log");
@@ -163,6 +168,7 @@ describe("switching on (AC3, AC5, PD8)", () => {
       "/assets/nope.js",
       "/assets/../index.html",
       "/control/x",
+      "/send/x",
     ]) {
       const response = await lan(path);
       expect(response.status, path).toBe(404);
@@ -186,10 +192,11 @@ describe("switching on (AC3, AC5, PD8)", () => {
     expect((await lan("/control")).status).toBe(200);
   });
 
-  it("under --api-only answers 404 to /control and /assets/*", async () => {
+  it("under --api-only answers 404 to /control, /send and /assets/*", async () => {
     await start(() => [LOOPBACK], null);
     expect((await act(await screen(), "enable")).on).toBe(true);
     expect((await lan("/control")).status).toBe(404);
+    expect((await lan("/send")).status).toBe(404);
     expect((await lan("/assets/app-1234.js")).status).toBe(404);
   });
 });
