@@ -69,6 +69,15 @@ describe("stepping (SD8, AC15)", () => {
     expect(createScaleController(createFrameStats()).scale()).toBe(1);
   });
 
+  it("frames more than a second apart step down too (D-11)", () => {
+    const { controller, run, settle } = rig();
+    settle();
+    run(1200, 3600);
+    expect(controller.scale()).toBe(0.75);
+    run(1200, 3600);
+    expect(controller.scale()).toBe(0.5);
+  });
+
   it("2 s above budget steps down once, another 2 s again, and never below 50%", () => {
     const { controller, run, settle } = rig();
     settle();

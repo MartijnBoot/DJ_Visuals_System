@@ -51,6 +51,39 @@ describe("frame statistics", () => {
   });
 });
 
+// D-11: with frames more than half a second apart the window holds one frame, and the mean of
+// its intervals was 0: the overlay and the builder's preview read "0.0 ms" for the heaviest
+// looks, and the scale controller, which ignores 0, never stepped down when frames were more
+// than a second apart. One frame in the window reads the interval that ended it.
+describe("sparse frames (D-11)", () => {
+  for (const gap of [600, 1500, 4000]) {
+    it(`reads ${gap} ms when frames are ${gap} ms apart`, () => {
+      const stats = createFrameStats();
+      for (let i = 0; i < 5; i++) stats.record(i * gap);
+      expect(stats.read(4 * gap).frameTimeMs).toBeCloseTo(gap, 9);
+    });
+  }
+
+  it("reads the interval that ended the one frame, after a fast stretch", () => {
+    const stats = steady(60);
+    stats.record(59 * FRAME + 1200);
+    expect(stats.read(59 * FRAME + 1200).frameTimeMs).toBeCloseTo(1200, 9);
+  });
+
+  it("counts a first frame at timestamp 0", () => {
+    const stats = createFrameStats();
+    stats.record(0);
+    stats.record(1500);
+    expect(stats.read(1500).frameTimeMs).toBe(1500);
+  });
+
+  it("still reads 0 for the very first frame, with nothing before it", () => {
+    const stats = createFrameStats();
+    stats.record(500);
+    expect(stats.read(500)).toEqual({ fps: 1, frameTimeMs: 0, lastFrameAt: 500 });
+  });
+});
+
 describe("frame buffer bound", () => {
   it("record keeps no more than one second of frames even when read is never called", () => {
     const stats = createFrameStats();

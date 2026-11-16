@@ -29,6 +29,10 @@ export interface FrameStatsRecorder {
 export function createFrameStats(): FrameStatsRecorder {
   let frames: number[] = [];
   let lastFrameAt = 0;
+  /** The interval that ended the last frame; 0 before the second frame (D-11). */
+  let lastIntervalMs = 0;
+  /** A frame has been recorded (a first frame at timestamp 0 counts). */
+  let recorded = false;
 
   // Drops frames older than the window measured from `now`. Called on every record as well as
   // on every read, so the buffer never holds more than about one second of frames however long
@@ -39,6 +43,8 @@ export function createFrameStats(): FrameStatsRecorder {
 
   return {
     record(timestamp) {
+      if (recorded) lastIntervalMs = timestamp - lastFrameAt;
+      recorded = true;
       frames.push(timestamp);
       lastFrameAt = timestamp;
       prune(timestamp);
@@ -51,6 +57,10 @@ export function createFrameStats(): FrameStatsRecorder {
         const first = frames[0]!;
         const last = frames[frames.length - 1]!;
         frameTimeMs = (last - first) / (frames.length - 1);
+      } else if (frames.length === 1) {
+        // Frames more than half a second apart (D-11): the one frame's own interval, so the
+        // heaviest look never reads as free. No frame in the window still reads 0: stopped.
+        frameTimeMs = lastIntervalMs;
       }
       return { fps, frameTimeMs, lastFrameAt };
     },
