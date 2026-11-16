@@ -1,11 +1,13 @@
 # Architecture
 
-The system as built at the end of B-04 (live set controls): specs
+The system as built at the end of B-06 (remote input devices): specs
 [phase-0-walking-skeleton](../specs/phase-0-walking-skeleton.md),
 [phase-b-01-live-visual-engine](../specs/phase-b-01-live-visual-engine.md),
-[phase-b-02-visual-profiles](../specs/phase-b-02-visual-profiles.md) and
-[phase-b-04-live-set-controls](../specs/phase-b-04-live-set-controls.md), decisions in the
-[Setup Decision Record](../adr/0001-setup-decision-record.md). Plans read this and do not
+[phase-b-02-visual-profiles](../specs/phase-b-02-visual-profiles.md),
+[phase-b-04-live-set-controls](../specs/phase-b-04-live-set-controls.md) and
+[phase-b-06-remote-input-devices](../specs/phase-b-06-remote-input-devices.md), decisions in the
+[Setup Decision Record](../adr/0001-setup-decision-record.md) and
+[ADR 0002](../adr/0002-remote-input-over-the-lan.md). Plans read this and do not
 redesign it; a change here is an owner stop (CLAUDE.md). Diagrams stay text so they diff.
 
 ## Overview
@@ -15,13 +17,16 @@ and a small JSON API. The browser on the same machine runs the screen page, whic
 camera and the audio source, analyses the audio, drives the renderer on a full-window canvas
 and, while the overlay is shown, asks the server for its health. A second route, `/builder`
 (B-02), is where visual profiles are made, edited, exported and imported; it has its own preview
-canvas and engine instance. Rendering, analysis and the media stay in the browser: no camera
-frame or audio sample reaches the server, the disk or a network (B-01 SD14; the server has no
+canvas and engine instance. Rendering and analysis stay in the screen machine's browser: no
+camera frame or audio sample reaches the server or the disk (B-01 SD14; the server has no
 endpoint for either, and `tests/browser/live.spec.ts` asserts every request a running set makes).
 External control (B-04) lets a phone, tablet or laptop on the LAN drive the set: while the
 operator switches it on, a second listener on the machine's private addresses serves `/control`
-and a device socket; every change goes over the server to the screen page, which applies it and
-mirrors its state back (External control, below). Five workspace packages:
+and a device socket over HTTPS; every change goes over the server to the screen page, which
+applies it and mirrors its state back (External control, below). Remote input (B-06, ADR 0002)
+lets a paired device send its camera or its audio from `/send`: the media goes peer to peer to
+the screen page over the LAN, never through the server, which relays only the WebRTC setup
+(Remote input, below). Five workspace packages:
 
 ```
   browser, screen machine                                  Node 24 process, 127.0.0.1:PORT
@@ -61,8 +66,8 @@ browser check runs only against `pnpm start`.
 |---|---|---|---|
 | `engine/` | The WebGL2 context, the animation loop, the look (one shader pass composed from a profile, `shader.ts`; its constants and B-01's reference mapping in `look.ts`), the profile model, strength formula and built-in profile (`profile.ts`), render scaling (`scale.ts`), the latency record (`latency.ts`), frame statistics; custom effects wrapped into the pass, the flash limiter, the runtime guard and context-loss recovery (B-03), compile errors located to effect and line (`compile-error.ts`); its own `AudioFeatures`, `Dials` (`features.ts`) and `Profile` | `createEngine(canvas)` returning `{ start, stop, stats, latency, setFeatures, setDials, setSource, setScaleCap, setProfile(profile, { pick }), onGuard }`, `BUILT_IN_PROFILE`, `EFFECTS`, `effectStrength`, `DEFAULT_DIALS`, `ZERO_FEATURES`, `WebGL2UnavailableError`, `ProfileSupersededError`, `ProfileCompileError`, `locateErrors` (`engine/src/index.ts`) | Declare or import any package, including `audio/` and `shared/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
 | `audio/` | The `AudioWorklet` processor (`djv-features`, `audio/src/processor.ts`), the analysis maths as pure functions (`analysis.ts`; every number in `constants.ts`), the `AudioFeatures` contract (`features.ts`), the main-thread source that maps the worklet's clock and decays stale features (`source.ts`, `clock.ts`), the synthetic feature loop for the builder's preview (`synthetic.ts`) | `createFeatureSource(context, stream, moduleUrl)` resolving to `{ read(now), stop, lastBlockAt }`, `createAnalyser`, `windowFrames`, `createClockMap`, `decayFeatures`, `syntheticFeatures`, `AudioFeatures`, `ZERO_FEATURES` (`audio/src/index.ts`); the worklet file as `@djv/audio/processor` | Declare or import any package, including `engine/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
-| `web/` | The screen page at `/`, the builder at `/builder` and the External control page at `/control` (`web/src/main.tsx` reads `location.pathname`; no router), the screen's control client and the controller (`web/src/control/`), the capture session (`web/src/capture/`), the panel and its profile picker (`profiles/active.ts`), the overlay, the wake lock, the health and profile clients (`profiles/api.ts`), the builder (`web/src/builder/`: list, editor reducer, custom effect row, preview with live compile and frame time, conflict, export, import and Replace); wiring `audio/` and `shared/` to `engine/` (`features-compat.ts`, `profile-compat.ts`, checked both ways by `tests/meta/features-compat.test.ts` and `tests/meta/profile-compat.test.ts`) | The built app in `web/dist` | Import from `server/`; read the environment |
-| `server/` | Configuration, logging, the database and migrations, the profile store (`server/src/profiles/store.ts`, the only SQL for profiles) and routes (`routes.ts`), HTTP, External control (`server/src/control/`: pairing, the LAN listener, the sockets, relaying) | `GET /api/health`, the profile endpoints below, `GET /builder`, static `web/dist`, the screen socket `/api/control/screen`; on the LAN listener while switched on `GET /control`, `GET /assets/*`, the device socket `/api/control/device`; `pnpm migrate` | Listen on anything but `127.0.0.1`, except the External control listener on private IPv4 addresses while switched on; read the environment outside `config.ts` |
+| `web/` | The screen page at `/`, the builder at `/builder`, the External control page at `/control` and the sending page at `/send` (`web/src/main.tsx` reads `location.pathname`; no router), the screen's control client and the controller (`web/src/control/`), the screen's remote sources (`web/src/remote/`) and the sender (`web/src/send/`), the capture session (`web/src/capture/`), the panel and its profile picker (`profiles/active.ts`), the overlay, the wake lock, the health and profile clients (`profiles/api.ts`), the builder (`web/src/builder/`: list, editor reducer, custom effect row, preview with live compile and frame time, conflict, export, import and Replace); wiring `audio/` and `shared/` to `engine/` (`features-compat.ts`, `profile-compat.ts`, checked both ways by `tests/meta/features-compat.test.ts` and `tests/meta/profile-compat.test.ts`) | The built app in `web/dist` | Import from `server/`; read the environment |
+| `server/` | Configuration, logging, the database and migrations, the profile store (`server/src/profiles/store.ts`, the only SQL for profiles) and routes (`routes.ts`), HTTP, External control (`server/src/control/`: pairing, the LAN listener, the sockets, relaying, the trust page), the local certificate authority (`server/src/tls/`: DER, the two certificate shapes, the store under `DATA_DIR/tls/`) | `GET /api/health`, the profile endpoints below, `GET /builder`, static `web/dist`, the screen socket `/api/control/screen`; on the LAN listener while switched on, over HTTPS only, `GET /control`, `GET /send`, `GET /trust`, `GET /assets/*`, the device socket `/api/control/device`; `pnpm migrate` | Listen on anything but `127.0.0.1`, except the External control listener on private IPv4 addresses while switched on; read the environment outside `config.ts` |
 | `shared/` | The schemas both sides validate against: health, the profile and its file format (`profile.ts`, with the optional `primary` and `derivePrimary`, the custom effect and its code checks), the endpoint bodies and error shapes (`profile-api.ts`), the "Name (n)" rule (`names.ts`), every External control message both ways and its limits (`control.ts`) | `healthResponseSchema`, `profileSchema`, `profileFileSchema`, `toProfileFile`, `SUPPORTED_FORMAT_VERSIONS`, `isSupportedFormatVersion`, `derivePrimary`, `customCodeIssues`, `storedProfileSchema`, `updateProfileSchema`, `issuesFrom`, `nextFreeName`, `LIMITS`, `CUSTOM_LIMITS`, the control schemas and constants (`shared/src/index.ts`) | — |
 
 `shared/`, `engine/` and `audio/` export their `src/index.ts`; there is no build step for the
@@ -254,18 +259,22 @@ the pairing and relays.
   listener is one small Fastify instance per private IPv4 address of the machine (10/8,
   172.16/12, 192.168/16; never `0.0.0.0`, a public address or IPv6; `control/addresses.ts`) on
   `CONTROL_PORT`, created when the operator switches on in the panel and closed when they switch
-  off; binding is all or nothing ("Port <n> is in use", "No local network address found"). It
-  answers `GET /control` (`index.html`), `GET /assets/*` (rooted at the assets folder, nothing
+  off; binding is all or nothing ("Port <n> is in use", "No local network address found",
+  "Certificate store unreadable — see the runbook"). It serves HTTPS only, with a server
+  certificate for exactly the addresses bound (B-06; no plain-HTTP listener exists on the LAN),
+  and answers `GET /control` and `GET /send` (`index.html`), `GET /trust` (the trust page, and
+  the root certificate at `?download`), `GET /assets/*` (rooted at the assets folder, nothing
   else of `web/dist`) and the device socket; everything else is 404, with no CORS header. Boot
   never switches it on.
 - **Sockets.** `ws` in `noServer` mode behind each listener's `upgrade` event
   (`control/upgrade.ts`): a path no route names is 404, an `Origin` other than the listener's own
   is 403 before the handshake. The screen socket accepts `http://127.0.0.1:PORT`,
   `http://localhost:PORT` and Vite's `http://localhost:5173`; a device socket only
-  `http://<that address>:CONTROL_PORT`. Every received message goes through `control/channel.ts`:
+  `https://<that address>:CONTROL_PORT`. Every received message goes through `control/channel.ts`:
   the rate limit (120 a second per device socket, none for the screen), the size limit (4 KB per
-  device message, 256 KB on the screen socket), JSON, the shared schema (`shared/src/control.ts`);
-  a failure is dropped with one `warn` naming its type and the socket stays open.
+  device message, 256 KB on the screen socket, 16 KB for a WebRTC setup message on either), JSON,
+  the shared schema (`shared/src/control.ts`); a failure is dropped with one `warn` naming its
+  type and the socket stays open.
 - **Pairing** (`control/pairing.ts`, in memory, dies with the process). Switching on issues a
   six-character code from a 31-character alphabet (no `0 O 1 I L`), carried in the QR URL's
   fragment so it never reaches a request line. A device's first message is `hello` with the code
@@ -298,7 +307,95 @@ the pairing and relays.
   the machine's private addresses. Every integration and browser check passes `127.0.0.1`, so the
   gate never binds a LAN address; the browser checks boot their own server in the test process
   (`tests/browser/control-server.ts`) and can restart it on the same ports. Real addresses and
-  Wi-Fi latency are the owner's checks ([runbook](../runbooks/README.md)).
+  Wi-Fi latency are the owner's checks ([runbook](../runbooks/README.md)). The LAN side is HTTPS
+  under a root made per run in the test server's temporary `DATA_DIR`: Node proves the chain
+  (`server/test/control-tls.int.test.ts`, `ca` set to that root and nothing else), and the
+  browser checks' LAN contexts set `ignoreHTTPSErrors` (B-06 PD9), since Chromium has no
+  per-context trust store.
+
+## Remote input
+
+B-06 (spec [phase-b-06-remote-input-devices](../specs/phase-b-06-remote-input-devices.md),
+[ADR 0002](../adr/0002-remote-input-over-the-lan.md)): a paired device sends its camera, its
+audio, or both, from `/send`. The screen page receives them over WebRTC, peer to peer on the LAN,
+and draws and analyses them as it does its local sources. The server pairs and relays setup; no
+media passes it.
+
+```
+  sender (/send, any LAN browser)       Node 24 process                    screen page (127.0.0.1)
+ +-----------------------------+      +-------------------------------+   +----------------------+
+ | web/src/send/               | WSS  | hub.ts: offer, candidate  --->|-->| remote/peers.ts      |
+ |   send-link.ts (pair-link)  |----->|   relayed with the deviceId;  |   |   answer (recvonly)  |
+ |   peer.ts: sendonly, Opus   |<-----|   answer, candidate, stream <-|<--|   feeds, loss, stats |
+ |   capture.ts                |      |   { active } relayed back     |   | remote/sources.ts    |
+ +--------------+--------------+      +-------------------------------+   |   main-audio.ts      |
+                |                                                         |   picture.ts         |
+                +------- media: RTP over UDP, host candidates only ------>|   -> engine, audio/  |
+                                                                          +----------------------+
+```
+
+- **Roles and pairing.** A sender's `hello` carries the code and `sends` (`video`, `audio` or
+  both), which is its role for the life of the pairing (`control/pairing.ts`). Same code, approval
+  surfaces, 60 s expiry, throttle and IP-bound key as a controller; its own limits: 4 video
+  senders, 1 audio sender ("Another device is sending audio"), the 4 pending requests shared. The
+  panel and every controller name the role in the request ("… wants to send video and audio");
+  the panel lists approved senders apart from controllers, with Disconnect. The sender keeps its
+  key in `djv.sendKey` and its choice in `djv.sendChoice` and reconnects as a controller does: the
+  hello, key, backoff and refusal rules are `web/src/control/pair-link.ts`, which `device-link.ts`
+  and `send-link.ts` share.
+- **The relay** (`control/hub.ts`, `control/device.ts`). A sender's socket may send `hello`,
+  `offer` and `candidate`, nothing else (a control from it is dropped with one `warn`). They go
+  to the target screen with the sender's `deviceId`; the screen's `answer`, `candidate` and
+  `stream { active }` go back to that sender. When the target screen (re)connects, each sender is
+  told `screen { connected }` and offers again; a screen reload leaves the senders' capture
+  running ("Screen reconnecting…"). New code, Disconnect, switching off or a restart end the
+  pairing: the sender stops its capture ("Pairing ended — scan the code again").
+- **Peer connections.** `RTCPeerConnection({ iceServers: [] })` on both sides: host candidates
+  only, so a network that isolates clients cannot connect them (after 10 s without `connected`,
+  "Could not reach the screen machine — the network may block devices from talking to each
+  other" on `/send` and on the panel's sender row). The sender offers `sendonly`, with
+  `contentHint = "motion"` on video and 128 kb/s on audio; both sides pass their description
+  through `opusMusic` (`web/src/remote/sdp.ts`: stereo, 128 kb/s, no DTX). The screen answers
+  `recvonly` (`web/src/remote/peers.ts`). Senders start paused; the screen asks a sender to stream
+  with `stream { active }`: the audio sender from Start on, a video sender only while it is the
+  picked camera or a lost picked camera waiting to return, so at most one remote video decodes.
+- **Loss.** A feed is lost when its track ends, it is muted for 1 s, the peer is `disconnected`
+  or `failed`, or (PD8 as amended) its inbound `packetsReceived` has not moved for 1 s while it
+  was asked to stream — read from `getStats()` every 250 ms, since Chromium gives a receiver no
+  other sign when a sender stops.
+- **Sources** (`web/src/remote/sources.ts`). Above the capture session, which still owns exactly
+  one local camera and one local input, `sources.frame(now)` decides at the start of each frame
+  which features and which video element the engine gets. Main audio (`main-audio.ts`) is a
+  choice, remote or local, and a playing source: an arriving audio sender sets the choice to
+  remote; a loss plays the local input in the same frame (its feature source keeps running beside
+  the remote one), and the remote plays again after 3 s back and steady; the local choice pins
+  local. A remote audio track goes through a muted `<audio>` element into `createFeatureSource`
+  on the session's own context. With System audio as the local choice, the default input is
+  opened as the standby without being remembered. The picture (`picture.ts`): a remote camera is
+  listed as "<hint> — Device n" with the id `remote:<deviceId>` and drawn only once picked and
+  once it has a frame (every camera switch keeps the previous picture until then); lost for 1 s it
+  falls back to the local camera and returns after 3 s back, unless another camera was picked in
+  between. A remote choice never reaches `djv.sources`.
+- **The panel and controllers.** The panel shows the trust block, the `/control` and `/send` QR
+  codes (the same code), the senders with their state from the page's own peer (connecting,
+  connected, on screen, lost, could not reach), the remote cameras in the camera picker marked
+  "(remote)", and a "main audio" row while an audio sender is approved. Controllers show remote
+  camera tiles with a mark and "Main audio: laptop / screen machine". The overlay gains
+  `network ms` and `video ms` (the selected pair's round trip / 2 plus the jitter buffer, sampled
+  every 250 ms while shown) and names the remote source on its `audio:` and `camera:` lines.
+- **Trust and certificates** (`server/src/tls/`). At the first switch-on the store makes a local
+  root (EC P-256, 10 years) and a server certificate for the bound addresses (397 days, issued
+  again when the addresses change or fewer than 30 days remain), all under `DATA_DIR/tls/`;
+  certificates are hand-written DER on `node:crypto` (`der.ts`, `certificate.ts`). `store.ts` is
+  the only module that reads a key file, and no key is served or logged. A device trusts the root
+  once from `/trust` (the panel's first QR code): the fingerprint, the steps per OS, and the
+  certificate as `application/x-x509-ca-cert`. An unreadable root is "Certificate store
+  unreadable"; deleting the folder starts over (runbook).
+- **The test seam.** Two headless Chromium contexts on `127.0.0.1` connect with loopback host
+  candidates (`--allow-loopback-in-peer-connection`, test only, `tests/browser/fixtures/launch.ts`).
+  `tests/browser/sender-client.ts` is a scripted sender that makes its own media;
+  `tests/browser/remote-e2e.spec.ts` runs the whole scenario with real `/control` and `/send`
+  pages. The gate proves structure and order; the millisecond bounds are the owner's checks.
 
 ## Latency and render scale
 
@@ -339,7 +436,11 @@ the pairing and relays.
   plain string; removing it selects the built-in). No profile data is stored in the browser.
   External control: `djv.controlAddress` on the screen machine (the address for the QR code);
   `djv.controlKey` (the session key) and `djv.controlMode` (`dj` or `vj`) on a controller's LAN
-  origin.
+  origin; `djv.sendKey` and `djv.sendChoice` (what it sends and from which device) on a sender's.
+- **Certificates.** `DATA_DIR/tls/root.key`, `root.crt`, `server.key`, `server.crt` (PEM), made at
+  the first switch-on (B-06). Git ignores `data/`, the default location
+  (`tests/meta/tls-boundary.test.ts`). The restore plan is to delete the folder; every device then
+  trusts the new root again.
 - **Profile definition.** `definition` may carry `primary` (B-04 SD10), written only when set;
   rows and version-1 files without it stay valid and `formatVersion` stays 1. It may carry
   custom effects with their code (B-03), with no migration; a B-02-era build would read such a
@@ -376,8 +477,8 @@ is reported the same way. `scripts/dev.ts` learns `PORT` for the Vite proxy by i
 
 - **Auth.** None (SDR question 3). The main listener binds `127.0.0.1` only, so no other device
   can reach it, `/api/profiles` included (`server/test/boot.int.test.ts`). The External control
-  listener is the only door to the LAN: open only while switched on, it serves no API, and a
-  device needs the code and an approval (External control, above).
+  listener is the only door to the LAN: open only while switched on, HTTPS only, it serves no
+  API, and a device needs the code and an approval (External control, above).
 - **Writes** (B-02 SD18). No response carries a CORS header. A `POST` or `PUT` without
   `Content-Type: application/json` is 415, answered before the body is read, and `text/plain` is
   not a parser, so a page on another origin cannot write with a simple request. The body limit
@@ -387,16 +488,21 @@ is reported the same way. `scripts/dev.ts` learns `PORT` for the Vite proxy by i
   (`/api/control/screen`, one WebSocket from load), and `/api/profiles` and `/api/profiles/:id`
   only on a user action in the panel or on a paired controller (Start, opening the panel,
   picking a profile, a controller connecting or pressing Refresh); no media endpoint exists
-  (`docs/invariants.md`, `tests/browser/live.spec.ts`).
+  (`docs/invariants.md`, `tests/browser/live.spec.ts`). A sender's peer connection is not an
+  HTTP request, and the screen page opens no further socket for it.
 - **Logging.** pino JSON lines on stdout at `LOG_LEVEL`. Fastify's request id (`reqId`) is on
   every line that belongs to a request. The environment and the config object are never
   logged whole. The server logs profile create, update, delete and import at `info` with the id
   and revision, never the definition. External control logs on and off (addresses, port), a new
   code (never the code), screens connecting and superseded, and each device step by its sequence
   label ("Device 3"); control messages at `debug`, type only. Never a code, a session key, a
-  User-Agent, a device hint, a camera label or a colour. The browser logs capture state changes
-  and profile switches at info level, and guard events at warn with the profile id, without
-  device labels, media data or profile code.
+  User-Agent, a device hint, a camera label or a colour. Senders (B-06) are logged as "sender
+  <step>" with the sequence label and the role; a certificate issued with its addresses and
+  expiry date, never a key; setup messages at `debug`, type only, never an SDP or a candidate.
+  The browser logs capture state changes (for remote audio `remote audio lost`, `fallback
+  local`, `restored remote`, by sequence label) and profile switches at info level, and guard
+  events at warn with the profile id, without device labels, media data or profile code
+  (`tests/browser/remote-e2e.spec.ts` checks every line of a whole run).
 - **Errors.** Every boot failure goes through `fatal` in `server/src/log.ts`: one `fatal` line,
   exit 1, nothing listening. In the browser, a failed or invalid health answer reads
   `server: unreachable` and never stops the engine; no WebGL2 context shows one line of text

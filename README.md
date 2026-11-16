@@ -28,7 +28,11 @@ pnpm profile:check <file> # check, compile and render stills of a profile file (
 ```
 
 The output screen is `/`; the profile builder is `/builder` (also linked from the screen's
-settings panel, key `s`).
+settings panel, key `s`). Two more pages are served to other devices on the network while
+External control is on: the controller at `/control` and the sending page at `/send` (below).
+The code is laid out in `engine/` (renderer), `audio/` (analysis), `web/` (the pages; the remote
+sources in `web/src/remote/`, the sender in `web/src/send/`), `server/` (API, External control,
+the local certificate authority in `server/src/tls/`) and `shared/` (schemas).
 
 `.env.local` needs five variables: `APP_ENV`, `LOG_LEVEL`, `PORT`, `CONTROL_PORT` and `DATA_DIR`
 (see `.env.example`). A `.env.local` made before External control lacks `CONTROL_PORT`; add
@@ -43,13 +47,15 @@ switch it on, and nothing survives a restart.
 
 1. `pnpm start`, open `http://127.0.0.1:8000/` on the screen machine, press **Start**.
 2. Press `s` for the panel. Under **External control**, switch it on. The panel shows the
-   address, a QR code, the URL and a six-character code. (`pnpm dev` has no controller page; use
-   `pnpm start`.)
-3. Scan the QR code with the phone, or open the URL and type the code. The phone shows "Waiting
-   for approval".
-4. Press **Accept** in the panel (or on an already paired controller). The phone gets the
+   address, the trust QR code, the controller's QR code, the URL and a six-character code.
+   (`pnpm dev` has no controller page; use `pnpm start`.)
+3. Once per device: scan the trust QR code ("Install once per device") and follow the steps on
+   that page, so the device trusts the screen machine's own certificate (the pages are HTTPS).
+4. Scan the controller's QR code with the phone, or open the URL and type the code. The phone
+   shows "Waiting for approval".
+5. Press **Accept** in the panel (or on an already paired controller). The phone gets the
    controls.
-5. On the phone, pick **DJ** (large tiles, one Primary colour) or **VJ** (every colour, the
+6. On the phone, pick **DJ** (large tiles, one Primary colour) or **VJ** (every colour, the
    status strip and the round-trip time).
 
 The phone reconnects by itself after a Wi-Fi drop or a locked screen. **New code** disconnects
@@ -57,6 +63,23 @@ every device; **Disconnect** removes one; switching off, or restarting the serve
 pairing ("Pairing ended — scan the code again"). The first time you switch on, Windows asks
 whether Node.js may use the network: allow it on private networks, or no device can reach it
 (see [docs/runbooks/README.md](docs/runbooks/README.md)).
+
+## Send a camera or audio from a device (remote input)
+
+A trusted, paired device can send its camera, its audio (a microphone, an audio interface, or a
+laptop's "System audio"), or both, to the screen machine. The media goes straight from the
+device's browser to the screen's browser on the local network; the server only introduces them.
+
+1. With External control on, scan the panel's `/send` QR code on the device (it carries the same
+   code).
+2. Tick **Camera** and/or **Audio**, pick the devices, press **Send**, and **Accept** the request
+   in the panel or on a controller.
+3. Audio becomes the main audio by itself (the panel's "main audio" row and the controllers'
+   switch set it back to local); a camera appears in the camera pickers and waits to be picked.
+   If the device's audio or camera drops, the screen falls back to its own and returns by itself.
+
+If the device says "Could not reach the screen machine — the network may block devices from
+talking to each other", the network isolates its clients: see the runbook.
 
 ## Author a profile with Claude Code
 
