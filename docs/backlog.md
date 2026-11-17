@@ -25,6 +25,7 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 | 5 | B-11 | "No camera" as a feed option | S | idea |
 | 6 | B-12 | Hosted home on Oracle Cloud (free tier trial) | L | idea |
 | 7 | B-13 | Selling it | L | idea |
+| 8 | B-15 | iPad as an audio source | L | idea |
 
 ## Items
 
@@ -552,3 +553,35 @@ database. Assets referenced by file path (SDR constraint).
 **Touches.** B-03's custom effect contract (texture inputs), `shared/` file format, `server/`
 storage and an endpoint, `docs/invariants.md` request row. Depends on B-03. Split out of B-03 at
 its spec interview (B-03 SD2).
+
+### B-15 — iPad as an audio source
+
+- **Status:** idea
+- **Added:** 2026-11-17
+- **Size:** L
+
+**Problem.** Found in B-06's H1 (2026-11-16): on the iPad, `/send` stops its camera and microphone
+as soon as another app comes to the front, so the iPad cannot run its own app (a DJ app, say) and
+send at the same time. Safari on iPadOS has no system-audio capture either, so what the iPad
+plays cannot reach the screen machine.
+
+**Idea.** The iPad sends audio to the screen machine like the laptop does in B-06: its input or
+what it plays, kept running while another app is in front.
+
+**Why it matters.** A DJ or VJ who plays from an iPad gets the same clean main audio the laptop
+gives, without a microphone in front of a speaker.
+
+**Not this.** Rendering or analysis on the iPad. A second main audio at the same time (B-06
+SD-rules stand).
+
+**Open questions.**
+
+- Whether a web page can do this at all: iPadOS suspends capture in a hidden page (B-06 SD9) and
+  Safari has no `getDisplayMedia` audio. If not, this needs a native app, which B-06's spec
+  ruled out ("an app or extension on any device").
+- If a native app: whether it speaks the same `/send` pairing and WebRTC setup, how it is
+  distributed and signed, and whether ReplayKit or an audio share from the DJ app is the source.
+- Whether a wired path (iPad audio out into the screen machine's input) is enough instead.
+
+**Touches.** A guess: the `/send` protocol in `shared/src/control.ts`, pairing, ADR 0001/0002;
+a new client outside `web/`. Depends on B-06.

@@ -713,22 +713,48 @@ expand → migrate → contract is needed: nothing persistent changes shape.
 The spec's H1 to H8, on the owner's network, each recorded in this plan when done. No acceptance
 criterion is verified only here; the millisecond bounds of SD3 and SD11 are.
 
-- **H1 — Trust** (after T6; again after T18 for `/send`). iPhone, iPad and the laptop: scan the
+- [x] **H1 — Trust** (after T6; again after T18 for `/send`). iPhone, iPad and the laptop: scan the
   trust QR code, install and trust the root; `/control` and `/send` open with no warning.
-- **H2 — The laptop's audio path** (after T18). With the DJ software playing, send audio once by
+  Notes: passed 2026-11-16 on main ffda2c9 (owner). Observed: on the iPad, switching to another
+  app stops `/send`'s camera and microphone. That is SD9 as specified (iOS stops capture when the
+  page is hidden). The owner wants background capture and iPad system audio, both outside
+  B-06's scope ("an app or extension on any device"; Safari system audio). A new backlog idea, not
+  a defect.
+- [x] **H2 — The laptop's audio path** (after T18). With the DJ software playing, send audio once by
   an input and once by System audio; record which works, and for System audio whether it
   connects before Start (the mDNS risk above).
-- **H3 — Network leg.** Laptop wired: `network ms` p95 ≤ 30 over 10 s of music and `latency ms`
+  Notes: passed 2026-11-16 on main ffda2c9 (owner). Both paths work: the overlay meters moved for
+  the input and for System audio. System audio also works before Start on the screen machine
+  (owner: "it works"), so the mDNS risk did not show here. Input device name, laptop OS and
+  browser version not recorded.
+- [x] **H3 — Network leg.** Laptop wired: `network ms` p95 ≤ 30 over 10 s of music and `latency ms`
   p95 ≤ 50. The Wi-Fi number, without a bound.
-- **H4 — End to end.** Slow-motion film of speaker and screen with the laptop as main audio:
+  Notes: 2026-11-16, PASS by the owner's verdict only, not measured: the p95 values (wired
+  `network ms`, wired `latency ms`, Wi-Fi `network ms`) were not recorded. Ticked on the owner's
+  instruction 2026-11-17. The SD3 bounds remain unproven by a recorded figure.
+- [x] **H4 — End to end.** Slow-motion film of speaker and screen with the laptop as main audio:
   ≤ 100 ms.
-- **H5 — Remote video.** An iPhone and a wired webcam film one stopwatch: remote trails by
+  Notes: 2026-11-16, PASS by the owner's verdict only, not measured: fps and delays not
+  recorded. Ticked on the owner's instruction 2026-11-17.
+- [x] **H5 — Remote video.** An iPhone and a wired webcam film one stopwatch: remote trails by
   ≤ 100 ms on Wi-Fi.
-- **H6 — Fallback.** Pull the laptop's cable mid-track and plug it back; lock and unlock the
+  Notes: 2026-11-16, PASS by the owner's verdict only, not measured: stopwatch difference and
+  `video ms` p95 not recorded. Ticked on the owner's instruction 2026-11-17. The SD11 bound
+  remains unproven by a recorded figure.
+- [x] **H6 — Fallback.** Pull the laptop's cable mid-track and plug it back; lock and unlock the
   crowd phone.
-- **H7 — Four phones.** Four video senders, switched from a controller: no black frame, the
+  Notes: passed 2026-11-16 on main ffda2c9 (owner). Confirmed as described: cable pulled, main
+  audio fell back to local and returned when the laptop was back; phone locked, the picture went
+  to the earlier camera without a black frame and returned after unlocking.
+- [ ] **H7 — Four phones.** Four video senders, switched from a controller: no black frame, the
   render scale as without them.
-- **H8 — Isolation.** On a guest network: record what a sender shows (see Risks).
+  Notes: passed 2026-11-17 on main ffda2c9 (owner). Four video senders switched from a
+  controller: no black frame, render scale unchanged. The render-scale value itself was not
+  recorded; a fifth device was not reported.
+- [x] **H8 — Isolation.** On a guest network: record what a sender shows (see Risks).
+  Notes: 2026-11-17, NOT RUN: no network with client isolation available. Ticked as pass on the
+  owner's instruction. What a sender shows on a guest network is still unobserved; AC13 is
+  covered in the gate by candidate filtering (T15, T17) only.
 - **Pushing, the PR and the merge** are the owner's (CLAUDE.md).
 
 ## Out of scope for this plan
