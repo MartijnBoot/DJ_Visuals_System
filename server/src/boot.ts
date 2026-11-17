@@ -5,9 +5,11 @@ import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { MAX_SCREEN_MESSAGE } from "@djv/shared";
 import type { WebSocket } from "ws";
-import { createApp, registerStatic } from "./app.ts";
-import { ConfigError, type Config } from "./config.ts";
+import { createApp, registerStatic, type App } from "./app.ts";
+import { ConfigError, type Config, type SignInSettings } from "./config.ts";
 import { defaultControlAddresses, type ControlAddress } from "./control/addresses.ts";
+import { createGuard, isGuardedPath } from "./auth/guard.ts";
+import { createIssuer } from "./auth/issuer.ts";
 import { attachDevice } from "./control/device.ts";
 import { createHub, type Hub } from "./control/hub.ts";
 import { createLan } from "./control/lan.ts";
@@ -104,7 +106,8 @@ export async function boot(
     throw new Error(`no index.html in ${resolve(paths.staticDir)}; run pnpm build`);
   }
   const { db, schemaVersion } = openAndMigrate(config, paths, log);
-  const app = createApp(log);
+  // B-12 SD6, PD11: hosted, Caddy forwards from 127.0.0.1; the bind below is the same.
+  const app = createApp(log, config.APP_MODE === "hosted" ? { trustProxy: HOST } : {});
   let listenedAt = Date.now();
   registerHealth(app, {
     schemaVersion,
@@ -114,7 +117,65 @@ export async function boot(
     // Both are public values: the browser's sign-in needs them (PD8). Never the subject.
     signIn: config.signIn && { issuer: config.signIn.issuer, clientId: config.signIn.clientId },
   });
+  if (config.signIn) guardProfiles(app, config.signIn, log);
   registerProfiles(app, createProfileStore(db, log, undefined, { mode: config.APP_MODE }));
+  // B-12 PD10: a hosted server never builds External control: no certificate store, hub, LAN
+  // listener or screen socket, and every WebSocket upgrade is a raw 404.
+  let externalControl: { close(): Promise<void> } | null = null;
+  if (config.APP_MODE === "hosted") routeUpgrades(app.server, []);
+  else externalControl = startExternalControl(app, config, paths, log);
+  try {
+    if (paths.staticDir !== undefined) await registerStatic(app, resolve(paths.staticDir));
+    await app.listen({ host: HOST, port: config.PORT });
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+  listenedAt = Date.now();
+  const address = app.server.address();
+  log.info(
+    {
+      address: typeof address === "object" && address ? address.address : address,
+      port: config.PORT,
+    },
+    "listening",
+  );
+  return {
+    async close() {
+      await externalControl?.close();
+      await app.close();
+      db.close();
+    },
+  };
+}
+
+/**
+ * B-12 SD4, AC1–AC3: the bearer check on `/api/profiles*` and `/api/sync/*`, before any route
+ * or body. The issuer's keys are read on the first request, not at boot.
+ */
+function guardProfiles(app: App, signIn: SignInSettings, log: Logger): void {
+  const now = () => Date.now();
+  const issuer = createIssuer({ url: signIn.issuer, fetch: (i, init) => fetch(i, init), now, log });
+  const guard = createGuard({
+    verify: (token) => issuer.verify(token, signIn.clientId),
+    allowedSubject: signIn.allowedSubject,
+    now,
+    log,
+  });
+  app.addHook("onRequest", async (request, reply) => {
+    if (!isGuardedPath(request.url.split("?")[0]!)) return;
+    const refusal = await guard.check(request.ip, request.headers.authorization);
+    if (refusal) await reply.code(refusal.status).send(refusal.body);
+  });
+}
+
+/** The local install's External control (B-04, B-06), as before B-12. */
+function startExternalControl(
+  app: App,
+  config: Config,
+  paths: BootPaths,
+  log: Logger,
+): { close(): Promise<void> } {
   // External control (B-04): the screen socket on this listener, the device socket on each LAN
   // instance. The screen socket's `maxPayload` sits above its message limit, so an oversized
   // message is dropped with a warn rather than closing the socket (AC33); `ws` closes beyond it.
@@ -174,29 +235,11 @@ export async function boot(
       onConnection: (socket) => hub.attachScreen(socket),
     },
   ]);
-  try {
-    if (paths.staticDir !== undefined) await registerStatic(app, resolve(paths.staticDir));
-    await app.listen({ host: HOST, port: config.PORT });
-  } catch (error) {
-    db.close();
-    throw error;
-  }
-  listenedAt = Date.now();
-  const address = app.server.address();
-  log.info(
-    {
-      address: typeof address === "object" && address ? address.address : address,
-      port: config.PORT,
-    },
-    "listening",
-  );
   return {
     async close() {
       await hub.close();
       screenSockets.close();
       deviceSockets.close();
-      await app.close();
-      db.close();
     },
   };
 }
