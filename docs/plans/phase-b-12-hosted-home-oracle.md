@@ -762,3 +762,8 @@ T2).
 - [x] No two tasks in one parallel group write the same file
 
 Audited by: Martijn Boot  Date: 2026-11-17
+
+Owner decision at build (2026-11-17, T11): PD8's one `/api/health` read before render stands;
+`tests/browser/screen.spec.ts`'s "hidden on load, asks nothing" becomes "one read on load, none
+more while hidden" (phase 0 AC12's overlay still polls only while shown). `/control` and `/send`
+skip the read: only the LAN listener serves them, and it answers no `/api/health`.

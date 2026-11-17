@@ -45,20 +45,27 @@ test("the canvas changes colour between two reads 500 ms apart (AC11)", async ({
   await expectCanvasChanging(page);
 });
 
-test("the overlay is hidden on load, asks nothing, and toggles with o (AC12)", async ({ page }) => {
+// B-12 (owner's decision at build, 2026-11-17): the page reads `/api/health` once on load to learn
+// its mode (B-12 PD8); the hidden overlay still polls nothing.
+test("the overlay is hidden on load, asks health once for the mode and no more while hidden, and toggles with o (AC12)", async ({
+  page,
+}) => {
   const healthRequests: string[] = [];
   page.on("request", (request) => {
     if (new URL(request.url()).pathname === "/api/health") healthRequests.push(request.url());
   });
   await openScreen(page);
   await expect(page.getByTestId("overlay")).toHaveCount(0);
-  expect(healthRequests).toHaveLength(0);
+  expect(healthRequests).toHaveLength(1);
+  // Longer than the overlay's 5 s poll (phase 0 UI): hidden, it asks nothing more.
+  await page.waitForTimeout(5500);
+  expect(healthRequests).toHaveLength(1);
 
   await page.keyboard.press("o");
   await expect(page.getByTestId("overlay-server")).toHaveText("server: ok");
   await expect(page.getByTestId("overlay-fps")).toHaveText(/^fps \d+\.\d$/);
   await expect(page.getByTestId("overlay-frame-ms")).toHaveText(/^frame ms \d+\.\d$/);
-  expect(healthRequests.length).toBeGreaterThanOrEqual(1);
+  expect(healthRequests.length).toBeGreaterThanOrEqual(2);
 
   await page.keyboard.press("o");
   await expect(page.getByTestId("overlay")).toHaveCount(0);
