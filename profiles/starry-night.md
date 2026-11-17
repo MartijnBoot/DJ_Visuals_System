@@ -1,72 +1,88 @@
 # Starry Night
 
-**Source:** Vincent van Gogh, _The Starry Night_ (_De sterrennacht_), oil on canvas, June 1889,
-Museum of Modern Art, New York. Public domain.
-Image used: [Wikimedia Commons, Google Art Project scan](https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg)
-(the 1280 px thumbnail, kept in `inspiration/starry-night/starry-night.jpg`, not committed).
+**Source:** _Loving Vincent_ (Dorota Kobiela and Hugh Welchman, BreakThru Films / Trademark
+Films, 2017), the first fully oil-painted feature film: about 65,000 frames, each painted by hand
+in Van Gogh's style by a team of more than 100 painters.
+Trailer: <https://www.youtube.com/watch?v=MUd3tVDZqSg>. The trailer's thumbnail (Vincent's portrait
+against the swirling turquoise wall) is kept in `inspiration/starry-night/loving-vincent-trailer.jpg`,
+not committed. Behind it: Vincent van Gogh's paintings of 1888–1890, _The Starry Night_ among them
+(`inspiration/starry-night/starry-night.jpg`, the Google Art Project scan from Wikimedia Commons,
+public domain).
+
+The first version of this profile twisted the camera picture into the painting's two spirals and
+laid stars and a moon over it. It read as an effect on a video. This version paints the camera:
+everything on the screen is made of brush strokes, as in the film.
 
 ## Palette
 
-Picked from the canvas, darkest to lightest, because `paletteMap` spreads the picture's luma
-over the slots in that order:
+Picked from the trailer frame and Van Gogh's late canvases, darkest to lightest:
 
-| Slot | Colour    | Where in the painting                         |
-| ---- | --------- | --------------------------------------------- |
-| 0    | `#1c2a24` | the cypress, black-green                      |
-| 1    | `#1e3f8f` | the deep ultramarine of the night sky         |
-| 2    | `#4a78c2` | the cerulean strokes of the swirls            |
-| 3    | `#a9c4c9` | the pale green-blue of the big swirl's arms   |
-| 4    | `#f2c832` | the moon and the star centres, cadmium yellow |
-| 5    | `#f4efb4` | the cream of the halos                        |
+| Slot | Colour    | What it is                                        |
+| ---- | --------- | ------------------------------------------------- |
+| 0    | `#1d2b53` | Prussian blue, the contour lines and the darks    |
+| 1    | `#3f64a8` | cobalt, coats and shadows                         |
+| 2    | `#4f8a6e` | viridian green, the cool middle tones             |
+| 3    | `#c0762f` | ochre and burnt orange, beard and skin in shadow  |
+| 4    | `#8fc9b5` | the turquoise of the swirling walls and skies     |
+| 5    | `#f1d77a` | chrome yellow and cream, the lit skin and the sun |
 
-The stars and the moon read the last two slots (`palette[paletteSize - 2]` for the cores,
-`palette[paletteSize - 1]` for the rings), so a changed palette keeps that relation.
+The strokes keep the camera's own colours, saturated. Each stroke also leans toward the palette
+colour of its own lightness, interpolated between slots in the order above. One stroke in three
+leans hard, as an accent. That way a changed palette still colours the painting.
+
+## Texture: the strokes
+
+The look is a stroke painter in one custom effect, **Painted strokes**. It has no overlays and no
+warping.
+
+- **Stroke placement.** The frame is cut into a grid of cells (frame height units, so it does not
+  stretch). Every cell holds one stroke at a jittered place. The picture is read once at each cell
+  corner. The average of the four corners is the stroke's single colour: one brush, one colour.
+- **Stroke direction.** The difference across the corners gives the form's gradient. On a contour
+  the stroke runs _along_ it, as the painters followed a cheek or a sleeve. Where the picture is
+  flat (a sky, a wall), the stroke follows a slow curl-noise current. That current gathers into
+  the swirls of the trailer's background and of _The Starry Night_. Each stroke bends slightly
+  along its length and sits a little askew.
+- **Two layers.** Broad strokes cover everything. A random rank per stroke decides which lies on top, and a pixel no stroke reaches takes the nearest one, so no camera shows through. Fine
+  strokes at less than half the size are added only where the picture has detail (eyes, edges,
+  hands), with soft edges.
+- **Paint body.** Bristle grooves run along every stroke, and the stroke has a ridge of thick
+  paint lit from the top left (impasto). Contours get a dark line in palette slot 0, broken up
+  like a brush line.
 
 ## Motion
 
-The sky in the painting never stands still: one big double spiral at the centre, a smaller one
-below it and to the right, and long bands running left to right. The **Swirling brushwork**
-effect builds that flow from three parts. A curl-noise field gives currents that never pool. A
-left-to-right lean with a slow wave in it gives the bands. Two vortices sit where the painting has
-them, at (0.5, 0.66) and (0.69, 0.5) of the frame. The picture is twisted around both centres. The
-**kick** winds the main spiral tighter for a moment and lights its arms in slot 3. The flow drifts
-slowly with time (`drift`). A small share of the previous frame, carried along the current, makes
-the paint look wet.
-
-## Texture
-
-Van Gogh's short, parallel, thick strokes. The effect averages the picture and a fine value noise
-along the flow direction over six steps, a line integral convolution. The noise becomes streaks
-that follow the current, and they modulate the brightness, so the palette map turns them into
-alternating blue and pale strokes. Even a flat wall becomes brushwork. The streaks are anchored in
-the frame, not in time, so they move only where the flow turns, like paint, and do not shimmer.
-
-## Stars and moon
-
-**Stars and moon** puts ringed stars on a jittered grid in the upper part of the frame only (the
-sky). Each has a yellow core and concentric cream rings that slowly breathe outward. The **hi-hat**
-(`audio.high`) makes them swell and twinkle. A crescent moon sits top right with the widest halo.
+- **Boil.** The film's frames were each repainted, so the strokes boil. The painter does the
+  same: a few times a second (`boil`) every stroke is nudged and turned a little, but keeps its
+  place. The painting shimmers and does not jump. The current drifts slowly over time.
+- **Kick** (`audio.beat`): every stroke jolts askew and stretches a little, so the whole canvas's
+  brushwork shudders on the beat.
+- **Hi-hat** (`audio.high`): the impasto ridges catch the light.
 
 ## The idea
 
-The room seen as Van Gogh saw that night from his window: nothing is still, everything flows and
-burns. At recognisability 0 both custom effects are off (both are flagged `abstraction`). The
-camera comes back plainly, only coloured three quarters of the way into the night palette, so the
-look stays recognisable as this profile.
+The room is painted, frame by frame, by Van Gogh's hand: you still see who is there, but
+everything is paint, and nothing holds quite still.
 
-## Effects and sliders
+## Effects, sliders and dials
 
-1. `custom` **Swirling brushwork** (abstraction): `swirl` (how hard the vortices pull and twist),
-   `stroke length` (how far the strokes smear), `drift` (how fast the currents move).
-2. `paletteMap` at 0.75.
-3. `custom` **Stars and moon** (abstraction): `stars` (how many, 3 to 8 cells per frame height),
-   `halo` (how bright the rings are).
+1. `custom` **Painted strokes** (abstraction):
+   - `stroke size`: cell size, 0.022 to 0.075 of the frame height.
+   - `stroke length`: how long a stroke runs against its width.
+   - `boil`: how often the strokes are repainted, 1 to 12 times a second.
+   - `palette`: how far the colours lean toward the palette.
 
-Starting dials: recognisability 0.7, reactivity 0.6.
+Starting dials: recognisability 0.8, reactivity 0.6. The effect is flagged `abstraction`, so its
+strength is recognisability. Lower strength paints with smaller strokes (down to a third of the
+size), so detail returns before the paint fades. Below 0.3 it blends back to the camera, and at
+recognisability 0 the camera is plain.
 
-`pnpm profile:check` reports the flash limiter clipping 5 to 8 of 69 frames. Those frames are the
-kick twisting bright paint quickly through the spiral. On the screen it becomes a pulse, which
-suits the look.
+`pnpm profile:check` reports the flash limiter clipping 18 to 25 of 69 frames. That is the boil
+and the kick moving bright strokes over dark ones. On the screen it softens into a short pulse,
+which suits wet paint.
 
-Cost: six `source` calls in the brushwork, and the camera is the only link before it, so the extra
-work is small. The stars loop over 9 cells and make no `source` calls beyond their one.
+Cost: 37 `source` calls per pixel (16 cell corners per layer, the pixel itself, four for the
+contours). The camera is the only link before it, so each call is a single camera read. The two
+stroke loops visit 9 cells each, with four noise reads per cell for the current. The cost per
+pixel does not depend on the sliders. Software WebGL says nothing about real speed: check the
+frame time in the builder.
