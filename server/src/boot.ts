@@ -22,6 +22,9 @@ import { migrate } from "./migrate.ts";
 import { registerProfiles } from "./profiles/routes.ts";
 import { createProfileStore } from "./profiles/store.ts";
 import { registerSync } from "./sync/routes.ts";
+import { registerCloud } from "./cloud/routes.ts";
+import { createSessionStore } from "./cloud/session-store.ts";
+import { createSignin, type Signin } from "./cloud/signin.ts";
 import { createCertificateStore } from "./tls/store.ts";
 
 export const HOST = "127.0.0.1";
@@ -58,6 +61,13 @@ export interface BootPaths {
    * `Date.now`. Tests move it 90 days on (AC18).
    */
   now?: () => number;
+  /** In-process tests reach the local install's cloud parts through this (B-12 T7, T9). */
+  cloudInternals?: (internals: CloudInternals) => void;
+}
+
+/** What a test may drive directly on a local install with cloud settings. */
+export interface CloudInternals {
+  signin: Signin;
 }
 
 export interface Booted {
@@ -129,6 +139,31 @@ export async function boot(
   registerProfiles(app, store);
   // B-12 PD17: the cloud's sync endpoints exist in hosted mode only, behind the guard.
   if (config.APP_MODE === "hosted") registerSync(app, store, clock);
+  // B-12 SD15, PD20: a local install with the cloud settings can connect; without them there is
+  // no `/api/cloud/*` at all (AC19).
+  if (config.cloud) {
+    const signin = createSignin({
+      clientId: config.cloud.clientId,
+      port: config.PORT,
+      issuer: createIssuer({
+        url: config.cloud.issuer,
+        fetch: (i, init) => fetch(i, init),
+        now: clock,
+        log,
+      }),
+      store: createSessionStore(resolve(config.DATA_DIR)),
+      fetch: (input, init) => fetch(input, init),
+      now: clock,
+      log,
+    });
+    registerCloud(app, {
+      signin,
+      status: () => ({ state: signin.state(), lastSyncAt: null, conflicts: 0 }),
+      onConnected: () => {},
+      onDisconnected: () => {},
+    });
+    paths.cloudInternals?.({ signin });
+  }
   // B-12 PD10: a hosted server never builds External control: no certificate store, hub, LAN
   // listener or screen socket, and every WebSocket upgrade is a raw 404.
   let externalControl: { close(): Promise<void> } | null = null;
