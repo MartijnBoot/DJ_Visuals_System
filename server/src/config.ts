@@ -61,12 +61,31 @@ export interface SignInSettings {
   allowedSubject: string;
 }
 
+/** Object Storage through its S3-compatible API (B-12 SD10, PD25): all five or none. */
+export interface BackupSettings {
+  endpoint: string;
+  region: string;
+  bucket: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
 export type Config = z.infer<typeof configSchema> & {
   /** Local mode with the cloud settings present; otherwise null. */
   cloud: CloudSettings | null;
   /** Hosted mode only; otherwise null. */
   signIn: SignInSettings | null;
+  /** The backup bucket, when configured (either mode); otherwise null. */
+  backup: BackupSettings | null;
 };
+
+const BACKUP_VARIABLES = [
+  "BACKUP_ENDPOINT",
+  "BACKUP_REGION",
+  "BACKUP_BUCKET",
+  "BACKUP_ACCESS_KEY_ID",
+  "BACKUP_SECRET_ACCESS_KEY",
+] as const;
 
 const CLOUD_VARIABLES = ["CLOUD_URL", "OIDC_ISSUER", "OIDC_CLIENT_ID", "ALLOWED_SUBJECT"] as const;
 const CLOUD_GROUP = ["CLOUD_URL", "OIDC_ISSUER", "OIDC_CLIENT_ID"] as const;
@@ -75,7 +94,11 @@ const URL_VARIABLES = ["CLOUD_URL", "OIDC_ISSUER"] as const;
 const URL_REASON = "must be an https URL, or http on 127.0.0.1 or localhost";
 const GROUP_REASON = "must be set with CLOUD_URL, OIDC_ISSUER and OIDC_CLIENT_ID, or none of them";
 
-const ORDER: readonly string[] = [...Object.keys(configSchema.shape), ...CLOUD_VARIABLES];
+const ORDER: readonly string[] = [
+  ...Object.keys(configSchema.shape),
+  ...CLOUD_VARIABLES,
+  ...BACKUP_VARIABLES,
+];
 
 /** `https:`, or `http:` on the loopback names only: the gate's fake issuer and cloud (PD5). */
 function isServiceUrl(value: string): boolean {
@@ -115,6 +138,16 @@ function cloudProblems(
     }
     if (has("ALLOWED_SUBJECT")) problems.set("ALLOWED_SUBJECT", "only for APP_MODE=hosted");
   }
+  if (BACKUP_VARIABLES.some(has)) {
+    for (const name of BACKUP_VARIABLES) {
+      if (!has(name)) {
+        problems.set(name, "must be set with the other BACKUP_ variables, or none of them");
+      }
+    }
+    if (has("BACKUP_ENDPOINT") && !isServiceUrl(env.BACKUP_ENDPOINT!)) {
+      problems.set("BACKUP_ENDPOINT", URL_REASON);
+    }
+  }
 }
 
 /**
@@ -147,7 +180,16 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
             allowedSubject: env.ALLOWED_SUBJECT!,
           }
         : null;
-    return { ...result.data, cloud, signIn };
+    const backup = env.BACKUP_ENDPOINT
+      ? {
+          endpoint: env.BACKUP_ENDPOINT,
+          region: env.BACKUP_REGION!,
+          bucket: env.BACKUP_BUCKET!,
+          accessKeyId: env.BACKUP_ACCESS_KEY_ID!,
+          secretAccessKey: env.BACKUP_SECRET_ACCESS_KEY!,
+        }
+      : null;
+    return { ...result.data, cloud, signIn, backup };
   }
   const ordered = [...problems].sort(([a], [b]) => ORDER.indexOf(a) - ORDER.indexOf(b));
   throw new ConfigError(ordered.map(([variable, reason]) => ({ variable, reason })));

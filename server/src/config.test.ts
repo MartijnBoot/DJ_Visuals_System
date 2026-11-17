@@ -33,6 +33,7 @@ describe("loadConfig", () => {
       DATA_DIR: "./data",
       cloud: null,
       signIn: null,
+      backup: null,
     });
   });
 
@@ -271,5 +272,50 @@ describe("loadConfig: APP_MODE and the cloud settings (B-12 SD14, PD5)", () => {
       "ALLOWED_SUBJECT",
     ]);
     expect(JSON.stringify(error.problems)).not.toContain(subject);
+  });
+});
+
+// B-12 T15, PD25: the backup group, all or none.
+describe("loadConfig: the backup settings (B-12 PD25)", () => {
+  const backup = {
+    BACKUP_ENDPOINT: "https://ns.compat.objectstorage.eu-amsterdam-1.oraclecloud.com",
+    BACKUP_REGION: "eu-amsterdam-1",
+    BACKUP_BUCKET: "djvisuals-backups",
+    BACKUP_ACCESS_KEY_ID: "access-key-value-4",
+    BACKUP_SECRET_ACCESS_KEY: "secret-key-value-5",
+  };
+  const names = Object.keys(backup);
+
+  it("accepts all five, in either mode", () => {
+    expect(loadConfig({ ...valid, ...backup }).backup).toEqual({
+      endpoint: backup.BACKUP_ENDPOINT,
+      region: backup.BACKUP_REGION,
+      bucket: backup.BACKUP_BUCKET,
+      accessKeyId: backup.BACKUP_ACCESS_KEY_ID,
+      secretAccessKey: backup.BACKUP_SECRET_ACCESS_KEY,
+    });
+    expect(loadConfig({ ...hosted, ...backup }).backup).not.toBeNull();
+  });
+
+  it("accepts none", () => {
+    expect(loadConfig(valid).backup).toBeNull();
+  });
+
+  it.each(names)("refuses the group without %s, naming only it, never a value", (name) => {
+    const env: Record<string, string | undefined> = { ...valid, ...backup };
+    delete env[name];
+    const problems = problemsOf(env);
+    expect(problems).toEqual({
+      [name]: "must be set with the other BACKUP_ variables, or none of them",
+    });
+    for (const value of Object.values(backup)) {
+      expect(JSON.stringify(problems)).not.toContain(value);
+    }
+  });
+
+  it("refuses an endpoint that is not https or loopback http", () => {
+    expect(problemsOf({ ...valid, ...backup, BACKUP_ENDPOINT: "http://example.com" })).toEqual({
+      BACKUP_ENDPOINT: "must be an https URL, or http on 127.0.0.1 or localhost",
+    });
   });
 });

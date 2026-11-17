@@ -58,6 +58,23 @@ export function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+/**
+ * B-12 T15: whether `file` is a database that `PRAGMA integrity_check` calls `ok`. Opened read
+ * only, so checking a copy never changes it; a file that will not open is not ok.
+ */
+export function integrityCheckOk(file: string): boolean {
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(file, { readOnly: true, timeout: 0 });
+    const rows = db.prepare("PRAGMA integrity_check").all() as { integrity_check: string }[];
+    return rows.length === 1 && rows[0]!.integrity_check === "ok";
+  } catch {
+    return false;
+  } finally {
+    db?.close();
+  }
+}
+
 /** Opens (creating if absent) the file with WAL and foreign keys on. */
 export function openDatabase(file: string): Db {
   return new Db(file);
