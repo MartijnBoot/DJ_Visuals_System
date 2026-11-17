@@ -1,6 +1,6 @@
 // T4 (B-02 spec AC5, AC6, AC7, AC10, SD7, SD10, SD14, Data): the profile store on an
 // in-memory database with the real migrations applied.
-import type { Profile } from "@djv/shared";
+import type { Profile, StoredProfile, SyncChange } from "@djv/shared";
 import { resolve } from "node:path";
 import { pino } from "pino";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
@@ -536,5 +536,288 @@ describe("the cloud's feed (B-12 T6, PD16, PD21)", () => {
     const second = cloud.fullPage("b", 2);
     expect(second.profiles.map((p) => p.id)).toEqual(["c"]);
     expect(second.more).toBe(false);
+  });
+});
+
+// B-12 T8 (PD2, PD15, PD16, AC11, AC13–AC16, AC18): the local side of sync in the store. No
+// request is made here; the tests feed it what the cloud would answer.
+describe("the local sync queue and its rules (B-12 T8)", () => {
+  const cloud = (
+    id: string,
+    name: string,
+    revision: number,
+    extra: Partial<StoredProfile> = {},
+  ): StoredProfile => ({
+    ...warm,
+    name,
+    id,
+    revision,
+    createdAt: "2026-11-01T00:00:00.000Z",
+    updatedAt: "2026-11-01T00:00:00.000Z",
+    ...extra,
+  });
+  const change = (p: StoredProfile, seq: number): SyncChange => ({
+    kind: "profile",
+    seq,
+    profile: p,
+  });
+  const gone = (id: string, revision: number, seq: number): SyncChange => ({
+    kind: "tombstone",
+    seq,
+    id,
+    revision,
+  });
+  const names = () => store.list().map((p) => p.name);
+  const unsynced = () => store.pending().map((c) => `${c.kind} ${c.id}`);
+  const okUpdate = (id: string, profile: Profile, revision: number) => {
+    const result = store.update(id, profile, revision);
+    if (result.kind !== "ok") throw new Error(`update gave ${result.kind}`);
+    return result.profile;
+  };
+  const localRevision = (id: string) => {
+    const got = store.get(id);
+    if (got.kind !== "ok") throw new Error(`get gave ${got.kind}`);
+    return got.profile.revision;
+  };
+
+  it("lists unsynced rows and local deletes in change order, with their cloud base", () => {
+    const a = created({ ...warm, name: "A" });
+    store.applyPull([change(cloud("s", "S", 4), 1), change(cloud("t", "T", 2), 2)], 2);
+    const b = created({ ...warm, name: "B" });
+    okUpdate("s", { ...warm, name: "S" }, localRevision("s"));
+    store.remove("t");
+    expect(store.pending()).toEqual([
+      {
+        kind: "put",
+        id: a.id,
+        seq: 1,
+        baseRevision: 0,
+        profile: { ...warm, name: "A" },
+        conflictCopy: false,
+      },
+      {
+        kind: "put",
+        id: b.id,
+        seq: 4,
+        baseRevision: 0,
+        profile: { ...warm, name: "B" },
+        conflictCopy: false,
+      },
+      {
+        kind: "put",
+        id: "s",
+        seq: 5,
+        baseRevision: 4,
+        profile: { ...warm, name: "S" },
+        conflictCopy: false,
+      },
+      { kind: "delete", id: "t", seq: 6, baseRevision: 2 },
+    ]);
+  });
+
+  it("a pulled profile with no local row is inserted, synced, and the cursor moves", () => {
+    store.applyPull([change(cloud("c1", "Cloud one", 3), 7)], 7);
+    expect(store.get("c1")).toMatchObject({ kind: "ok", profile: { name: "Cloud one" } });
+    expect(store.pending()).toEqual([]);
+    expect(store.cursor()).toBe(7);
+  });
+
+  it("a synced row is overwritten by the cloud copy; the local revision moves only on a change (PD15)", () => {
+    store.applyPull([change(cloud("c1", "One", 1), 1)], 1);
+    const before = store.get("c1");
+    store.applyPull([change(cloud("c1", "One", 1), 1)], 1);
+    expect(store.get("c1")).toEqual(before);
+    const revision = localRevision("c1");
+    store.applyPull([change(cloud("c1", "Renamed", 2), 2)], 2);
+    expect(names()).toEqual(["Renamed"]);
+    expect(localRevision("c1")).toBe(revision + 1);
+    expect(store.pending()).toEqual([]);
+  });
+
+  it("an unsynced edit on the same cloud revision is kept, to be pushed", () => {
+    store.applyPull([change(cloud("c1", "One", 1), 1)], 1);
+    okUpdate("c1", { ...warm, name: "Mine" }, localRevision("c1"));
+    store.applyPull([change(cloud("c1", "One", 1), 1)], 1);
+    expect(names()).toEqual(["Mine"]);
+    expect(unsynced()).toEqual(["put c1"]);
+  });
+
+  it("an unsynced edit against a newer cloud revision becomes a marked, unsynced copy X (2); the row takes the cloud version (AC14)", () => {
+    store.applyPull([change(cloud("c1", "X", 1), 1)], 1);
+    okUpdate("c1", { ...warm, name: "X", palette: ["#010101", "#020202", "#030303"] }, 1);
+    const result = store.applyPull(
+      [change(cloud("c1", "X", 2, { palette: ["#0a0a0a", "#0b0b0b", "#0c0c0c"] }), 2)],
+      2,
+    );
+    expect(result.conflicts).toBe(1);
+    const row = store.get("c1");
+    expect(row.kind === "ok" && row.profile.palette).toEqual(["#0a0a0a", "#0b0b0b", "#0c0c0c"]);
+    const copy = store.list().find((p) => p.id !== "c1")!;
+    expect(copy).toMatchObject({ name: "X (2)", conflictCopy: true });
+    expect(copy.palette).toEqual(["#010101", "#020202", "#030303"]);
+    expect(unsynced()).toEqual([`put ${copy.id}`]);
+    expect(store.pending()[0]).toMatchObject({ baseRevision: 0, conflictCopy: true });
+    expect(store.conflictCount()).toBe(1);
+  });
+
+  it("an unsynced row that already equals the cloud copy is adopted, with no copy (a lost answer, AC16)", () => {
+    const a = created({ ...warm, name: "A" });
+    store.applyPull([change(cloud(a.id, "A", 1), 1)], 1);
+    expect(store.list()).toHaveLength(1);
+    expect(store.pending()).toEqual([]);
+  });
+
+  it("an unsynced local X against a cloud X of another id: the local one becomes X (2) (AC15)", () => {
+    const local = created({ ...warm, name: "X" });
+    store.applyPull([change(cloud("c1", "X", 1), 1)], 1);
+    expect(store.get("c1")).toMatchObject({ kind: "ok", profile: { name: "X" } });
+    expect(store.get(local.id)).toMatchObject({ kind: "ok", profile: { name: "X (2)" } });
+    expect(unsynced()).toEqual([`put ${local.id}`]);
+  });
+
+  it("a cloud name swap of two synced rows applies with no copy and no unsynced row", () => {
+    store.applyPull([change(cloud("a", "Left", 1), 1), change(cloud("b", "Right", 1), 2)], 2);
+    store.applyPull([change(cloud("a", "Right", 2), 3), change(cloud("b", "Left", 2), 4)], 4);
+    expect(store.list().map((p) => `${p.id}:${p.name}`)).toEqual(["b:Left", "a:Right"]);
+    expect(store.pending()).toEqual([]);
+    expect(store.conflictCount()).toBe(0);
+  });
+
+  it("a cloud tombstone deletes a synced row, writing no local tombstone (AC11)", () => {
+    store.applyPull([change(cloud("c1", "One", 1), 1)], 1);
+    store.applyPull([gone("c1", 1, 2)], 2);
+    expect(store.get("c1")).toEqual({ kind: "missing" });
+    expect(store.pending()).toEqual([]);
+    expect(tombstones()).toEqual([]);
+  });
+
+  it("a cloud tombstone leaves an unsynced edit in place, to restore on push (AC13)", () => {
+    store.applyPull([change(cloud("c1", "One", 1), 1)], 1);
+    okUpdate("c1", { ...warm, name: "Edited" }, localRevision("c1"));
+    store.applyPull([gone("c1", 1, 2)], 2);
+    expect(names()).toEqual(["Edited"]);
+    expect(store.pending()[0]).toMatchObject({ kind: "put", id: "c1", baseRevision: 1 });
+  });
+
+  it("a pending local delete keeps the row away while the cloud still has that revision", () => {
+    store.applyPull([change(cloud("c1", "One", 1), 1)], 1);
+    store.remove("c1");
+    store.applyPull([change(cloud("c1", "One", 1), 1)], 1);
+    expect(store.get("c1")).toEqual({ kind: "missing" });
+    expect(unsynced()).toEqual(["delete c1"]);
+  });
+
+  it("a newer cloud revision beats a pending local delete: the row returns (SD8)", () => {
+    store.applyPull([change(cloud("c1", "One", 1), 1)], 1);
+    store.remove("c1");
+    store.applyPull([change(cloud("c1", "One edited", 2), 2)], 2);
+    expect(names()).toEqual(["One edited"]);
+    expect(store.pending()).toEqual([]);
+  });
+
+  it("a pull that throws half-way leaves rows and cursor as before (AC16)", () => {
+    store.applyPull([change(cloud("c1", "One", 1), 1)], 1);
+    const before = store.list();
+    db.exec(
+      "CREATE TRIGGER refuse BEFORE INSERT ON profiles WHEN NEW.id = 'boom' BEGIN SELECT RAISE(ABORT, 'refused'); END",
+    );
+    expect(() =>
+      store.applyPull(
+        [change(cloud("c1", "Changed", 2), 2), change(cloud("boom", "Boom", 1), 3)],
+        3,
+      ),
+    ).toThrow("refused");
+    expect(store.list()).toEqual(before);
+    expect(store.cursor()).toBe(1);
+  });
+
+  it("an acknowledged push marks the row synced and adopts the name the cloud gave it", () => {
+    const a = created({ ...warm, name: "Set" });
+    store.acknowledgePut(a.id, 1, cloud(a.id, "Set (2)", 1));
+    expect(names()).toEqual(["Set (2)"]);
+    expect(store.pending()).toEqual([]);
+  });
+
+  it("an acknowledgement after a newer local write leaves the row unsynced, on the new base", () => {
+    const a = created({ ...warm, name: "A" });
+    okUpdate(a.id, { ...warm, name: "A newer" }, 1);
+    store.acknowledgePut(a.id, 1, cloud(a.id, "A", 1));
+    expect(names()).toEqual(["A newer"]);
+    expect(store.pending()).toMatchObject([{ kind: "put", id: a.id, baseRevision: 1 }]);
+  });
+
+  it("an acknowledgement for a row deleted meanwhile queues the delete at the cloud revision", () => {
+    const a = created({ ...warm, name: "A" });
+    store.remove(a.id);
+    expect(store.pending()).toEqual([]);
+    store.acknowledgePut(a.id, 1, cloud(a.id, "A", 1));
+    expect(store.pending()).toMatchObject([{ kind: "delete", id: a.id, baseRevision: 1 }]);
+  });
+
+  it("a refused delete brings the cloud version back; a done one drops the tombstone (AC12)", () => {
+    store.applyPull([change(cloud("c1", "One", 1), 1), change(cloud("c2", "Two", 1), 2)], 2);
+    store.remove("c1");
+    store.remove("c2");
+    store.acknowledgeDelete("c1", cloud("c1", "One edited", 2));
+    store.acknowledgeDelete("c2", null);
+    expect(names()).toEqual(["One edited"]);
+    expect(store.pending()).toEqual([]);
+    expect(tombstones()).toEqual([]);
+  });
+
+  it("a stale push answer makes the copy and takes the cloud version (AC14)", () => {
+    store.applyPull([change(cloud("c1", "X", 1), 1)], 1);
+    okUpdate("c1", { ...warm, name: "X", dials: { recognisability: 0.1, reactivity: 0.1 } }, 1);
+    store.conflict("c1", cloud("c1", "X", 2, { dials: { recognisability: 0.9, reactivity: 0.9 } }));
+    expect(store.list().map((p) => [p.name, p.dials.reactivity, p.conflictCopy ?? false])).toEqual([
+      ["X", 0.9, false],
+      ["X (2)", 0.1, true],
+    ]);
+    expect(store.conflictCount()).toBe(1);
+  });
+
+  it("the mark leaves a copy saved once (PD28)", () => {
+    store.applyPull([change(cloud("c1", "X", 1), 1)], 1);
+    okUpdate("c1", { ...warm, name: "X", dials: { recognisability: 0.1, reactivity: 0.1 } }, 1);
+    store.conflict("c1", cloud("c1", "X", 2));
+    const copy = store.list().find((p) => p.conflictCopy)!;
+    okUpdate(copy.id, { ...warm, name: "Kept" }, copy.revision);
+    expect(store.conflictCount()).toBe(0);
+  });
+
+  it("applyFull turns every unsynced row into a marked copy, drops pending deletes and synced rows the cloud lacks (PD2, AC18)", () => {
+    store.applyPull(
+      [
+        change(cloud("s1", "Synced kept", 1), 1),
+        change(cloud("s2", "Synced gone", 1), 2),
+        change(cloud("s3", "Deleted here", 1), 3),
+      ],
+      3,
+    );
+    okUpdate(
+      "s1",
+      { ...warm, name: "Synced kept", dials: { recognisability: 0.3, reactivity: 0.3 } },
+      localRevision("s1"),
+    );
+    store.remove("s3");
+    const local = created({ ...warm, name: "Local only" });
+    store.applyFull(
+      [cloud("s1", "Synced kept", 4), cloud("s3", "Deleted here", 1), cloud("n1", "New", 1)],
+      40,
+    );
+    const byName = Object.fromEntries(store.list().map((p) => [p.name, p]));
+    expect(Object.keys(byName).sort()).toEqual(
+      ["Deleted here", "Local only", "New", "Synced kept", "Synced kept (2)"].sort(),
+    );
+    expect(byName["Synced kept"]!.id).toBe("s1");
+    expect(byName["Synced kept (2)"]).toMatchObject({ conflictCopy: true });
+    expect(byName["Synced kept (2)"]!.dials.reactivity).toBe(0.3);
+    expect(byName["Local only"]).toMatchObject({ conflictCopy: true });
+    expect(byName["Local only"]!.id).not.toBe(local.id);
+    expect(byName["Deleted here"]!.id).toBe("s3");
+    expect(store.get("s2")).toEqual({ kind: "missing" });
+    expect(store.pending().map((c) => c.kind)).toEqual(["put", "put"]);
+    expect(tombstones()).toEqual([]);
+    expect(store.cursor()).toBe(40);
   });
 });
