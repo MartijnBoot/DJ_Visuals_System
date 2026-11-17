@@ -136,6 +136,14 @@ export function ProfileList(props: ProfileListProps) {
                   >
                     {entry.name}
                   </button>
+                  {entry.conflictCopy && (
+                    <span
+                      data-testid={`conflict-copy-${entry.id}`}
+                      style={{ fontSize: 12, color: "#fc6" }}
+                    >
+                      Conflict copy
+                    </span>
+                  )}
                   <button
                     type="button"
                     data-testid={`profile-duplicate-${entry.id}`}

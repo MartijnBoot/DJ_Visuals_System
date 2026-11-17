@@ -17,7 +17,7 @@ import { Send } from "./send/Send.tsx";
 // hosted server answers 404 on both (PD10).
 const path = location.pathname;
 
-function pageFor({ mode, signIn }: PageMode): ReactNode {
+function pageFor({ mode, cloud, signIn }: PageMode): ReactNode {
   if (mode === "hosted" && signIn) {
     const session = createSession({
       issuer: signIn.issuer,
@@ -40,7 +40,7 @@ function pageFor({ mode, signIn }: PageMode): ReactNode {
       </HostedGate>
     );
   }
-  return path === "/builder" ? <Builder /> : <Screen />;
+  return path === "/builder" ? <Builder /> : <Screen cloud={mode === "local" && cloud} />;
 }
 
 const root = createRoot(document.getElementById("root")!);

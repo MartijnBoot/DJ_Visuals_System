@@ -108,7 +108,8 @@ function legReader(
   };
 }
 
-export function Screen() {
+/** `cloud`: a local install with cloud settings shows the panel's cloud row (B-12 PD8). */
+export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const sessionRef = useRef<Session | null>(null);
@@ -451,6 +452,7 @@ export function Screen() {
           control={controlView}
           onControl={(action) => void control.link.send(action)}
           {...(hosted ? { hosted: { signedOut, onSignInAgain: () => void hosted.signIn() } } : {})}
+          cloud={cloud}
         />
       )}
     </>

@@ -16,6 +16,7 @@ import { ExternalControl, type SenderEntry, type SenderState } from "./control/E
 import type { PanelAction, ScreenLinkView } from "./control/screen-link.ts";
 import type { ActiveState } from "./profiles/active.ts";
 import type { AudioSource } from "./remote/main-audio.ts";
+import { CloudRow } from "./cloud/CloudRow.tsx";
 import { FIT, Row, SourcePickers } from "./SourcePickers.tsx";
 
 const METERS = ["level", "low", "mid", "high", "beat"] as const;
@@ -51,6 +52,8 @@ export interface PanelProps {
    * lives, and "Sign in again" once renewal has failed. Absent on a local install.
    */
   hosted?: { signedOut: boolean; onSignInAgain(): void };
+  /** B-12 (UI "Panel, cloud row"): a local install with cloud settings; absent otherwise. */
+  cloud?: boolean;
 }
 
 export function Panel(props: PanelProps) {
@@ -198,6 +201,7 @@ export function Panel(props: PanelProps) {
       <div data-testid="panel-camera-state">camera: {capture.camera}</div>
       <div data-testid="panel-audio-state">audio: {capture.audio}</div>
       {capture.reason && <div data-testid="panel-reason">{capture.reason}</div>}
+      {props.cloud && !props.hosted && <CloudRow />}
       {props.hosted ? (
         <>
           <div data-testid="hosted-control-line">External control needs the local install</div>
