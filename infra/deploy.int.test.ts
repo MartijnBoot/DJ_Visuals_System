@@ -28,7 +28,7 @@ let tmp: string;
 let root: string;
 let envFile: string;
 let database: string;
-let service: Server;
+let service: Server | undefined;
 let healthUrl: string;
 let events: string[];
 let logs: string[];
@@ -124,13 +124,19 @@ beforeEach(async () => {
     res.statusCode = marker === "ok" ? 200 : 503;
     res.end(JSON.stringify({ status: marker }));
   });
-  await new Promise<void>((r) => service.listen(0, "127.0.0.1", r));
-  const address = service.address();
+  const listening = service;
+  await new Promise<void>((r) => listening.listen(0, "127.0.0.1", r));
+  const address = listening.address();
   healthUrl = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/`;
-});
+  // No time limit (B-08 PD18, as the project's testTimeout): this hook copies the server's code
+  // and spawns a migration, and under the gate's parallel load ran past Vitest's default 10 s.
+}, 0);
 
 afterEach(async () => {
-  await new Promise<void>((r) => service.close(() => r()));
+  // `service` is unset when beforeEach failed before it: the failure is that one, not this.
+  const running = service;
+  service = undefined;
+  if (running) await new Promise<void>((r) => running.close(() => r()));
   rmSync(tmp, { recursive: true, force: true });
 });
 
