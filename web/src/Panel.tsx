@@ -46,6 +46,11 @@ export interface PanelProps {
   onProfile(id: string): void;
   control: ScreenLinkView;
   onControl(action: PanelAction): void;
+  /**
+   * B-12 (SD1, AC21, AC23): hosted use. No External control block, the line saying where it
+   * lives, and "Sign in again" once renewal has failed. Absent on a local install.
+   */
+  hosted?: { signedOut: boolean; onSignInAgain(): void };
 }
 
 export function Panel(props: PanelProps) {
@@ -193,11 +198,22 @@ export function Panel(props: PanelProps) {
       <div data-testid="panel-camera-state">camera: {capture.camera}</div>
       <div data-testid="panel-audio-state">audio: {capture.audio}</div>
       {capture.reason && <div data-testid="panel-reason">{capture.reason}</div>}
-      <ExternalControl
-        view={props.control}
-        onAction={props.onControl}
-        senderState={props.senderState}
-      />
+      {props.hosted ? (
+        <>
+          <div data-testid="hosted-control-line">External control needs the local install</div>
+          {props.hosted.signedOut && (
+            <button type="button" data-testid="sign-in-again" onClick={props.hosted.onSignInAgain}>
+              Sign in again
+            </button>
+          )}
+        </>
+      ) : (
+        <ExternalControl
+          view={props.control}
+          onAction={props.onControl}
+          senderState={props.senderState}
+        />
+      )}
     </section>
   );
 }

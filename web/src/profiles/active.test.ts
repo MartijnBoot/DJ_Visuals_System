@@ -441,3 +441,33 @@ describe("the guard's reason (B-03)", () => {
     expect(setProfile.mock.calls.at(-1)![1]).toBeUndefined();
   });
 });
+
+describe("hosted sign-in failures (B-12 PD4, AC23)", () => {
+  const SIGN_IN = "profiles unavailable: sign in again; keeping the current look";
+  const NO_ACCESS = "profiles unavailable: this account has no access; keeping the current look";
+
+  it("gives PD4's reasons when the list is refused, keeping the built-in", async () => {
+    for (const [kind, reason] of [
+      ["signed_out", SIGN_IN],
+      ["not_allowed", NO_ACCESS],
+    ] as const) {
+      const { active, setProfile } = setup({ list: { kind } });
+      await active.open();
+      expect(active.state()).toMatchObject({ reason, activeId: BUILTIN_ID });
+      expect(setProfile).not.toHaveBeenCalled();
+    }
+  });
+
+  it("gives PD4's reasons when a pick is refused, keeping the current look", async () => {
+    for (const [kind, reason] of [
+      ["signed_out", SIGN_IN],
+      ["not_allowed", NO_ACCESS],
+    ] as const) {
+      const { active, setProfile } = setup({ get: { kind } });
+      await active.open();
+      await active.pick("w1");
+      expect(active.state()).toMatchObject({ reason, activeId: BUILTIN_ID });
+      expect(setProfile).not.toHaveBeenCalled();
+    }
+  });
+});

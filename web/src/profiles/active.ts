@@ -76,7 +76,14 @@ const REASONS = {
   missing: "that profile no longer exists; keeping the current look",
   unusable: "that profile could not be read; keeping the current look",
   engine: "that profile could not be prepared; keeping the current look",
+  // B-12 PD4: hosted use, a read refused for sign-in or for the account.
+  signedOut: "profiles unavailable: sign in again; keeping the current look",
+  notAllowed: "profiles unavailable: this account has no access; keeping the current look",
 } as const;
+
+/** The reason a refused read gives, when the refusal is about sign-in (B-12 PD4). */
+const signInReason = (kind: string): string | null =>
+  kind === "signed_out" ? REASONS.signedOut : kind === "not_allowed" ? REASONS.notAllowed : null;
 
 /** The guard's reasons (B-03 PD8); the panel and every controller show them word for word. */
 const GUARD_REASONS = {
@@ -190,11 +197,12 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     if (mine !== token) return;
     if (result.kind !== "ok") {
       reason =
-        result.kind === "unreachable"
+        signInReason(result.kind) ??
+        (result.kind === "unreachable"
           ? REASONS.unreachable
           : result.kind === "missing"
             ? REASONS.missing
-            : REASONS.unusable;
+            : REASONS.unusable);
       emit();
       return;
     }
@@ -204,7 +212,9 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   const open = async (): Promise<void> => {
     const result = await deps.api.list();
     if (result.kind !== "ok") {
-      reason = result.kind === "unreachable" ? REASONS.listUnreachable : REASONS.listUnusable;
+      reason =
+        signInReason(result.kind) ??
+        (result.kind === "unreachable" ? REASONS.listUnreachable : REASONS.listUnusable);
       stored = [];
       loaded = true;
       emit();
