@@ -3,6 +3,7 @@ import { z } from "zod";
 export * from "./control.ts";
 export * from "./profile.ts";
 export * from "./profile-api.ts";
+export * from "./sync.ts";
 export { nextFreeName } from "./names.ts";
 
 /** The body of `GET /api/health`: built by the server, parsed by the web before use. */

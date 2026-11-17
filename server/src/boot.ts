@@ -21,6 +21,7 @@ import { createLogger, type Logger } from "./log.ts";
 import { migrate } from "./migrate.ts";
 import { registerProfiles } from "./profiles/routes.ts";
 import { createProfileStore } from "./profiles/store.ts";
+import { registerSync } from "./sync/routes.ts";
 import { createCertificateStore } from "./tls/store.ts";
 
 export const HOST = "127.0.0.1";
@@ -52,6 +53,11 @@ export interface BootPaths {
    * IPv4 addresses. Tests pass `127.0.0.1`, so the gate never binds a real LAN address.
    */
   controlAddresses?: () => ControlAddress[];
+  /**
+   * The cloud's clock for profile writes and the tombstone clean-up (B-12 T6, T9); absent means
+   * `Date.now`. Tests move it 90 days on (AC18).
+   */
+  now?: () => number;
 }
 
 export interface Booted {
@@ -118,7 +124,11 @@ export async function boot(
     signIn: config.signIn && { issuer: config.signIn.issuer, clientId: config.signIn.clientId },
   });
   if (config.signIn) guardProfiles(app, config.signIn, log);
-  registerProfiles(app, createProfileStore(db, log, undefined, { mode: config.APP_MODE }));
+  const clock = paths.now ?? (() => Date.now());
+  const store = createProfileStore(db, log, () => new Date(clock()), { mode: config.APP_MODE });
+  registerProfiles(app, store);
+  // B-12 PD17: the cloud's sync endpoints exist in hosted mode only, behind the guard.
+  if (config.APP_MODE === "hosted") registerSync(app, store, clock);
   // B-12 PD10: a hosted server never builds External control: no certificate store, hub, LAN
   // listener or screen socket, and every WebSocket upgrade is a raw 404.
   let externalControl: { close(): Promise<void> } | null = null;

@@ -369,3 +369,172 @@ describe("the conflict-copy mark (B-12 T3, PD28)", () => {
     expect(syncRow(a.id)?.conflict_copy).toBe(0);
   });
 });
+
+// B-12 T6 (PD17, AC11–AC13, AC15, AC18): the cloud's side of sync, on a hosted store.
+describe("the cloud's sync writes (B-12 T6, PD17)", () => {
+  let cloud: ProfileStore;
+  beforeEach(() => {
+    cloud = createProfileStore(db, { warn }, () => new Date((clock += 1000)), { mode: "hosted" });
+  });
+
+  const put = (id: string, profile: Profile, base: number, copy = false) =>
+    cloud.syncPut(id, profile, base, copy);
+  const okProfile = (result: ReturnType<ProfileStore["syncPut"]>) => {
+    if (result.kind !== "ok") throw new Error(`syncPut gave ${result.kind}`);
+    return result.profile;
+  };
+
+  it("creates a new id at revision 1 when the base is 0", () => {
+    const stored = okProfile(put("m-1", warm, 0));
+    expect(stored).toMatchObject({ ...warm, id: "m-1", revision: 1 });
+    expect(counter()).toBe(1);
+  });
+
+  it("updates when the base equals the revision, carrying the conflict-copy mark", () => {
+    okProfile(put("m-1", warm, 0));
+    const edited = okProfile(
+      put("m-1", { ...warm, palette: ["#000000", "#ffffff", "#808080"] }, 1, true),
+    );
+    expect(edited).toMatchObject({
+      revision: 2,
+      palette: ["#000000", "#ffffff", "#808080"],
+      conflictCopy: true,
+    });
+    expect(okProfile(put("m-1", warm, 2))).not.toHaveProperty("conflictCopy");
+  });
+
+  it("refuses a stale base with the current profile and writes nothing", () => {
+    okProfile(put("m-1", warm, 0));
+    const current = okProfile(
+      put("m-1", { ...warm, palette: ["#000000", "#ffffff", "#808080"] }, 1),
+    );
+    const before = counter();
+    expect(put("m-1", { ...warm, palette: ["#111111", "#222222", "#333333"] }, 1)).toEqual({
+      kind: "stale",
+      current,
+    });
+    expect(counter()).toBe(before);
+  });
+
+  it("answers a repeat of a push it already took with the current profile, not stale (AC16)", () => {
+    const first = okProfile(put("m-1", warm, 0));
+    expect(put("m-1", warm, 0)).toEqual({ kind: "ok", profile: first });
+    const second = okProfile(
+      put("m-1", { ...warm, palette: ["#000000", "#ffffff", "#808080"] }, 1),
+    );
+    expect(put("m-1", { ...warm, palette: ["#000000", "#ffffff", "#808080"] }, 1)).toEqual({
+      kind: "ok",
+      profile: second,
+    });
+  });
+
+  it("names an arrival by nextFreeName when another id holds its name (AC15)", () => {
+    okProfile(put("a", { ...warm, name: "Set" }, 0));
+    expect(okProfile(put("b", { ...warm, name: "set" }, 0)).name).toBe("set (2)");
+    // Its own name is never "taken" by itself.
+    expect(okProfile(put("a", { ...warm, name: "Set" }, 1)).name).toBe("Set");
+  });
+
+  it("deletes at the current revision and leaves a tombstone (AC11)", () => {
+    okProfile(put("m-1", warm, 0));
+    expect(cloud.syncDelete("m-1", 1)).toEqual({ kind: "deleted" });
+    expect(cloud.get("m-1")).toEqual({ kind: "missing" });
+    expect(tombstones()).toMatchObject([{ id: "m-1", revision: 1 }]);
+  });
+
+  it("refuses a delete after an edit, returning the current profile (AC12)", () => {
+    okProfile(put("m-1", warm, 0));
+    const current = okProfile(
+      put("m-1", { ...warm, palette: ["#000000", "#ffffff", "#808080"] }, 1),
+    );
+    expect(cloud.syncDelete("m-1", 1)).toEqual({ kind: "kept", current });
+    expect(cloud.get("m-1").kind).toBe("ok");
+  });
+
+  it("answers a repeat delete as deleted, and an unknown id as missing (AC16)", () => {
+    okProfile(put("m-1", warm, 0));
+    cloud.syncDelete("m-1", 1);
+    const before = counter();
+    expect(cloud.syncDelete("m-1", 1)).toEqual({ kind: "deleted" });
+    expect(counter()).toBe(before);
+    expect(cloud.syncDelete("never", 3)).toEqual({ kind: "missing" });
+  });
+
+  it("restores a tombstoned id with the machine's edit, past the tombstone's revision (AC13)", () => {
+    okProfile(put("m-1", warm, 0));
+    okProfile(put("m-1", warm, 1)); // revision 2
+    cloud.syncDelete("m-1", 2);
+    const restored = okProfile(
+      put("m-1", { ...warm, palette: ["#000000", "#ffffff", "#808080"] }, 1),
+    );
+    expect(restored).toMatchObject({
+      id: "m-1",
+      revision: 3,
+      palette: ["#000000", "#ffffff", "#808080"],
+    });
+    expect(tombstones()).toEqual([]);
+  });
+
+  it("restores an id whose tombstone was purged, past the machine's base (AC18)", () => {
+    const restored = okProfile(put("m-9", warm, 4));
+    expect(restored).toMatchObject({ id: "m-9", revision: 5 });
+  });
+
+  it("purges tombstones older than the given time and records purged_through", () => {
+    okProfile(put("old", warm, 0));
+    okProfile(put("new", { ...warm, name: "New" }, 0));
+    cloud.syncDelete("old", 1); // deleted_at at the clock's then
+    const oldSeq = counter();
+    clock += 91 * 24 * 3600 * 1000;
+    cloud.syncDelete("new", 1);
+    cloud.purgeTombstones(new Date(clock - 90 * 24 * 3600 * 1000));
+    expect(tombstones().map((t) => t.id)).toEqual(["new"]);
+    expect(cloud.purgedThrough()).toBe(oldSeq);
+    cloud.purgeTombstones(new Date(clock - 90 * 24 * 3600 * 1000));
+    expect(cloud.purgedThrough()).toBe(oldSeq);
+  });
+});
+
+describe("the cloud's feed (B-12 T6, PD16, PD21)", () => {
+  let cloud: ProfileStore;
+  beforeEach(() => {
+    cloud = createProfileStore(db, { warn }, () => new Date((clock += 1000)), { mode: "hosted" });
+  });
+
+  it("returns changes after the cursor in counter order, profiles and tombstones, paged", () => {
+    for (let i = 0; i < 60; i += 1) cloud.syncPut(`p-${i}`, { ...warm, name: `P${i}` }, 0, false);
+    cloud.syncDelete("p-0", 1);
+    const first = cloud.changesSince(0, 50);
+    expect(first.changes).toHaveLength(50);
+    expect(first.more).toBe(true);
+    expect(first.cursor).toBe(51);
+    expect(first.changes.map((c) => c.seq)).toEqual(Array.from({ length: 50 }, (_, i) => i + 2)); // p-0's row is gone: its tombstone comes last
+    const second = cloud.changesSince(first.cursor, 50);
+    expect(second.more).toBe(false);
+    expect(second.changes.at(-1)).toEqual({ kind: "tombstone", seq: 61, id: "p-0", revision: 1 });
+    expect(second.cursor).toBe(61);
+    expect(cloud.changesSince(61, 50)).toEqual({ changes: [], cursor: 61, more: false });
+  });
+
+  it("leaves a profile the schema rejects out of the feed with one warn, and moves past it", () => {
+    cloud.syncPut("good", warm, 0, false);
+    cloud.syncPut("bad", { ...warm, name: "Bad" }, 0, false);
+    db.run("UPDATE profiles SET definition = '{}' WHERE id = 'bad'");
+    const page = cloud.changesSince(0, 50);
+    expect(page.changes.map((c) => (c.kind === "profile" ? c.profile.id : c.id))).toEqual(["good"]);
+    expect(page.cursor).toBe(2);
+    cloud.changesSince(0, 50);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toEqual({ id: "bad" });
+  });
+
+  it("pages the whole set by id with the counter", () => {
+    for (const id of ["c", "a", "b"]) cloud.syncPut(id, { ...warm, name: id }, 0, false);
+    const first = cloud.fullPage("", 2);
+    expect(first.profiles.map((p) => p.id)).toEqual(["a", "b"]);
+    expect(first).toMatchObject({ counter: 3, more: true });
+    const second = cloud.fullPage("b", 2);
+    expect(second.profiles.map((p) => p.id)).toEqual(["c"]);
+    expect(second.more).toBe(false);
+  });
+});
