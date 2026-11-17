@@ -47,6 +47,10 @@ Framing decisions, settled before the ten questions because they shape them:
 Partly superseded by [0002](0002-remote-input-over-the-lan.md) (question 2: audio may cross the
 LAN, opt-in).
 
+Partly superseded by [0003](0003-hosting-on-oracle-synced-profiles.md) (§7's rows "Cloud hosting",
+"Hosted database", "Bought auth" and "Application Insights"; question 2's "nothing at a gig needs
+venue internet" holds for the local install).
+
 ### Constraints carried into specs
 
 These follow from the decisions above; each spec that touches the area must honour them.
