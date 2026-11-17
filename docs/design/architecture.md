@@ -1,13 +1,15 @@
 # Architecture
 
-The system as built at the end of B-06 (remote input devices): specs
+The system as built at the end of B-12 (hosted home on Oracle Cloud): specs
 [phase-0-walking-skeleton](../specs/phase-0-walking-skeleton.md),
 [phase-b-01-live-visual-engine](../specs/phase-b-01-live-visual-engine.md),
 [phase-b-02-visual-profiles](../specs/phase-b-02-visual-profiles.md),
-[phase-b-04-live-set-controls](../specs/phase-b-04-live-set-controls.md) and
-[phase-b-06-remote-input-devices](../specs/phase-b-06-remote-input-devices.md), decisions in the
-[Setup Decision Record](../adr/0001-setup-decision-record.md) and
-[ADR 0002](../adr/0002-remote-input-over-the-lan.md). Plans read this and do not
+[phase-b-04-live-set-controls](../specs/phase-b-04-live-set-controls.md),
+[phase-b-06-remote-input-devices](../specs/phase-b-06-remote-input-devices.md) and
+[phase-b-12-hosted-home-oracle](../specs/phase-b-12-hosted-home-oracle.md), decisions in the
+[Setup Decision Record](../adr/0001-setup-decision-record.md),
+[ADR 0002](../adr/0002-remote-input-over-the-lan.md) and
+[ADR 0003](../adr/0003-hosting-on-oracle-synced-profiles.md). Plans read this and do not
 redesign it; a change here is an owner stop (CLAUDE.md). Diagrams stay text so they diff.
 
 ## Overview
@@ -26,7 +28,9 @@ and a device socket over HTTPS; every change goes over the server to the screen 
 applies it and mirrors its state back (External control, below). Remote input (B-06, ADR 0002)
 lets a paired device send its camera or its audio from `/send`: the media goes peer to peer to
 the screen page over the LAN, never through the server, which relays only the WebRTC setup
-(Remote input, below). Five workspace packages:
+(Remote input, below). The same process also runs as the cloud (B-12, ADR 0003): in hosted
+mode on an Oracle VM behind Caddy, signed in, with no External control; a local install with
+cloud settings syncs its profiles with it (Hosting and sync, below). Five workspace packages:
 
 ```
   browser, screen machine                                  Node 24 process, 127.0.0.1:PORT
@@ -67,8 +71,8 @@ browser check runs only against `pnpm start`.
 | `engine/` | The WebGL2 context, the animation loop, the look (one shader pass composed from a profile, `shader.ts`; its constants and B-01's reference mapping in `look.ts`), the profile model, strength formula and built-in profile (`profile.ts`), render scaling (`scale.ts`), the latency record (`latency.ts`), frame statistics; custom effects wrapped into the pass, the flash limiter, the runtime guard and context-loss recovery (B-03), compile errors located to effect and line (`compile-error.ts`); its own `AudioFeatures`, `Dials` (`features.ts`) and `Profile` | `createEngine(canvas)` returning `{ start, stop, stats, latency, setFeatures, setDials, setSource, setScaleCap, setProfile(profile, { pick }), onGuard }`, `BUILT_IN_PROFILE`, `EFFECTS`, `effectStrength`, `DEFAULT_DIALS`, `ZERO_FEATURES`, `WebGL2UnavailableError`, `ProfileSupersededError`, `ProfileCompileError`, `locateErrors` (`engine/src/index.ts`) | Declare or import any package, including `audio/` and `shared/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
 | `audio/` | The `AudioWorklet` processor (`djv-features`, `audio/src/processor.ts`), the analysis maths as pure functions (`analysis.ts`; every number in `constants.ts`), the `AudioFeatures` contract (`features.ts`), the main-thread source that maps the worklet's clock and decays stale features (`source.ts`, `clock.ts`), the synthetic feature loop for the builder's preview (`synthetic.ts`) | `createFeatureSource(context, stream, moduleUrl)` resolving to `{ read(now), stop, lastBlockAt }`, `createAnalyser`, `windowFrames`, `createClockMap`, `decayFeatures`, `syntheticFeatures`, `AudioFeatures`, `ZERO_FEATURES` (`audio/src/index.ts`); the worklet file as `@djv/audio/processor` | Declare or import any package, including `engine/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
 | `web/` | The screen page at `/`, the builder at `/builder`, the External control page at `/control` and the sending page at `/send` (`web/src/main.tsx` reads `location.pathname`; no router), the screen's control client and the controller (`web/src/control/`), the screen's remote sources (`web/src/remote/`) and the sender (`web/src/send/`), the capture session (`web/src/capture/`), the panel and its profile picker (`profiles/active.ts`), the overlay, the wake lock, the health and profile clients (`profiles/api.ts`), the builder (`web/src/builder/`: list, editor reducer, custom effect row, preview with live compile and frame time, conflict, export, import and Replace); wiring `audio/` and `shared/` to `engine/` (`features-compat.ts`, `profile-compat.ts`, checked both ways by `tests/meta/features-compat.test.ts` and `tests/meta/profile-compat.test.ts`) | The built app in `web/dist` | Import from `server/`; read the environment |
-| `server/` | Configuration, logging, the database and migrations, the profile store (`server/src/profiles/store.ts`, the only SQL for profiles) and routes (`routes.ts`), HTTP, External control (`server/src/control/`: pairing, the LAN listener, the sockets, relaying, the trust page), the local certificate authority (`server/src/tls/`: DER, the two certificate shapes, the store under `DATA_DIR/tls/`) | `GET /api/health`, the profile endpoints below, `GET /builder`, static `web/dist`, the screen socket `/api/control/screen`; on the LAN listener while switched on, over HTTPS only, `GET /control`, `GET /send`, `GET /trust`, `GET /assets/*`, the device socket `/api/control/device`; `pnpm migrate` | Listen on anything but `127.0.0.1`, except the External control listener on private IPv4 addresses while switched on; read the environment outside `config.ts` |
-| `shared/` | The schemas both sides validate against: health, the profile and its file format (`profile.ts`, with the optional `primary` and `derivePrimary`, the custom effect and its code checks), the endpoint bodies and error shapes (`profile-api.ts`), the "Name (n)" rule (`names.ts`), every External control message both ways and its limits (`control.ts`) | `healthResponseSchema`, `profileSchema`, `profileFileSchema`, `toProfileFile`, `SUPPORTED_FORMAT_VERSIONS`, `isSupportedFormatVersion`, `derivePrimary`, `customCodeIssues`, `storedProfileSchema`, `updateProfileSchema`, `issuesFrom`, `nextFreeName`, `LIMITS`, `CUSTOM_LIMITS`, the control schemas and constants (`shared/src/index.ts`) | — |
+| `server/` | Configuration, logging, the database and migrations, the profile store (`server/src/profiles/store.ts`, the only SQL for profiles, the sync columns and tombstones included) and routes (`routes.ts`), HTTP, External control (`server/src/control/`: pairing, the LAN listener, the sockets, relaying, the trust page), the local certificate authority (`server/src/tls/`: DER, the two certificate shapes, the store under `DATA_DIR/tls/`); B-12: token verification and the guard (`server/src/auth/`), the per-address rate window (`rate-window.ts`), the cloud's sync endpoints (`server/src/sync/`), the local install's sign-in, sync run and scheduler (`server/src/cloud/`, the session file only in `session-store.ts`), the backup routine (`server/src/backup/`, `backup-cli.ts`) | `GET /api/health`, the profile endpoints below, `GET /builder`, static `web/dist`, the screen socket `/api/control/screen`; on the LAN listener while switched on, over HTTPS only, `GET /control`, `GET /send`, `GET /trust`, `GET /assets/*`, the device socket `/api/control/device`; `pnpm migrate` | Listen on anything but `127.0.0.1`, except the External control listener on private IPv4 addresses while switched on; read the environment outside `config.ts` |
+| `shared/` | The schemas both sides validate against: health (with `mode`, `cloud`, `signIn`), the profile and its file format (`profile.ts`, with the optional `primary` and `derivePrimary`, the custom effect and its code checks), the endpoint bodies and error shapes (`profile-api.ts`, with the optional `conflictCopy`), the "Name (n)" rule (`names.ts`), every External control message both ways and its limits (`control.ts`), the sync bodies (`sync.ts`) and the cloud row's status (`cloud.ts`) | `healthResponseSchema`, `profileSchema`, `profileFileSchema`, `toProfileFile`, `SUPPORTED_FORMAT_VERSIONS`, `isSupportedFormatVersion`, `derivePrimary`, `customCodeIssues`, `storedProfileSchema`, `updateProfileSchema`, `issuesFrom`, `nextFreeName`, `LIMITS`, `CUSTOM_LIMITS`, the control schemas and constants (`shared/src/index.ts`) | — |
 
 `shared/`, `engine/` and `audio/` export their `src/index.ts`; there is no build step for the
 server or those packages. Only `web/` is built, by Vite, into `web/dist`; the worklet reaches
@@ -422,6 +426,59 @@ media passes it.
   overlay shows the current scale. At 50% the controller also reports how long the mean has been
   above budget, for the guard (Profiles, above).
 
+## Hosting and sync
+
+B-12, [ADR 0003](../adr/0003-hosting-on-oracle-synced-profiles.md). One server, two modes, chosen
+by the required `APP_MODE`.
+
+```
+  any browser                     Oracle VM (Always Free)                    screen machine
+ +--------------+  HTTPS  +--------+  127.0.0.1  +---------------------+     +------------------+
+ | hosted page  |-------->| Caddy  |------------>| Node, APP_MODE=     |<----| local install,   |
+ | sign-in PKCE |         | :443   |             |  hosted             | sync| APP_MODE=local,  |
+ +------+-------+         +--------+             |  guard on profiles  | over| CLOUD_URL set    |
+        | code, tokens                            |  and /api/sync/*    | HTTPS| (pull, then push)|
+        v                                         |  no External control|     +--------+---------+
+ OIDC provider  <---------------- loopback sign-in, refresh token in DATA_DIR/cloud/ --+
+```
+
+- **Hosted mode.** `boot()` never builds the certificate store, the hub, the LAN listener or the
+  screen socket; every WebSocket upgrade is 404, and `/control`, `/send`, `/trust` are 404 too.
+  Fastify trusts `X-Forwarded-For` from `127.0.0.1` only (Caddy), and still binds `127.0.0.1`.
+  An `onRequest` guard (`server/src/auth/guard.ts`) checks `/api/profiles*` and `/api/sync/*`:
+  a bearer OIDC **ID token** (RS256 or ES256, the issuer's JWKS, `iss`, `aud` = the client id,
+  `exp`/`nbf` with 60 s leeway; `node:crypto`, no library), then `sub` = `ALLOWED_SUBJECT`
+  (else 403). Ten refusals from one address in 60 s answer 429 for 60 s. `/api/health` and the
+  page shell stay open. The cloud serves `/api/sync/changes`, `/api/sync/full`, and `PUT`/
+  `DELETE /api/sync/profiles/:id` (`server/src/sync/routes.ts`).
+- **Hosted page.** `main.tsx` reads `/api/health` once before rendering (mode and the public
+  sign-in settings). Hosted, the sign-in gate (`web/src/auth/`) runs authorisation code + PKCE
+  straight against the provider; the ID and refresh tokens stay in memory, `sessionStorage`
+  holds only the attempt and the `djv.signedIn` marker, so a later load in the tab goes to the
+  provider and straight back. `web/src/profiles/api.ts` sends the bearer, renewing on demand
+  (within 60 s of `exp`, or once after a 401); a failed renewal shows "Sign in again" and the
+  failing read says why, while the screen keeps drawing.
+- **Sync.** A local install with `CLOUD_URL` connects through a loopback sign-in
+  (`/api/cloud/connect`, the provider, `/api/cloud/callback` on `127.0.0.1:PORT`); the refresh
+  token is `DATA_DIR/cloud/session.json`. The queue is the rows: every write stamps
+  `change_seq` from `app_meta.change_counter`; a row is unsynced when it never matched the cloud
+  (`cloud_revision IS NULL`) or was written since its last push (`change_seq > pushed_seq`); a
+  delete of a synced row leaves a tombstone. One run (`server/src/cloud/sync.ts`) pulls every
+  page of the cloud's feed and applies them in one transaction with the new cursor (a cursor
+  below a purged tombstone pulls the full set instead), then pushes each pending change, one
+  request each. The cloud decides names (`nextFreeName`) and wins conflicts; the machine's
+  losing edit becomes a "Name (2)" copy marked `conflict_copy` on both sides; an edit beats a
+  delete. Tombstones go after 90 days by the cloud's clock.
+- **When sync runs** (`server/src/cloud/scheduler.ts`). At boot when connected, after a connect,
+  2 s after a profile write, at the end of a set and on "Sync now"; a failed run retries at 5 s
+  doubling to 5 min. While the target screen reports `started: true` (the hub's `onRunning`),
+  nothing starts and a run in flight makes no further request; "Sync now" answers 409.
+- **Deploy.** `.github/workflows/deploy.yml` after CI is green for a push to `main`; SSH to a
+  forced command (`infra/receive.sh`), then `infra/deploy.ts`: backup, migrate on the new
+  release, switch `current`, restart, health for 30 s, or switch back and restore the
+  pre-deploy copy. The VM is built by `infra/rebuild.sh` (Caddy, systemd units, a nightly backup
+  timer, 14 days of journal). [docs/runbooks/hosting.md](../runbooks/hosting.md).
+
 ## Data
 
 - **Store.** One SQLite file, `DATA_DIR/djvisuals.sqlite`, opened through `node:sqlite` in
@@ -436,6 +493,15 @@ media passes it.
   only) and answered 422 by `GET /api/profiles/:id`, so the screen falls back to the built-in.
   `update` is one `UPDATE ... WHERE id = ? AND revision = ?`; an import is one `BEGIN IMMEDIATE`
   transaction. `DATA_DIR/assets/` exists and is empty: no effect uses an asset.
+- **Sync columns** (`0003_sync.sql`, B-12). `profiles` gains `change_seq`, `cloud_revision`,
+  `pushed_seq` and `conflict_copy`; `profile_tombstones(id, name, revision, deleted_at,
+  change_seq)`; `app_meta` gains `change_counter`, `sync_cursor` and `purged_through`. Every
+  write is one `BEGIN IMMEDIATE` transaction (`Db.transaction`) that bumps the counter and
+  stamps the row. Both modes run the same migration; `cloud_revision`, `pushed_seq` and
+  `sync_cursor` stay unused on the cloud, `purged_through` locally.
+- **Cloud session.** `DATA_DIR/cloud/session.json` holds the local install's refresh token (or
+  `{ revoked: true }`), written atomically, owner-only where the OS allows; only
+  `server/src/cloud/session-store.ts` names it (`tests/meta/cloud-boundary.test.ts`).
 - **Browser storage.** `djv.sources` (device ids) and `djv.profile` (the picked profile's id, a
   plain string; removing it selects the built-in). No profile data is stored in the browser.
   External control: `djv.controlAddress` on the screen machine (the address for the QR code);
@@ -454,20 +520,30 @@ media passes it.
   row. The runner takes `BEGIN IMMEDIATE` on every run, so a file locked by another process
   fails boot at once. A misnamed `.sql` file or a duplicate number fails boot naming the file.
   The schema version reported by health is the highest applied number.
-- **When they run.** At boot, before listening, and through `pnpm migrate`. This departs from
-  way-of-working 5.6 on purpose (SD7): one process on one machine has no replica race. The
-  hosting trigger in SDR §7 reopens it.
-- **Direction.** Forward-only. The restore plan is to delete the file. The guard hook keeps
-  `server/migrations` append-only for agents (`.claude/guard-paths.json`).
+- **When they run.** At boot, before listening, and through `pnpm migrate`. On the cloud, a
+  deploy runs them with the new release's `migrate-cli.ts` while the old release still serves,
+  after a backup (B-12 SD7). One process per machine still has no replica race.
+- **Direction.** Forward-only. The guard hook keeps `server/migrations` append-only for agents
+  (`.claude/guard-paths.json`). On a local install the restore plan is still to delete the file
+  (a connected install pulls its profiles back on the next sync). On the cloud it is a backup:
+  `server/src/backup-cli.ts` takes a `VACUUM INTO` copy checked by `PRAGMA integrity_check`,
+  uploads it to Object Storage (SigV4 on `node:crypto`) nightly and before every deploy, keeps
+  the newest 14, and restores the newest (`restore --latest`) or a deploy's own copy
+  (`restore --from`) with the service stopped ([restore.md](../runbooks/restore.md)).
 
 ## Configuration
 
 `server/src/config.ts` is the one module that reads the environment. `loadConfig(env)` is a pure
-zod parse of five variables, all required, no defaults in code: `APP_ENV` (`development`,
-`test`, `production`), `LOG_LEVEL` (`debug`, `info`, `warn`, `error`), `PORT` (1 to 65535),
-`CONTROL_PORT` (1 to 65535 and different from `PORT`, checked only when both parse; the External
-control listener's port, nothing listens on it until switched on) and `DATA_DIR` (a non-empty
-path). `loadConfigFromProcess()` is the single `process.env` reader.
+zod parse of six required variables, no defaults in code: `APP_ENV` (`development`, `test`,
+`production`), `LOG_LEVEL` (`debug`, `info`, `warn`, `error`), `APP_MODE` (`local`, `hosted`;
+B-12), `PORT` (1 to 65535), `CONTROL_PORT` (1 to 65535 and different from `PORT`, checked only
+when both parse; the External control listener's port, nothing listens on it until switched
+on) and `DATA_DIR` (a non-empty path). B-12 groups, each all or none: hosted needs
+`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `ALLOWED_SUBJECT` and refuses `CLOUD_URL`; local takes
+`CLOUD_URL`, `OIDC_ISSUER`, `OIDC_CLIENT_ID` together or none and refuses `ALLOWED_SUBJECT`;
+either mode takes the five `BACKUP_` variables together or none. URLs are `https:`, or `http:` on
+`127.0.0.1`/`localhost` only. `loadConfigFromProcess()` is the single `process.env` reader; on
+the VM the values come from `/etc/djvisuals/env` through systemd, never the repository.
 `.env.example` is the contract; `scripts/setup.sh` copies it to `.env.local`.
 
 The run scripts start `node --env-file-if-exists=.env.local` from the repository root, so a
@@ -479,10 +555,13 @@ is reported the same way. `scripts/dev.ts` learns `PORT` for the Vite proxy by i
 
 ## Cross-cutting
 
-- **Auth.** None (SDR question 3). The main listener binds `127.0.0.1` only, so no other device
-  can reach it, `/api/profiles` included (`server/test/boot.int.test.ts`). The External control
-  listener is the only door to the LAN: open only while switched on, HTTPS only, it serves no
-  API, and a device needs the code and an approval (External control, above).
+- **Auth.** On a local install, none (SDR question 3): the main listener binds `127.0.0.1` only,
+  so no other device can reach it, `/api/profiles` included (`server/test/boot.int.test.ts`).
+  The External control listener is the only door to the LAN: open only while switched on, HTTPS
+  only, it serves no API, and a device needs the code and an approval (External control, above).
+  On the cloud (B-12), bought, not built: the owner's OIDC provider signs in, the server only
+  verifies its ID tokens and allows one subject (`server/src/auth/`, a guarded area in
+  `docs/invariants.md`).
 - **Writes** (B-02 SD18). No response carries a CORS header. A `POST` or `PUT` without
   `Content-Type: application/json` is 415, answered before the body is read, and `text/plain` is
   not a parser, so a page on another origin cannot write with a simple request. The body limit
@@ -493,7 +572,11 @@ is reported the same way. `scripts/dev.ts` learns `PORT` for the Vite proxy by i
   only on a user action in the panel or on a paired controller (Start, opening the panel,
   picking a profile, a controller connecting or pressing Refresh); no media endpoint exists
   (`docs/invariants.md`, `tests/browser/live.spec.ts`). A sender's peer connection is not an
-  HTTP request, and the screen page opens no further socket for it.
+  HTTP request, and the screen page opens no further socket for it. Every page load also reads
+  `/api/health` once, for the mode (B-12 PD8). In hosted use there is no screen socket, and the
+  provider's token endpoint is asked only within a user's profile action
+  (`tests/browser/hosted.spec.ts`); the local cloud row asks `/api/cloud/*` only when the panel
+  opens or a button is pressed.
 - **Logging.** pino JSON lines on stdout at `LOG_LEVEL`. Fastify's request id (`reqId`) is on
   every line that belongs to a request. The environment and the config object are never
   logged whole. The server logs profile create, update, delete and import at `info` with the id
@@ -506,7 +589,11 @@ is reported the same way. `scripts/dev.ts` learns `PORT` for the Vite proxy by i
   The browser logs capture state changes (for remote audio `remote audio lost`, `fallback
   local`, `restored remote`, by sequence label) and profile switches at info level, and guard
   events at warn with the profile id, without device labels, media data or profile code
-  (`tests/browser/remote-e2e.spec.ts` checks every line of a whole run).
+  (`tests/browser/remote-e2e.spec.ts` checks every line of a whole run). Request lines carry the
+  path without its query string (B-12 PD12). Sync and sign-in log outcomes, counts, ids and
+  revisions, never a token, a refresh token, a code, a subject, an email or a definition
+  (`server/test/secrets.int.test.ts`, `tests/browser/hosted.spec.ts`). On the VM the journal
+  keeps the lines 14 days.
 - **Errors.** Every boot failure goes through `fatal` in `server/src/log.ts`: one `fatal` line,
   exit 1, nothing listening. In the browser, a failed or invalid health answer reads
   `server: unreachable` and never stops the engine; no WebGL2 context shows one line of text

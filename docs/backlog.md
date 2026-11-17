@@ -458,7 +458,8 @@ Depends on B-04.
 
 ### B-12 — Hosted home on Oracle Cloud (free tier trial)
 
-- **Status:** specced → `docs/specs/phase-b-12-hosted-home-oracle.md`
+- **Status:** built → `docs/plans/phase-b-12-hosted-home-oracle.md` (2026-11-17; T1–T19 on
+  stacked branches, awaiting review and the owner's human steps H0–H12)
 - **Added:** 2026-11-15
 - **Size:** L
 
