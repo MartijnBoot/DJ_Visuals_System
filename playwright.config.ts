@@ -1,6 +1,6 @@
 // The browser check (spec SD9, AC10 to AC13): Chromium only, headless, software WebGL, against
 // `pnpm start` (the built app served by the one Node process), never the Vite dev server.
-// The server always starts fresh on its own port with a temporary DATA_DIR; all five variables
+// The server always starts fresh on its own port with a temporary DATA_DIR; all six variables
 // are passed here, so nothing comes from .env.local (the process environment wins over it).
 // Nothing listens on CONTROL_PORT until External control is switched on (B-04 AC1); the
 // External control specs boot their own server (B-04 PD13).
@@ -54,6 +54,7 @@ export default defineConfig({
     env: {
       APP_ENV: "test",
       LOG_LEVEL: "warn",
+      APP_MODE: "local",
       PORT: String(PORT),
       CONTROL_PORT: String(CONTROL_PORT),
       DATA_DIR: dataDir,

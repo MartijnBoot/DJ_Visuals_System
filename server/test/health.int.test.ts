@@ -57,6 +57,14 @@ describe("GET /api/health (AC9)", () => {
     expect(body.schemaVersion).toBe(2);
   });
 
+  it("answers the mode, no cloud and no sign-in for a local install (B-12 PD8)", async () => {
+    const port = await bootWith();
+    const body = healthResponseSchema.parse(
+      await (await fetch(`http://127.0.0.1:${port}/api/health`)).json(),
+    );
+    expect(body).toMatchObject({ mode: "local", cloud: false, signIn: null });
+  });
+
   it("logs the request's lines under one reqId", async () => {
     const port = await bootWith();
     await fetch(`http://127.0.0.1:${port}/api/health`);

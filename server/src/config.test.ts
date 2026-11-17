@@ -4,6 +4,7 @@ import { ConfigError, loadConfig } from "./config.ts";
 const valid = {
   APP_ENV: "development",
   LOG_LEVEL: "info",
+  APP_MODE: "local",
   PORT: "8000",
   CONTROL_PORT: "8001",
   DATA_DIR: "./data",
@@ -22,17 +23,20 @@ function problemsOf(env: Record<string, string | undefined>): Record<string, str
 }
 
 describe("loadConfig", () => {
-  it("accepts all five variables valid and ignores the rest of the environment", () => {
+  it("accepts all six variables valid and ignores the rest of the environment", () => {
     expect(loadConfig({ ...valid, PATH: "/usr/bin", SESSION_SECRET: "x" })).toEqual({
       APP_ENV: "development",
       LOG_LEVEL: "info",
+      APP_MODE: "local",
       PORT: 8000,
       CONTROL_PORT: 8001,
       DATA_DIR: "./data",
+      cloud: null,
+      signIn: null,
     });
   });
 
-  it.each(["APP_ENV", "LOG_LEVEL", "PORT", "CONTROL_PORT", "DATA_DIR"])(
+  it.each(["APP_ENV", "LOG_LEVEL", "APP_MODE", "PORT", "CONTROL_PORT", "DATA_DIR"])(
     "reports %s missing",
     (name) => {
       const env: Record<string, string | undefined> = { ...valid };
@@ -120,11 +124,152 @@ describe("loadConfig", () => {
     expect(error.problems.map((p) => p.variable)).toEqual([
       "APP_ENV",
       "LOG_LEVEL",
+      "APP_MODE",
       "PORT",
       "CONTROL_PORT",
       "DATA_DIR",
     ]);
     expect(JSON.stringify(error.problems)).not.toContain("secret-looking-value");
     expect(JSON.stringify(error.problems)).not.toContain("staging-ish");
+  });
+});
+
+// B-12 SD14, PD5: the mode and the cloud settings.
+const issuer = "https://issuer.example.test/tenant-value-1";
+const clientId = "client-value-2";
+const subject = "subject-value-3";
+const cloudUrl = "https://cloud.example.test";
+const hosted = {
+  ...valid,
+  APP_MODE: "hosted",
+  OIDC_ISSUER: issuer,
+  OIDC_CLIENT_ID: clientId,
+  ALLOWED_SUBJECT: subject,
+};
+const connected = { ...valid, CLOUD_URL: cloudUrl, OIDC_ISSUER: issuer, OIDC_CLIENT_ID: clientId };
+
+/** Every problem of `env`, checked to carry none of the values passed in (PD5). */
+function problemsWithoutValues(env: Record<string, string | undefined>): Record<string, string> {
+  const problems = problemsOf(env);
+  for (const value of [issuer, clientId, subject, cloudUrl, "http://example.com"]) {
+    expect(JSON.stringify(problems)).not.toContain(value);
+  }
+  return problems;
+}
+
+describe("loadConfig: APP_MODE and the cloud settings (B-12 SD14, PD5)", () => {
+  it("reports APP_MODE malformed", () => {
+    expect(problemsOf({ ...valid, APP_MODE: "cloud" })).toEqual({
+      APP_MODE: "must be one of local, hosted",
+    });
+  });
+
+  it("puts APP_MODE after LOG_LEVEL in the order of problems", () => {
+    expect(Object.keys(problemsOf({ ...valid, APP_MODE: "x", LOG_LEVEL: "x", PORT: "x" }))).toEqual(
+      ["LOG_LEVEL", "APP_MODE", "PORT"],
+    );
+  });
+
+  it("accepts hosted with its three settings", () => {
+    const config = loadConfig(hosted);
+    expect(config.APP_MODE).toBe("hosted");
+    expect(config.signIn).toEqual({ issuer, clientId, allowedSubject: subject });
+    expect(config.cloud).toBeNull();
+  });
+
+  it.each(["OIDC_ISSUER", "OIDC_CLIENT_ID", "ALLOWED_SUBJECT"])(
+    "refuses hosted without %s",
+    (name) => {
+      const env: Record<string, string | undefined> = { ...hosted };
+      delete env[name];
+      expect(problemsWithoutValues(env)).toEqual({ [name]: "is required for APP_MODE=hosted" });
+      expect(problemsWithoutValues({ ...hosted, [name]: "" })).toEqual({
+        [name]: "is required for APP_MODE=hosted",
+      });
+    },
+  );
+
+  it("refuses CLOUD_URL in hosted", () => {
+    expect(problemsWithoutValues({ ...hosted, CLOUD_URL: cloudUrl })).toEqual({
+      CLOUD_URL: "only for APP_MODE=local",
+    });
+  });
+
+  it("accepts local with no cloud settings, or with all three", () => {
+    expect(loadConfig(valid).cloud).toBeNull();
+    const config = loadConfig(connected);
+    expect(config.cloud).toEqual({ url: cloudUrl, issuer, clientId });
+    expect(config.signIn).toBeNull();
+  });
+
+  it.each([
+    [["CLOUD_URL"], ["OIDC_ISSUER", "OIDC_CLIENT_ID"]],
+    [["OIDC_ISSUER"], ["CLOUD_URL", "OIDC_CLIENT_ID"]],
+    [["OIDC_CLIENT_ID"], ["CLOUD_URL", "OIDC_ISSUER"]],
+    [["CLOUD_URL", "OIDC_ISSUER"], ["OIDC_CLIENT_ID"]],
+    [["CLOUD_URL", "OIDC_CLIENT_ID"], ["OIDC_ISSUER"]],
+    [["OIDC_ISSUER", "OIDC_CLIENT_ID"], ["CLOUD_URL"]],
+  ])("refuses local with only %j of the cloud settings", (given, absent) => {
+    const env: Record<string, string | undefined> = { ...valid };
+    for (const name of given) env[name] = connected[name as keyof typeof connected];
+    expect(problemsWithoutValues(env)).toEqual(
+      Object.fromEntries(
+        absent.map((name) => [
+          name,
+          "must be set with CLOUD_URL, OIDC_ISSUER and OIDC_CLIENT_ID, or none of them",
+        ]),
+      ),
+    );
+  });
+
+  it("refuses ALLOWED_SUBJECT in local", () => {
+    expect(problemsWithoutValues({ ...connected, ALLOWED_SUBJECT: subject })).toEqual({
+      ALLOWED_SUBJECT: "only for APP_MODE=hosted",
+    });
+    expect(problemsWithoutValues({ ...valid, ALLOWED_SUBJECT: subject })).toEqual({
+      ALLOWED_SUBJECT: "only for APP_MODE=hosted",
+    });
+  });
+
+  it.each(["http://example.com", "ftp://cloud.example.test", "not a url", "http://192.168.1.2"])(
+    "refuses the URL %j",
+    (value) => {
+      expect(problemsWithoutValues({ ...connected, CLOUD_URL: value })).toEqual({
+        CLOUD_URL: "must be an https URL, or http on 127.0.0.1 or localhost",
+      });
+      expect(problemsWithoutValues({ ...hosted, OIDC_ISSUER: value })).toEqual({
+        OIDC_ISSUER: "must be an https URL, or http on 127.0.0.1 or localhost",
+      });
+    },
+  );
+
+  it.each(["http://127.0.0.1:9", "http://localhost:9/issuer", "https://cloud.example.test/"])(
+    "accepts the URL %j",
+    (value) => {
+      expect(loadConfig({ ...connected, CLOUD_URL: value, OIDC_ISSUER: value }).cloud).toEqual({
+        url: value,
+        issuer: value,
+        clientId,
+      });
+    },
+  );
+
+  it("reports the cloud settings after DATA_DIR, in a fixed order", () => {
+    const error = (() => {
+      try {
+        loadConfig({ ...valid, DATA_DIR: "", ALLOWED_SUBJECT: subject, CLOUD_URL: "x" });
+      } catch (e) {
+        return e as ConfigError;
+      }
+      throw new Error("expected a throw");
+    })();
+    expect(error.problems.map((p) => p.variable)).toEqual([
+      "DATA_DIR",
+      "CLOUD_URL",
+      "OIDC_ISSUER",
+      "OIDC_CLIENT_ID",
+      "ALLOWED_SUBJECT",
+    ]);
+    expect(JSON.stringify(error.problems)).not.toContain(subject);
   });
 });

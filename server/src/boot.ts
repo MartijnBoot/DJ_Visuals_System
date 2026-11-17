@@ -109,6 +109,10 @@ export async function boot(
   registerHealth(app, {
     schemaVersion,
     uptimeSeconds: () => Math.floor((Date.now() - listenedAt) / 1000),
+    mode: config.APP_MODE,
+    cloud: config.cloud !== null,
+    // Both are public values: the browser's sign-in needs them (PD8). Never the subject.
+    signIn: config.signIn && { issuer: config.signIn.issuer, clientId: config.signIn.clientId },
   });
   registerProfiles(app, createProfileStore(db, log));
   // External control (B-04): the screen socket on this listener, the device socket on each LAN

@@ -66,6 +66,7 @@ beforeEach(async () => {
     loadConfig({
       APP_ENV: "test",
       LOG_LEVEL: "debug",
+      APP_MODE: "local",
       PORT: String(port),
       CONTROL_PORT: String(controlPort),
       DATA_DIR: join(tmp, "data"),
