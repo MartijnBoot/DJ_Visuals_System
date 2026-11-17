@@ -99,9 +99,17 @@ export interface HostedCloud {
   dispose(): Promise<void>;
 }
 
-/** The cloud in hosted mode, and the fake issuer whose default subject it allows. */
-export async function startHostedCloud(): Promise<HostedCloud> {
-  const issuer = await startFakeIssuer({ clientId: CLIENT_ID });
+/**
+ * The cloud in hosted mode, and the fake issuer whose default subject it allows. `lifetime` is
+ * the seconds an ID token lives (T14 makes them short, to reach a renewal mid-set).
+ */
+export async function startHostedCloud({
+  lifetime,
+}: { lifetime?: number } = {}): Promise<HostedCloud> {
+  const issuer = await startFakeIssuer({
+    clientId: CLIENT_ID,
+    ...(lifetime === undefined ? {} : { lifetime }),
+  });
   const cloud = await start("cloud", {
     APP_MODE: "hosted",
     OIDC_ISSUER: issuer.url,
