@@ -23,9 +23,8 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 | 3 | B-09 | Transitions | M | idea |
 | 4 | B-10 | Global colour layer | S | idea |
 | 5 | B-11 | "No camera" as a feed option | S | idea |
-| 6 | B-12 | Hosted home on Oracle Cloud (free tier trial) | L | idea |
-| 7 | B-13 | Selling it | L | idea |
-| 8 | B-15 | iPad as an audio source | L | idea |
+| 6 | B-13 | Selling it | L | idea |
+| 7 | B-15 | iPad as an audio source | L | idea |
 
 ## Items
 
@@ -459,7 +458,7 @@ Depends on B-04.
 
 ### B-12 — Hosted home on Oracle Cloud (free tier trial)
 
-- **Status:** idea
+- **Status:** specced → `docs/specs/phase-b-12-hosted-home-oracle.md`
 - **Added:** 2026-11-15
 - **Size:** L
 
