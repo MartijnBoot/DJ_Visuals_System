@@ -180,10 +180,20 @@ export async function deploy(options: DeployOptions): Promise<DeployResult> {
   return { ok: true };
 }
 
-/** Runs a command without a shell; rejects with its exit code. */
-export function run(command: string, args: readonly string[]): Promise<void> {
+/**
+ * Runs a command without a shell; rejects with its exit code. `env`, when given, is the child's
+ * whole environment; without it the child inherits this process's.
+ */
+export function run(
+  command: string,
+  args: readonly string[],
+  env?: Record<string, string>,
+): Promise<void> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "inherit", "inherit"] });
+    const child = spawn(command, args, {
+      stdio: ["ignore", "inherit", "inherit"],
+      ...(env === undefined ? {} : { env }),
+    });
     child.on("error", reject);
     child.on("exit", (code) =>
       code === 0 ? resolvePromise() : reject(new Error(`${basename(command)} exited ${code}`)),
@@ -191,10 +201,14 @@ export function run(command: string, args: readonly string[]): Promise<void> {
   });
 }
 
-/** The steps that run the release's own CLIs with the env file (PD23). */
+/**
+ * The steps that run the release's own CLIs with the env file (PD23). Each starts with an empty
+ * environment: `--env-file` never overrides a variable already set, so an inherited one (the
+ * gate exports .env.local; a stray one on the VM) would otherwise win over the env file.
+ */
 export function cliSteps(envFile: string): Pick<DeploySteps, "snapshot" | "migrate" | "restore"> {
   const node = (release: string, script: string, args: string[]) =>
-    run(process.execPath, [`--env-file=${envFile}`, join(release, script), ...args]);
+    run(process.execPath, [`--env-file=${envFile}`, join(release, script), ...args], {});
   return {
     snapshot: (release, file) =>
       node(release, "server/src/backup-cli.ts", ["snapshot", "--to", file]),

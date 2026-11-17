@@ -13,9 +13,11 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDatabase } from "../server/src/db.ts";
 import { cliSteps, currentRelease, deploy, switchCurrent, type DeploySteps } from "./deploy.ts";
@@ -202,5 +204,26 @@ describe("a missing release folder", () => {
     expect(await run("absent")).toEqual({ ok: false, step: "release", rolledBack: false });
     expect(basename(currentRelease(root)!)).toBe("old");
     expect(existsSync(join(root, "backups", "pre-absent.sqlite"))).toBe(false);
+  });
+});
+
+describe("the env file is the only source of settings (PD23)", () => {
+  it("a DATA_DIR in the deploying process's own environment never reaches the release's CLIs", async () => {
+    // The gate exports .env.local into its own environment (scripts/check.sh); the VM's deploy
+    // user could carry a stray variable too. Either must lose to the env file.
+    const elsewhere = join(tmp, "elsewhere");
+    const child = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { cliSteps } from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "deploy.ts")).href)};
+         await cliSteps(${JSON.stringify(envFile)}).migrate(${JSON.stringify(join(root, "releases", "old"))});`,
+      ],
+      { env: { DATA_DIR: elsewhere, APP_MODE: "hosted" }, encoding: "utf8" },
+    );
+    expect(child.status, child.stderr).toBe(0);
+    expect(existsSync(elsewhere)).toBe(false);
+    expect(child.stdout).toContain('"msg":"migrations up to date"');
   });
 });
