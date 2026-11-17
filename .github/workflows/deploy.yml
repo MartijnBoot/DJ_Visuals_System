@@ -1,0 +1,112 @@
+# The deploy (B-12 SD7, AC29; plan PD24): a commit reaches the cloud only after the gate is green
+# on it on `main`, one deploy at a time, through the deploy user's forced command on the VM
+# (infra/receive.sh, then infra/deploy.ts). docs/runbooks/deploy.md says what it does and how to
+# read a failure.
+#
+# GitHub's documentation (docs.github.com, "Events that trigger workflows", `workflow_run`):
+# `branches` names "what branches the triggering workflow must run on"; a run is "triggered
+# regardless of the conclusion of the previous workflow", hence the `conclusion` check; and
+# GITHUB_SHA is the "last commit on default branch", hence the checkout of `head_sha`. "Secrets
+# cannot be directly referenced in `if:` conditionals" (Using secrets in GitHub Actions), hence
+# the first step: with DEPLOY_HOST unset the run ends green with one notice.
+#
+# Secrets: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, and nothing else
+# (docs/runbooks/hosting.md lists the same four).
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: ubuntu-latest
+    # CI also runs weekly and by hand on main: only a green push deploys.
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    steps:
+      - name: Check the deploy is configured
+        id: configured
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ]; then
+            echo "::notice::deploy not configured: DEPLOY_HOST is empty"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the gated commit
+        if: steps.configured.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # An older green run that lands after a newer push must not deploy over it.
+      - name: Check the commit is still main's tip
+        id: tip
+        if: steps.configured.outputs.enabled == 'true'
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          TIP="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [ "$TIP" = "$SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$SHA is no longer main's tip ($TIP); the newer push deploys"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up pnpm
+        if: steps.configured.outputs.enabled == 'true' && steps.tip.outputs.current == 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        if: steps.configured.outputs.enabled == 'true' && steps.tip.outputs.current == 'true'
+        uses: actions/setup-node@v4
+        with: { node-version-file: .nvmrc, cache: pnpm }
+
+      - name: Build web/dist
+        if: steps.configured.outputs.enabled == 'true' && steps.tip.outputs.current == 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      # PD23: the workspace file, .npmrc and every member's package.json, so the VM's
+      # `pnpm install --prod --frozen-lockfile` matches the lockfile.
+      - name: Pack the release
+        if: steps.configured.outputs.enabled == 'true' && steps.tip.outputs.current == 'true'
+        run: |
+          tar -czf release.tgz \
+            package.json pnpm-workspace.yaml .npmrc pnpm-lock.yaml .nvmrc \
+            shared/package.json engine/package.json audio/package.json \
+            server/package.json web/package.json \
+            shared/src server/src server/migrations web/dist infra
+
+      - name: Ship it to the VM
+        if: steps.configured.outputs.enabled == 'true' && steps.tip.outputs.current == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          (umask 077 && printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key)
+          (umask 077 && printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts_deploy)
+          chmod 0600 ~/.ssh/deploy_key ~/.ssh/known_hosts_deploy
+          # The remote's exit code is ssh's, so a failed deploy fails this job.
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts_deploy \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$SHA" < release.tgz
