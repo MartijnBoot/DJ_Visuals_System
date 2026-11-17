@@ -1,0 +1,27 @@
+# The hosted app (B-12 SD6, SD11, PD23): the release `current` points to, as the djvisuals user.
+# The environment comes from /etc/djvisuals/env only (the owner fills it; server/src/config.ts
+# validates it at boot). Node binds 127.0.0.1:PORT; Caddy faces the internet.
+[Unit]
+Description=DJ Visuals System (hosted)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=djvisuals
+Group=djvisuals
+# Group-writable files, so the deploy user (in the djvisuals group) can migrate and back up.
+UMask=0007
+EnvironmentFile=/etc/djvisuals/env
+WorkingDirectory=/srv/djvisuals/current
+ExecStart=/usr/bin/node /srv/djvisuals/current/server/src/main.ts
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/djvisuals
+
+[Install]
+WantedBy=multi-user.target

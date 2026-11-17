@@ -1,0 +1,3 @@
+# /etc/sudoers.d/djvisuals-deploy (B-12 PD23): the deploy user may restart, stop and start the
+# app's service, and nothing else. rebuild.sh checks it with `visudo -c` before installing it.
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart djvisuals, /usr/bin/systemctl stop djvisuals, /usr/bin/systemctl start djvisuals

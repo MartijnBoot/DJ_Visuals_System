@@ -1,0 +1,19 @@
+# The nightly backup (B-12 SD10, AC31, PD25): a consistent copy, checked, uploaded to Object
+# Storage, all but the newest 14 deleted. Started by djvisuals-backup.timer.
+[Unit]
+Description=DJ Visuals System nightly backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=djvisuals
+Group=djvisuals
+UMask=0007
+EnvironmentFile=/etc/djvisuals/env
+ExecStart=/usr/bin/node /srv/djvisuals/current/server/src/backup-cli.ts backup
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/djvisuals

@@ -9,6 +9,10 @@
 # It reads two settings from its own environment, with the VM's paths as defaults (tests point
 # them at a temp folder), and the service's PORT from the env file, to build the health URL.
 set -euo pipefail
+# Group-writable files: the service (group djvisuals) must read the release and write what the
+# migration and the backup create in DATA_DIR. pnpm through corepack must never stop to ask.
+umask 0007
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
 ROOT="${DJV_ROOT:-/srv/djvisuals}"
 ENV_FILE="${DJV_ENV_FILE:-/etc/djvisuals/env}"
