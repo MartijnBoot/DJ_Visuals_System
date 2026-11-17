@@ -20,11 +20,12 @@ import { registerHealth } from "./health.ts";
 import { createLogger, type Logger } from "./log.ts";
 import { migrate } from "./migrate.ts";
 import { registerProfiles } from "./profiles/routes.ts";
-import { createProfileStore } from "./profiles/store.ts";
+import { createProfileStore, type ProfileStore } from "./profiles/store.ts";
 import { registerSync } from "./sync/routes.ts";
 import { registerCloud } from "./cloud/routes.ts";
 import { createSessionStore } from "./cloud/session-store.ts";
 import { createSignin, type Signin } from "./cloud/signin.ts";
+import { runSync, type SyncResult } from "./cloud/sync.ts";
 import { createCertificateStore } from "./tls/store.ts";
 
 export const HOST = "127.0.0.1";
@@ -68,6 +69,9 @@ export interface BootPaths {
 /** What a test may drive directly on a local install with cloud settings. */
 export interface CloudInternals {
   signin: Signin;
+  store: ProfileStore;
+  /** One sync run now, as the scheduler (T10) would start it. */
+  sync(): Promise<SyncResult>;
 }
 
 export interface Booted {
@@ -162,7 +166,10 @@ export async function boot(
       onConnected: () => {},
       onDisconnected: () => {},
     });
-    paths.cloudInternals?.({ signin });
+    const cloudUrl = config.cloud.url;
+    const sync = () =>
+      runSync({ store, signin, cloudUrl, fetch: (input, init) => fetch(input, init), log });
+    paths.cloudInternals?.({ signin, store, sync });
   }
   // B-12 PD10: a hosted server never builds External control: no certificate store, hub, LAN
   // listener or screen socket, and every WebSocket upgrade is a raw 404.
