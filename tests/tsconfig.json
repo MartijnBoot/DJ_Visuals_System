@@ -9,6 +9,7 @@
     "browser",
     "../vitest.config.ts",
     "../playwright.config.ts",
-    "../scripts/*.ts"
+    "../scripts/*.ts",
+    "../infra/*.ts"
   ]
 }

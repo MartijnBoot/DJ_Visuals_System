@@ -3,9 +3,18 @@
 //   snapshot --to <file>   the deploy's copy (PD23): kept at <file>, uploaded when configured
 //   restore --latest       the newest copy downloaded, checked, and put in place of the database;
 //                          the service must be stopped first (docs/runbooks/restore.md)
+//   restore --from <file>  a local copy checked and put in place: the deploy's rollback (PD23)
 // It reads the environment through config.ts only. Success is one info line; a failure is one
 // error line naming the step and exit 1. No line carries a key, the secret or a profile.
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { createBucket, type Bucket } from "./backup/bucket.ts";
 import { integrityOk, snapshot } from "./backup/snapshot.ts";
@@ -104,6 +113,11 @@ async function backup(config: Config, log: Logger): Promise<void> {
 async function snapshotTo(config: Config, log: Logger, target: string): Promise<void> {
   const { database } = paths(config);
   const file = resolve(target);
+  // The first deploy runs before any database exists: nothing to copy, nothing to roll back to.
+  if (!existsSync(database)) {
+    log.info("snapshot skipped: no database yet");
+    return;
+  }
   await takeCopy(database, file);
   const bucket = bucketOf(config);
   if (!bucket) {
@@ -135,15 +149,34 @@ async function restoreLatest(config: Config, log: Logger): Promise<void> {
       return got;
     });
     writeFileSync(file, bytes);
-    await step("check", () => {
-      if (!integrityOk(file)) throw new Error("integrity_check failed");
-    });
-    await step("replace", () => {
-      rmSync(`${database}-wal`, { force: true });
-      rmSync(`${database}-shm`, { force: true });
-      renameSync(file, database);
-    });
+    await putInPlace(file, database);
     log.info({ object: newest }, "restore done");
+  } finally {
+    rmSync(file, { force: true });
+  }
+}
+
+/** The checked `file` becomes the database; its WAL and shared-memory files go with the old. */
+async function putInPlace(file: string, database: string): Promise<void> {
+  await step("check", () => {
+    if (!integrityOk(file)) throw new Error("integrity_check failed");
+  });
+  await step("replace", () => {
+    rmSync(`${database}-wal`, { force: true });
+    rmSync(`${database}-shm`, { force: true });
+    renameSync(file, database);
+  });
+}
+
+/** A deploy's rollback (B-12 PD23): its own pre-deploy copy, kept where it is. */
+async function restoreFrom(config: Config, log: Logger, source: string): Promise<void> {
+  const { database, backups } = paths(config);
+  mkdirSync(backups, { recursive: true });
+  const file = join(backups, `restore-${Date.now()}.sqlite`);
+  try {
+    await step("copy", () => copyFileSync(resolve(source), file));
+    await putInPlace(file, database);
+    log.info("restore done");
   } finally {
     rmSync(file, { force: true });
   }
@@ -158,7 +191,14 @@ async function main(): Promise<void> {
     else if (command === "snapshot" && flag === "--to" && value) {
       await snapshotTo(config, log, value);
     } else if (command === "restore" && flag === "--latest") await restoreLatest(config, log);
-    else throw new StepError("usage", "backup | snapshot --to <file> | restore --latest");
+    else if (command === "restore" && flag === "--from" && value) {
+      await restoreFrom(config, log, value);
+    } else {
+      throw new StepError(
+        "usage",
+        "backup | snapshot --to <file> | restore --latest | restore --from <file>",
+      );
+    }
   } catch (error) {
     const failed =
       error instanceof StepError ? error : new StepError("unknown", "unexpected failure");

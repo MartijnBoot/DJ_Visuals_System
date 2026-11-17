@@ -1,7 +1,7 @@
 // B-12 T15 (AC31, SD10, PD25): the backup CLI as a child process against an in-process fake
 // bucket that recomputes every request's SigV4 signature and refuses a wrong one with 403.
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -277,5 +277,35 @@ describe("restore --latest (SD11)", () => {
     expect(result.code).toBe(1);
     expect(result.lines.filter((l) => (l.level ?? 0) >= 50)[0]!.step).toBe("check");
     expect(profileNames()).toEqual(["One", "Two"]);
+  });
+});
+
+describe("for the deploy (B-12 T16, PD23)", () => {
+  it("snapshot --to with no database yet writes nothing and exits 0 (the first deploy)", async () => {
+    rmSync(join(dataDir, "djvisuals.sqlite"));
+    const file = join(tmp, "pre-first.sqlite");
+    const result = await run(["snapshot", "--to", file]);
+    expect(result.code).toBe(0);
+    expect(existsSync(file)).toBe(false);
+    expect(result.lines.some((l) => l.msg === "snapshot skipped: no database yet")).toBe(true);
+  });
+
+  it("restore --from puts a checked local copy in place and keeps the copy", async () => {
+    const file = join(tmp, "pre-x.sqlite");
+    expect((await run(["snapshot", "--to", file])).code).toBe(0);
+    addProfile("Two");
+    const result = await run(["restore", "--from", file]);
+    expect(result.code).toBe(0);
+    expect(profileNames()).toEqual(["One"]);
+    expect(existsSync(file)).toBe(true);
+  });
+
+  it("restore --from refuses a copy that fails the check", async () => {
+    const file = join(tmp, "broken.sqlite");
+    writeFileSync(file, "not a database");
+    const result = await run(["restore", "--from", file]);
+    expect(result.code).toBe(1);
+    expect(result.lines.filter((l) => (l.level ?? 0) >= 50)[0]!.step).toBe("check");
+    expect(profileNames()).toEqual(["One"]);
   });
 });
