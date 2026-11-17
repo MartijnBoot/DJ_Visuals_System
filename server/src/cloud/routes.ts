@@ -9,8 +9,10 @@ import type { Signin } from "./signin.ts";
 
 export interface CloudRoutesDeps {
   signin: Signin;
-  /** The panel's status (T10 adds syncing, offline, paused, the last sync and conflicts). */
+  /** The panel's status (PD18). */
   status(): CloudStatus;
+  /** "Sync now" (AC10): refused while a set runs, else answers when its run ends. */
+  syncNow(): Promise<{ refused: true } | { refused: false }>;
   /** After a good callback: a sync starts (AC24). */
   onConnected(): void;
   /** After "Disconnect from cloud": the scheduler stops. */
@@ -57,6 +59,12 @@ export function registerCloud(app: App, deps: CloudRoutesDeps): void {
         .send(page(CALLBACK_TEXTS[outcome]));
     },
   );
+
+  app.post("/api/cloud/sync", async (_request, reply) => {
+    const answer = await deps.syncNow();
+    if (answer.refused) return reply.code(409).send({ error: "paused" });
+    return status();
+  });
 
   app.post("/api/cloud/disconnect", () => {
     deps.signin.disconnect();

@@ -60,6 +60,8 @@ async function start(name: string, env: Record<string, string>): Promise<Node> {
       migrationsDir: resolve(repoRoot, "server/migrations"),
       now: () => (name === "cloud" ? clock : Date.now()),
       cloudInternals: (internals) => (node.internals = internals),
+      // Every run here is started by the test; the scheduler's timers never fire (T10).
+      syncTimers: { set: () => 0, clear: () => {} },
     },
     pino({ level: "info" }, { write: (line: string) => void node.lines.push(line) }),
   );
@@ -306,7 +308,8 @@ describe("logs (SD18, AC26)", () => {
     await sync(b);
     const finished = a.lines
       .map((l) => JSON.parse(l) as Record<string, unknown>)
-      .find((l) => l.msg === "sync finished");
+      .filter((l) => l.msg === "sync finished")
+      .at(-1); // the connect ran one of its own first
     expect(finished).toMatchObject({ pulled: 0, pushed: 1, conflicts: 0 });
     for (const line of [...a.lines, ...b.lines, ...cloud.lines]) {
       expect(line).not.toContain("#222222");

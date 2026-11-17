@@ -3,7 +3,7 @@
 // the throw into one fatal line (log.ts). Paths are arguments so tests can inject them.
 import { accessSync, constants, existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { MAX_SCREEN_MESSAGE } from "@djv/shared";
+import { MAX_SCREEN_MESSAGE, type CloudStatus } from "@djv/shared";
 import type { WebSocket } from "ws";
 import { createApp, registerStatic, type App } from "./app.ts";
 import { ConfigError, type Config, type SignInSettings } from "./config.ts";
@@ -26,6 +26,7 @@ import { registerCloud } from "./cloud/routes.ts";
 import { createSessionStore } from "./cloud/session-store.ts";
 import { createSignin, type Signin } from "./cloud/signin.ts";
 import { runSync, type SyncResult } from "./cloud/sync.ts";
+import { createScheduler, realTimers, type Scheduler, type Timers } from "./cloud/scheduler.ts";
 import { createCertificateStore } from "./tls/store.ts";
 
 export const HOST = "127.0.0.1";
@@ -64,13 +65,15 @@ export interface BootPaths {
   now?: () => number;
   /** In-process tests reach the local install's cloud parts through this (B-12 T7, T9). */
   cloudInternals?: (internals: CloudInternals) => void;
+  /** The sync scheduler's timers (B-12 T10); tests that start each run themselves pass inert ones. */
+  syncTimers?: Timers;
 }
 
 /** What a test may drive directly on a local install with cloud settings. */
 export interface CloudInternals {
   signin: Signin;
   store: ProfileStore;
-  /** One sync run now, as the scheduler (T10) would start it. */
+  /** "Sync now" through the scheduler; a refusal reads as outcome "paused". */
   sync(): Promise<SyncResult>;
 }
 
@@ -140,42 +143,21 @@ export async function boot(
   if (config.signIn) guardProfiles(app, config.signIn, log);
   const clock = paths.now ?? (() => Date.now());
   const store = createProfileStore(db, log, () => new Date(clock()), { mode: config.APP_MODE });
-  registerProfiles(app, store);
+  // B-12 SD15, PD19, PD20: a local install with the cloud settings syncs; without them there is
+  // no scheduler and no `/api/cloud/*` at all (AC19).
+  const cloud = config.cloud ? startCloud(app, config, store, paths, log, clock) : null;
+  registerProfiles(app, store, () => cloud?.scheduler.wrote());
   // B-12 PD17: the cloud's sync endpoints exist in hosted mode only, behind the guard.
   if (config.APP_MODE === "hosted") registerSync(app, store, clock);
-  // B-12 SD15, PD20: a local install with the cloud settings can connect; without them there is
-  // no `/api/cloud/*` at all (AC19).
-  if (config.cloud) {
-    const signin = createSignin({
-      clientId: config.cloud.clientId,
-      port: config.PORT,
-      issuer: createIssuer({
-        url: config.cloud.issuer,
-        fetch: (i, init) => fetch(i, init),
-        now: clock,
-        log,
-      }),
-      store: createSessionStore(resolve(config.DATA_DIR)),
-      fetch: (input, init) => fetch(input, init),
-      now: clock,
-      log,
-    });
-    registerCloud(app, {
-      signin,
-      status: () => ({ state: signin.state(), lastSyncAt: null, conflicts: 0 }),
-      onConnected: () => {},
-      onDisconnected: () => {},
-    });
-    const cloudUrl = config.cloud.url;
-    const sync = () =>
-      runSync({ store, signin, cloudUrl, fetch: (input, init) => fetch(input, init), log });
-    paths.cloudInternals?.({ signin, store, sync });
-  }
   // B-12 PD10: a hosted server never builds External control: no certificate store, hub, LAN
   // listener or screen socket, and every WebSocket upgrade is a raw 404.
   let externalControl: { close(): Promise<void> } | null = null;
   if (config.APP_MODE === "hosted") routeUpgrades(app.server, []);
-  else externalControl = startExternalControl(app, config, paths, log);
+  else {
+    externalControl = startExternalControl(app, config, paths, log, (running) =>
+      cloud?.scheduler.setRunning(running),
+    );
+  }
   try {
     if (paths.staticDir !== undefined) await registerStatic(app, resolve(paths.staticDir));
     await app.listen({ host: HOST, port: config.PORT });
@@ -194,11 +176,79 @@ export async function boot(
   );
   return {
     async close() {
+      await cloud?.scheduler.close();
       await externalControl?.close();
       await app.close();
       db.close();
     },
   };
+}
+
+/**
+ * The local install's cloud parts (B-12 T7, T10): the sign-in, the scheduler that runs sync,
+ * and `/api/cloud/*`. A connected install syncs at boot (SD2, AC5).
+ */
+function startCloud(
+  app: App,
+  config: Config,
+  store: ProfileStore,
+  paths: BootPaths,
+  log: Logger,
+  clock: () => number,
+): { scheduler: Scheduler } {
+  const settings = config.cloud!;
+  const fetchImpl: typeof fetch = (input, init) => fetch(input, init);
+  const signin = createSignin({
+    clientId: settings.clientId,
+    port: config.PORT,
+    issuer: createIssuer({ url: settings.issuer, fetch: fetchImpl, now: clock, log }),
+    store: createSessionStore(resolve(config.DATA_DIR)),
+    fetch: fetchImpl,
+    now: clock,
+    log,
+  });
+  const scheduler = createScheduler({
+    run: (mayContinue) =>
+      runSync({ store, signin, cloudUrl: settings.url, fetch: fetchImpl, log, mayContinue }),
+    timers: paths.syncTimers ?? realTimers,
+    now: clock,
+    log,
+  });
+  /** PD18: the panel's row, from the sign-in and the scheduler. */
+  const status = (): CloudStatus => {
+    const signedIn = signin.state();
+    const run = scheduler.status();
+    const state =
+      signedIn !== "connected"
+        ? signedIn
+        : run.paused
+          ? "paused"
+          : run.syncing
+            ? "syncing"
+            : run.offline
+              ? "offline"
+              : "connected";
+    return { state, lastSyncAt: run.lastSyncAt, conflicts: store.conflictCount() };
+  };
+  registerCloud(app, {
+    signin,
+    status,
+    syncNow: () => scheduler.syncNow(),
+    onConnected: () => scheduler.start(),
+    onDisconnected: () => scheduler.stop(),
+  });
+  if (signin.state() === "connected") scheduler.start();
+  paths.cloudInternals?.({
+    signin,
+    store,
+    sync: async () => {
+      const answer = await scheduler.syncNow();
+      return answer.refused
+        ? { outcome: "paused", pulled: 0, pushed: 0, conflicts: 0 }
+        : answer.result;
+    },
+  });
+  return { scheduler };
 }
 
 /**
@@ -227,6 +277,7 @@ function startExternalControl(
   config: Config,
   paths: BootPaths,
   log: Logger,
+  onRunning: (running: boolean) => void,
 ): { close(): Promise<void> } {
   // External control (B-04): the screen socket on this listener, the device socket on each LAN
   // instance. The screen socket's `maxPayload` sits above its message limit, so an oversized
@@ -243,6 +294,7 @@ function startExternalControl(
   });
   const deviceSockets = socketServer(64 * 1024);
   const hub: Hub = createHub({
+    onRunning,
     log,
     controlPort: config.CONTROL_PORT,
     now,

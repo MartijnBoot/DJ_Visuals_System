@@ -112,7 +112,11 @@ describe("connect and disconnect (AC24)", () => {
     expect(page.text).toContain("Connected to the cloud — you can close this tab");
     expect(page.text).not.toContain("<script");
     expect(existsSync(sessionFile())).toBe(true);
-    expect((await status()).state).toBe("connected");
+    // AC24: the connect starts a sync. No cloud answers on CLOUD_URL here, so it ends offline.
+    await expect
+      .poll(() => lines.some((l) => l.includes('"msg":"sync failed"')), { timeout: 10_000 })
+      .toBe(true);
+    expect((await status()).state).toBe("offline");
 
     const after = await call("POST", "/api/cloud/disconnect", {});
     expect(cloudStatusSchema.parse(JSON.parse(after.text)).state).toBe("not_connected");
@@ -132,13 +136,12 @@ describe("connect and disconnect (AC24)", () => {
 });
 
 describe("a revoked sign-in (AC25)", () => {
-  it("is signed_out, still after a restart, and the app keeps working", async () => {
+  it("is signed_out after the boot sync, still after a restart, and the app keeps working", async () => {
     await connect();
     issuer.refuseRefresh = true;
-    await restart();
-    expect((await status()).state).toBe("connected"); // nothing has asked yet
+    await restart(); // a connected install syncs at boot (SD2): its renewal is refused
+    await expect.poll(async () => (await status()).state, { timeout: 10_000 }).toBe("signed_out");
     expect(await internals!.signin.idToken()).toEqual({ kind: "signed_out" });
-    expect((await status()).state).toBe("signed_out");
     await restart();
     expect((await status()).state).toBe("signed_out");
     expect((await call("GET", "/api/profiles")).status).toBe(200);

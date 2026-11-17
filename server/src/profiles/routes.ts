@@ -18,7 +18,11 @@ import type { ProfileStore } from "./store.ts";
 /** A bundle import's body limit (B-02 SD18). */
 export const IMPORT_BODY_LIMIT = 1024 * 1024;
 
-export function registerProfiles(app: App, store: ProfileStore): void {
+/**
+ * `onWrite` is called after each successful write (B-12 PD19): a connected local install
+ * schedules a sync on it. Nothing is sent to it.
+ */
+export function registerProfiles(app: App, store: ProfileStore, onWrite = () => {}): void {
   app.get("/api/profiles", () => profileListSchema.parse({ profiles: store.list() }));
 
   app.get<{ Params: { id: string } }>("/api/profiles/:id", (request, reply) => {
@@ -41,6 +45,7 @@ export function registerProfiles(app: App, store: ProfileStore): void {
       { id: result.profile.id, revision: result.profile.revision },
       "profile created",
     );
+    onWrite();
     return reply.code(201).send(storedProfileSchema.parse(result.profile));
   });
 
@@ -69,6 +74,7 @@ export function registerProfiles(app: App, store: ProfileStore): void {
           { id: result.profile.id, revision: result.profile.revision },
           "profile updated",
         );
+        onWrite();
         return storedProfileSchema.parse(result.profile);
     }
   });
@@ -76,6 +82,7 @@ export function registerProfiles(app: App, store: ProfileStore): void {
   app.delete<{ Params: { id: string } }>("/api/profiles/:id", (request, reply) => {
     if (!store.remove(request.params.id)) return reply.code(404).send({ error: "not_found" });
     request.log.info({ id: request.params.id }, "profile deleted");
+    onWrite();
     return reply.code(204).send();
   });
 
@@ -100,6 +107,7 @@ export function registerProfiles(app: App, store: ProfileStore): void {
     }
     const stored = store.importAll(parsed.data.profiles);
     request.log.info({ count: stored.length, ids: stored.map((p) => p.id) }, "profiles imported");
+    onWrite();
     return reply.code(201).send(profileListSchema.parse({ profiles: stored }));
   });
 }
