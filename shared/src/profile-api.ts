@@ -11,6 +11,8 @@ export const storedProfileSchema = z
     revision: z.number().int().positive(),
     createdAt: z.string().min(1),
     updatedAt: z.string().min(1),
+    /** B-12 PD28: a copy a sync conflict made, until it is renamed or saved once. */
+    conflictCopy: z.literal(true).optional(),
   })
   .superRefine(checkProfileRules);
 

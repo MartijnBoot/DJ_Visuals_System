@@ -78,9 +78,9 @@ describe("migrations at boot (AC3, AC5, AC6)", () => {
   it("first boot applies every migration and app_meta holds schema_created_at", async () => {
     const first = track(spawnServer(await env()));
     await first.waitForLine((l) => l.msg === "listening");
-    expect(appliedNames(first)).toEqual(["0001_init.sql", "0002_profiles.sql"]);
+    expect(appliedNames(first)).toEqual(["0001_init.sql", "0002_profiles.sql", "0003_sync.sql"]);
     await first.kill();
-    expect(readRecorded()).toEqual(["0001_init.sql", "0002_profiles.sql"]);
+    expect(readRecorded()).toEqual(["0001_init.sql", "0002_profiles.sql", "0003_sync.sql"]);
     expect(readAppMeta().schema_created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -124,14 +124,82 @@ describe("an upgrade from schema version 1 (B-02 AC20)", () => {
     const port = await freePort();
     const upgraded = track(spawnServer(await env({ PORT: String(port) })));
     await upgraded.waitForLine((l) => l.msg === "listening");
-    expect(appliedNames(upgraded)).toEqual(["0002_profiles.sql"]);
+    expect(appliedNames(upgraded)).toEqual(["0002_profiles.sql", "0003_sync.sql"]);
     const health = (await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()) as {
       schemaVersion: number;
     };
-    expect(health.schemaVersion).toBe(2);
+    expect(health.schemaVersion).toBe(3);
     await upgraded.kill();
-    expect(readRecorded()).toEqual(["0001_init.sql", "0002_profiles.sql"]);
+    expect(readRecorded()).toEqual(["0001_init.sql", "0002_profiles.sql", "0003_sync.sql"]);
     expect(readAppMeta().schema_created_at).toBe(createdAt);
+  });
+});
+
+describe("an upgrade from schema version 2 (B-12 T3, AC8)", () => {
+  it("keeps the two rows, stamps change_seq 1 and 2, and leaves them unsynced", async () => {
+    const dir = join(tmp, "migrations-v2");
+    mkdirSync(dir);
+    for (const file of ["0001_init.sql", "0002_profiles.sql"]) {
+      copyFileSync(join(realMigrations, file), join(dir, file));
+    }
+    const old = track(
+      spawnServer(await env(), { entry: join(fixtures, "boot-entry.ts"), args: [dir] }),
+    );
+    await old.waitForLine((l) => l.msg === "listening");
+    await old.kill();
+    const db = openDatabase(join(dataDir, "djvisuals.sqlite"));
+    const definition = JSON.stringify({ palette: ["#000000"], dials: {}, effects: [] });
+    for (const [id, name] of [
+      // Ids out of order, so the counters follow the insert (rowid) order, not the id.
+      ["b-id", "First"],
+      ["a-id", "Second"],
+    ]) {
+      db.run(
+        "INSERT INTO profiles (id, name, revision, definition, created_at, updated_at) VALUES (?, ?, 4, ?, 'x', 'x')",
+        id!,
+        name!,
+        definition,
+      );
+    }
+    db.close();
+
+    const upgraded = track(spawnServer(await env()));
+    await upgraded.waitForLine((l) => l.msg === "listening");
+    expect(appliedNames(upgraded)).toEqual(["0003_sync.sql"]);
+    await upgraded.kill();
+    const after = openDatabase(join(dataDir, "djvisuals.sqlite"));
+    try {
+      expect(
+        after.all(
+          "SELECT id, revision, change_seq, cloud_revision, pushed_seq, conflict_copy FROM profiles ORDER BY rowid",
+        ),
+      ).toEqual([
+        {
+          id: "b-id",
+          revision: 4,
+          change_seq: 1,
+          cloud_revision: null,
+          pushed_seq: 0,
+          conflict_copy: 0,
+        },
+        {
+          id: "a-id",
+          revision: 4,
+          change_seq: 2,
+          cloud_revision: null,
+          pushed_seq: 0,
+          conflict_copy: 0,
+        },
+      ]);
+      expect(after.all("SELECT COUNT(*) AS n FROM profile_tombstones")).toEqual([{ n: 0 }]);
+    } finally {
+      after.close();
+    }
+    expect(readAppMeta()).toMatchObject({
+      change_counter: "2",
+      sync_cursor: "0",
+      purged_through: "0",
+    });
   });
 });
 
@@ -162,7 +230,7 @@ describe("pnpm migrate (AC8)", () => {
   it("applies pending migrations, then none, and never listens", async () => {
     const first = track(spawnServer(await env(), { entry: migrateCli }));
     expect((await first.exited).code).toBe(0);
-    expect(appliedNames(first)).toEqual(["0001_init.sql", "0002_profiles.sql"]);
+    expect(appliedNames(first)).toEqual(["0001_init.sql", "0002_profiles.sql", "0003_sync.sql"]);
     expect(first.lines().filter((l) => l.msg === "listening")).toHaveLength(0);
     expect(readAppMeta().schema_created_at).toBeDefined();
 

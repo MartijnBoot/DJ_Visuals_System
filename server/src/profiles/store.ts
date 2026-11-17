@@ -2,6 +2,10 @@
 // name is a column (unique, case-insensitive, SD14); `definition` holds palette, dials and
 // effects as JSON. Every row is validated on read: an unusable one is left out of the list and
 // reported by `get`, never thrown (AC13).
+// B-12 (PD14, PD28): every write bumps `app_meta.change_counter` and stamps the row's
+// `change_seq` in the same transaction; a delete writes its tombstone in that transaction too
+// (hosted: always; local: only for a row that ever matched the cloud); an update clears the
+// conflict-copy mark.
 import { nextFreeName, storedProfileSchema, type Profile, type StoredProfile } from "@djv/shared";
 import { randomUUID } from "node:crypto";
 import { isUniqueViolation, type Db } from "../db.ts";
@@ -13,6 +17,7 @@ interface Row {
   definition: string;
   created_at: string;
   updated_at: string;
+  conflict_copy: number;
 }
 
 export type GetResult =
@@ -28,6 +33,11 @@ export type UpdateResult =
   /** The revision moved on and the stored row fails the schema, so there is no "theirs". */
   | { kind: "unusable" };
 
+export interface StoreOptions {
+  /** Which side this store is (B-12 SD1): decides when a delete leaves a tombstone (PD14). */
+  mode?: "local" | "hosted";
+}
+
 export interface ProfileStore {
   list(): StoredProfile[];
   get(id: string): GetResult;
@@ -39,6 +49,7 @@ export interface ProfileStore {
 }
 
 const COLUMNS = "id, name, revision, definition, created_at, updated_at";
+const READ_COLUMNS = `${COLUMNS}, conflict_copy`;
 
 /** `primary` only when set, so a row without it stays what B-02 wrote (B-04 AC39). */
 const definitionOf = ({ palette, dials, effects, primary }: Profile) =>
@@ -48,8 +59,24 @@ export function createProfileStore(
   db: Db,
   log: { warn(fields: { id: string }, message: string): void },
   now: () => Date = () => new Date(),
+  { mode = "local" }: StoreOptions = {},
 ): ProfileStore {
   const warned = new Set<string>();
+
+  /** The counter the next write takes; it moves only through `setCounter`, inside a write's
+   *  transaction, so a refused or rolled-back write leaves it as it was. */
+  const nextSeq = (): number =>
+    Number(
+      db.all<{ value: string }>("SELECT value FROM app_meta WHERE key = 'change_counter'")[0]!
+        .value,
+    ) + 1;
+  const setCounter = (seq: number) =>
+    db.run("UPDATE app_meta SET value = ? WHERE key = 'change_counter'", String(seq));
+  const takeSeq = (): number => {
+    const seq = nextSeq();
+    setCounter(seq);
+    return seq;
+  };
 
   const fromRow = (row: Row): StoredProfile | null => {
     let definition: unknown;
@@ -66,30 +93,33 @@ export function createProfileStore(
       revision: row.revision,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      ...(row.conflict_copy ? { conflictCopy: true } : {}),
     });
     return parsed.success ? parsed.data : null;
   };
 
   const readRow = (id: string): Row | undefined =>
-    db.all<Row>(`SELECT ${COLUMNS} FROM profiles WHERE id = ?`, id)[0];
+    db.all<Row>(`SELECT ${READ_COLUMNS} FROM profiles WHERE id = ?`, id)[0];
 
+  /** Inside the caller's transaction. */
   const insert = (profile: Profile): StoredProfile => {
     const id = randomUUID();
     const at = now().toISOString();
     db.run(
-      `INSERT INTO profiles (${COLUMNS}) VALUES (?, ?, 1, ?, ?, ?)`,
+      `INSERT INTO profiles (${COLUMNS}, change_seq) VALUES (?, ?, 1, ?, ?, ?, ?)`,
       id,
       profile.name,
       definitionOf(profile),
       at,
       at,
+      takeSeq(),
     );
     return { ...profile, id, revision: 1, createdAt: at, updatedAt: at };
   };
 
   return {
     list() {
-      const rows = db.all<Row>(`SELECT ${COLUMNS} FROM profiles ORDER BY name COLLATE NOCASE`);
+      const rows = db.all<Row>(`SELECT ${READ_COLUMNS} FROM profiles ORDER BY name COLLATE NOCASE`);
       const profiles: StoredProfile[] = [];
       for (const row of rows) {
         const profile = fromRow(row);
@@ -112,7 +142,7 @@ export function createProfileStore(
 
     create(profile) {
       try {
-        return { kind: "ok", profile: insert(profile) };
+        return { kind: "ok", profile: db.transaction(() => insert(profile)) };
       } catch (error) {
         if (isUniqueViolation(error)) return { kind: "name_taken" };
         throw error;
@@ -124,15 +154,23 @@ export function createProfileStore(
       let changes: number;
       try {
         // One statement: the revision check and the write cannot be split (spec, edge cases).
-        ({ changes } = db.run(
-          `UPDATE profiles SET name = ?, definition = ?, revision = revision + 1, updated_at = ?
-           WHERE id = ? AND revision = ?`,
-          profile.name,
-          definitionOf(profile),
-          at,
-          id,
-          revision,
-        ));
+        // The counter moves only when it wrote; a save clears the conflict-copy mark (PD28).
+        changes = db.transaction(() => {
+          const seq = nextSeq();
+          const written = db.run(
+            `UPDATE profiles SET name = ?, definition = ?, revision = revision + 1, updated_at = ?,
+               change_seq = ?, conflict_copy = 0
+             WHERE id = ? AND revision = ?`,
+            profile.name,
+            definitionOf(profile),
+            at,
+            seq,
+            id,
+            revision,
+          ).changes;
+          if (written > 0) setCounter(seq);
+          return written;
+        });
       } catch (error) {
         if (isUniqueViolation(error)) return { kind: "name_taken" };
         throw error;
@@ -146,24 +184,41 @@ export function createProfileStore(
     },
 
     remove(id) {
-      return db.run("DELETE FROM profiles WHERE id = ?", id).changes > 0;
+      return db.transaction(() => {
+        const [row] = db.all<{ name: string; revision: number; cloud_revision: number | null }>(
+          "SELECT name, revision, cloud_revision FROM profiles WHERE id = ?",
+          id,
+        );
+        if (!row) return false;
+        const seq = takeSeq();
+        // PD14: the cloud always records a delete; a local install only when the cloud ever
+        // held the row, at the revision they last matched.
+        const revision = mode === "hosted" ? row.revision : row.cloud_revision;
+        if (revision !== null) {
+          db.run(
+            `INSERT OR REPLACE INTO profile_tombstones (id, name, revision, deleted_at, change_seq)
+             VALUES (?, ?, ?, ?, ?)`,
+            id,
+            row.name,
+            revision,
+            now().toISOString(),
+            seq,
+          );
+        }
+        db.run("DELETE FROM profiles WHERE id = ?", id);
+        return true;
+      });
     },
 
     importAll(profiles) {
-      db.exec("BEGIN IMMEDIATE");
-      try {
+      return db.transaction(() => {
         const taken = db.all<{ name: string }>("SELECT name FROM profiles").map((r) => r.name);
-        const stored = profiles.map((profile) => {
+        return profiles.map((profile) => {
           const name = nextFreeName(profile.name, taken);
           taken.push(name);
           return insert({ ...profile, name });
         });
-        db.exec("COMMIT");
-        return stored;
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
+      });
     },
   };
 }

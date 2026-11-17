@@ -25,6 +25,23 @@ export class Db {
     return this.#db.prepare(sql).all(...params) as T[];
   }
 
+  /**
+   * Runs `fn` inside `BEGIN IMMEDIATE` … `COMMIT`, or `ROLLBACK` when it throws (B-12 T3). Inside
+   * a transaction already open it runs `fn` in that one, so writes compose into one commit.
+   */
+  transaction<T>(fn: () => T): T {
+    if (this.#db.isTransaction) return fn();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = fn();
+      this.#db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   close(): void {
     this.#db.close();
   }

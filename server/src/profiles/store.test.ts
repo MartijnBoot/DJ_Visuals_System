@@ -198,6 +198,24 @@ describe("importAll (AC10, SD7, PD12)", () => {
     expect(renamed?.name).toBe(`${"x".repeat(56)} (2)`);
   });
 
+  it("leaves the change counter unchanged when the third insert fails (B-12 T3)", () => {
+    created();
+    const before = counter();
+    let calls = 0;
+    const failing = createProfileStore(db, { warn }, () => {
+      if (++calls === 3) throw new Error("disk full");
+      return new Date();
+    });
+    expect(() =>
+      failing.importAll([
+        { ...warm, name: "A" },
+        { ...warm, name: "B" },
+        { ...warm, name: "C" },
+      ]),
+    ).toThrow("disk full");
+    expect(counter()).toBe(before);
+  });
+
   it("stores none when the third insert fails", () => {
     created();
     let calls = 0;
@@ -213,5 +231,141 @@ describe("importAll (AC10, SD7, PD12)", () => {
       ]),
     ).toThrow("disk full");
     expect(store.list().map((p) => p.name)).toEqual(["Warm"]);
+  });
+});
+
+// B-12 T3 (PD14, PD28, AC8, AC16): every write bumps the change counter and stamps its row in
+// the same transaction; a delete leaves a tombstone where PD14 says; an update clears the
+// conflict-copy mark.
+function counter(): number {
+  const [row] = db.all<{ value: string }>(
+    "SELECT value FROM app_meta WHERE key = 'change_counter'",
+  );
+  return Number(row!.value);
+}
+
+interface SyncRow {
+  change_seq: number;
+  cloud_revision: number | null;
+  pushed_seq: number;
+  conflict_copy: number;
+}
+
+function syncRow(id: string): SyncRow | undefined {
+  return db.all<SyncRow>(
+    "SELECT change_seq, cloud_revision, pushed_seq, conflict_copy FROM profiles WHERE id = ?",
+    id,
+  )[0];
+}
+
+interface Tombstone {
+  id: string;
+  name: string;
+  revision: number;
+  deleted_at: string;
+  change_seq: number;
+}
+
+const tombstones = () =>
+  db.all<Tombstone>("SELECT id, name, revision, deleted_at, change_seq FROM profile_tombstones");
+
+describe("the change counter (B-12 T3, PD14)", () => {
+  it("starts at 0 on a fresh database", () => {
+    expect(counter()).toBe(0);
+  });
+
+  it("create, update, delete and import each raise it by one per row and stamp the row", () => {
+    const a = created();
+    expect(counter()).toBe(1);
+    expect(syncRow(a.id)).toEqual({
+      change_seq: 1,
+      cloud_revision: null,
+      pushed_seq: 0,
+      conflict_copy: 0,
+    });
+    store.update(a.id, { ...warm, name: "Warmer" }, 1);
+    expect(counter()).toBe(2);
+    expect(syncRow(a.id)?.change_seq).toBe(2);
+    const imported = store.importAll([
+      { ...warm, name: "I1" },
+      { ...warm, name: "I2" },
+    ]);
+    expect(counter()).toBe(4);
+    expect(imported.map((p) => syncRow(p.id)?.change_seq)).toEqual([3, 4]);
+    store.remove(a.id);
+    expect(counter()).toBe(5);
+  });
+
+  it("is not raised by a refused write", () => {
+    const a = created();
+    created({ ...warm, name: "Cool" });
+    const before = counter();
+    expect(store.update(a.id, warm, 7).kind).toBe("stale");
+    expect(store.update(a.id, { ...warm, name: "cool" }, 1)).toEqual({ kind: "name_taken" });
+    expect(store.create({ ...warm, name: "COOL" })).toEqual({ kind: "name_taken" });
+    expect(store.update("nope", warm, 1)).toEqual({ kind: "missing" });
+    expect(store.remove("nope")).toBe(false);
+    expect(counter()).toBe(before);
+  });
+});
+
+describe("delete tombstones (B-12 T3, PD14)", () => {
+  it("hosted: a delete writes a tombstone with the row's revision and the delete's counter", () => {
+    const hosted = createProfileStore(db, { warn }, () => new Date((clock += 1000)), {
+      mode: "hosted",
+    });
+    const a = created();
+    hosted.update(a.id, warm, 1);
+    expect(hosted.remove(a.id)).toBe(true);
+    expect(tombstones()).toEqual([
+      {
+        id: a.id,
+        name: "Warm",
+        revision: 2,
+        deleted_at: "2026-11-12T10:00:03.000Z",
+        change_seq: 3,
+      },
+    ]);
+  });
+
+  it("local: a delete of a row that never matched the cloud writes none", () => {
+    const a = created();
+    expect(store.remove(a.id)).toBe(true);
+    expect(tombstones()).toEqual([]);
+    expect(counter()).toBe(2);
+  });
+
+  it("local: a delete of a row that matched the cloud writes one with its cloud revision", () => {
+    const a = created();
+    store.update(a.id, warm, 1);
+    db.run("UPDATE profiles SET cloud_revision = 5 WHERE id = ?", a.id);
+    expect(store.remove(a.id)).toBe(true);
+    expect(tombstones()).toMatchObject([{ id: a.id, revision: 5, change_seq: 3 }]);
+  });
+
+  it("a delete whose tombstone insert throws leaves the row in place and the counter as it was", () => {
+    const hosted = createProfileStore(db, { warn }, () => new Date(), { mode: "hosted" });
+    const a = created();
+    db.exec(
+      "CREATE TRIGGER refuse BEFORE INSERT ON profile_tombstones BEGIN SELECT RAISE(ABORT, 'refused'); END",
+    );
+    expect(() => hosted.remove(a.id)).toThrow("refused");
+    expect(store.get(a.id).kind).toBe("ok");
+    expect(counter()).toBe(1);
+  });
+});
+
+describe("the conflict-copy mark (B-12 T3, PD28)", () => {
+  it("shows as conflictCopy: true only when set, and an update clears it", () => {
+    const a = created();
+    expect(store.get(a.id)).toEqual({ kind: "ok", profile: a });
+    expect(a).not.toHaveProperty("conflictCopy");
+    db.run("UPDATE profiles SET conflict_copy = 1 WHERE id = ?", a.id);
+    const marked = store.get(a.id);
+    expect(marked.kind === "ok" && marked.profile.conflictCopy).toBe(true);
+    expect(store.list()[0]?.conflictCopy).toBe(true);
+    const saved = store.update(a.id, warm, 1);
+    expect(saved.kind === "ok" && saved.profile).not.toHaveProperty("conflictCopy");
+    expect(syncRow(a.id)?.conflict_copy).toBe(0);
   });
 });

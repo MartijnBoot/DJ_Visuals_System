@@ -114,7 +114,7 @@ export async function boot(
     // Both are public values: the browser's sign-in needs them (PD8). Never the subject.
     signIn: config.signIn && { issuer: config.signIn.issuer, clientId: config.signIn.clientId },
   });
-  registerProfiles(app, createProfileStore(db, log));
+  registerProfiles(app, createProfileStore(db, log, undefined, { mode: config.APP_MODE }));
   // External control (B-04): the screen socket on this listener, the device socket on each LAN
   // instance. The screen socket's `maxPayload` sits above its message limit, so an oversized
   // message is dropped with a warn rather than closing the socket (AC33); `ws` closes beyond it.
