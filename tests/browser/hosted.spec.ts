@@ -11,7 +11,11 @@ import { startHostedCloud, type HostedCloud } from "./hosted-server.ts";
 const MARKER = "#3c1d2e";
 
 let hosted: HostedCloud | undefined;
-const evidence = { console: [] as string[], bodies: [] as string[] };
+const evidence = {
+  console: [] as string[],
+  bodies: [] as string[],
+  reading: [] as Promise<void>[],
+};
 
 const look = (name: string) => ({
   name,
@@ -27,10 +31,16 @@ async function setup(context: BrowserContext, options: { lifetime?: number } = {
   evidence.bodies = [];
   context.on("console", (message) => evidence.console.push(message.text()));
   context.on("weberror", (error) => evidence.console.push(String(error.error())));
-  context.on("response", async (response) => {
+  evidence.reading = [];
+  context.on("response", (response) => {
     if (!response.url().startsWith(origin)) return;
     if (!/json|html|javascript|text/.test(response.headers()["content-type"] ?? "")) return;
-    evidence.bodies.push(await response.text().catch(() => ""));
+    evidence.reading.push(
+      response
+        .text()
+        .catch(() => "")
+        .then((body) => void evidence.bodies.push(body)),
+    );
   });
   return hosted;
 }
@@ -47,9 +57,14 @@ test.afterEach(async () => {
     subject,
     FAKE_EMAIL,
   ];
-  for (const token of issued.idTokens) expect(token).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
+  expect(issued.idTokens.length).toBeGreaterThan(0);
+  expect(issued.refreshTokens.length).toBeGreaterThan(0);
+  expect(issued.codes.length).toBeGreaterThan(0);
+  for (const token of issued.idTokens) expect(token).toMatch(/^[\w-]+\.[\w-]+\.[\w-]{40,}$/);
+  for (const token of issued.refreshTokens) expect(token).toMatch(/^fake-refresh-[0-9a-f]{32}$/);
   for (const code of issued.codes) expect(code).toMatch(/^fake-code-[0-9a-f]{24}$/);
   expect(subject.length).toBeGreaterThan(8);
+  await Promise.all(evidence.reading); // a body still being read is scanned too
   const logs = hosted.cloud.lines;
   for (const text of [...logs, ...evidence.console, ...evidence.bodies]) {
     for (const secret of secrets) expect(text).not.toContain(secret);

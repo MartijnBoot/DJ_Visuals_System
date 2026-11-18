@@ -18,7 +18,13 @@ every deploy; the newest 14 nightly copies are kept (`djvisuals-backup.timer`).
 3. Start: `sudo systemctl start djvisuals`.
 4. Check `https://<domain>/api/health` answers `"status":"ok"`; sign in and the profiles are
    there.
-5. Connected local installs push what they hold that the cloud lost on their next sync.
+5. Connected local installs do **not** yet resync correctly after a restore (D-12,
+   `docs/specs/defect-register.md`): the restore moves the cloud's change counter back, so an
+   install's cursor is ahead of it and it misses the cloud's next writes, and profiles it had
+   already pushed since the copy are not pushed again. Until D-12 is fixed, on each connected
+   install press "Disconnect from cloud" before its next sync and leave it disconnected (a
+   reconnect resumes the same cursor); move what the cloud lacks by hand: "Export all" in the
+   install's builder, then "Import" in the hosted builder.
 
 ## Rebuild a reclaimed or lost VM (AC32, H9)
 

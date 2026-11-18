@@ -265,7 +265,11 @@ function guardProfiles(app: App, signIn: SignInSettings, log: Logger): void {
     log,
   });
   app.addHook("onRequest", async (request, reply) => {
-    if (!isGuardedPath(request.url.split("?")[0]!)) return;
+    // Decided on the route the router matched (it decodes `%70`, drops `#…`, reads an
+    // absolute-form target), not only on the raw URL, which those forms would slip past.
+    const route = request.routeOptions.url;
+    const raw = request.url.split(/[?#]/)[0]!;
+    if (!isGuardedPath(raw) && (route === undefined || !isGuardedPath(route))) return;
     const refusal = await guard.check(request.ip, request.headers.authorization);
     if (refusal) await reply.code(refusal.status).send(refusal.body);
   });

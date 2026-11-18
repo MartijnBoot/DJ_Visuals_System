@@ -32,4 +32,6 @@ migration: migrations are forward-only; the database goes back with the pre-depl
 9. Write the rehearsal or incident record in [rehearsals/](rehearsals/).
 
 Profile edits made on the cloud between the bad deploy and the rollback are lost with the
-restore; a local install that synced them pushes them again on its next sync.
+restore, and a local install that synced them does **not** push them again by itself (D-12,
+`docs/specs/defect-register.md`); follow step 5 of [restore.md](restore.md) for each connected
+install.

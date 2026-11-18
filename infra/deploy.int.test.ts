@@ -190,6 +190,27 @@ describe("a release whose migration fails (AC30)", () => {
   });
 });
 
+describe("a re-run of a failed deploy of the same commit (review finding 5)", () => {
+  it("takes a fresh backup and deploys, after a failed migration and after a failed health check", async () => {
+    const dir = release("new", "ok", [
+      "0004_extra.sql",
+      "INSERT INTO no_such_table (x) VALUES (1);\n",
+    ]);
+    expect(await run("new")).toMatchObject({ ok: false, step: "migrate" });
+    writeFileSync(join(dir, "health.txt"), "fail");
+    writeFileSync(
+      join(dir, "server", "migrations", "0004_extra.sql"),
+      "CREATE TABLE extra (id INTEGER PRIMARY KEY);\n",
+    );
+    expect(await run("new")).toMatchObject({ ok: false, step: "health", rolledBack: true });
+    writeFileSync(join(dir, "health.txt"), "ok");
+    expect(await run("new")).toEqual({ ok: true });
+    expect(basename(currentRelease(root)!)).toBe("new");
+    expect(tables(database)).toContain("extra");
+    expect(tables(join(root, "backups", "pre-new.sqlite"))).not.toContain("extra");
+  });
+});
+
 describe("old releases (PD23)", () => {
   it("a sixth deploy prunes the oldest; five stay", async () => {
     const start = Date.now() + 60_000;

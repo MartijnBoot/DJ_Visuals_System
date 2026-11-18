@@ -84,14 +84,22 @@ export async function runSync(deps: SyncDeps): Promise<SyncResult> {
     }
   }
 
-  async function request(method: string, path: string, body?: unknown): Promise<Answer> {
+  /** Before every outgoing request, the renewal's included: a set may have started (AC9). */
+  function mayGoOn(): void {
     if (deps.mayContinue && !deps.mayContinue()) throw new Stop("paused", "set_running");
+  }
+
+  async function request(method: string, path: string, body?: unknown): Promise<Answer> {
+    mayGoOn();
     const token = await deps.signin.idToken();
     if (token.kind !== "token") throw new Stop(token.kind, "token");
+    mayGoOn();
     let answer = await send(method, path, token.token, body);
     if (answer.status === 401) {
+      mayGoOn();
       const renewed = await deps.signin.renew();
       if (renewed.kind !== "token") throw new Stop(renewed.kind, "renewal");
+      mayGoOn();
       answer = await send(method, path, renewed.token, body);
       if (answer.status === 401) {
         deps.signin.rejected(); // a token just renewed and still refused: signed out (PD20)

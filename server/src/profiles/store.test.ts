@@ -428,6 +428,15 @@ describe("the cloud's sync writes (B-12 T6, PD17)", () => {
     });
   });
 
+  it("answers a repeat of a push it took under another name as ok, not stale (AC16, review finding 2)", () => {
+    okProfile(put("a", { ...warm, name: "Set" }, 0));
+    const taken = okProfile(put("b", { ...warm, name: "Set" }, 0));
+    expect(taken.name).toBe("Set (2)");
+    const before = counter();
+    expect(put("b", { ...warm, name: "Set" }, 0)).toEqual({ kind: "ok", profile: taken });
+    expect(counter()).toBe(before);
+  });
+
   it("names an arrival by nextFreeName when another id holds its name (AC15)", () => {
     okProfile(put("a", { ...warm, name: "Set" }, 0));
     expect(okProfile(put("b", { ...warm, name: "set" }, 0)).name).toBe("set (2)");

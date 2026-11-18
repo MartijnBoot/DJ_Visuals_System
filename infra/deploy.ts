@@ -139,7 +139,12 @@ export async function deploy(options: DeployOptions): Promise<DeployResult> {
       if (!existsSync(release)) throw new Error("release folder missing");
     });
     // (1) and (2): the old release keeps running; nothing has changed if either fails (AC30).
-    await attempt("backup", () => steps.snapshot(release, backup));
+    // A copy left by an earlier failed attempt of this commit is stale: that attempt's migration
+    // rolled itself back or its backup was restored, so the database now is the one to keep.
+    await attempt("backup", async () => {
+      rmSync(backup, { force: true });
+      await steps.snapshot(release, backup);
+    });
     await attempt("migrate", () => steps.migrate(release));
   } catch (error) {
     const step = error instanceof StepFailed ? error.step : "unknown";

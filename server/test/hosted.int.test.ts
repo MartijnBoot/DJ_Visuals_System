@@ -133,6 +133,54 @@ describe("refused tokens (AC1, AC3)", () => {
   });
 });
 
+/** One request with a raw request target, as a client that does not normalise it would send. */
+function rawCall(method: string, target: string): Promise<number> {
+  const { hostname, port } = new URL(base);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { hostname, port, method, path: target, headers: { "x-forwarded-for": nextAddress() } },
+      (res) => {
+        res.resume();
+        res.on("end", () => resolve(res.statusCode ?? 0));
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+describe("a path the router decodes is still behind the guard (AC1, review finding 1)", () => {
+  it("answers 401 to encoded, fragment and absolute-form paths, and changes nothing", async () => {
+    const keep = await call("POST", "/api/profiles", good(), { ...warm, name: "Keep encoded" });
+    const { id } = (await keep.json()) as { id: string };
+    const before = await profileCount();
+    const routes: [string, string, unknown?][] = [
+      ["GET", "/api/%70rofiles"],
+      ["GET", "/%61pi/profiles"],
+      ["GET", "/api/profile%73"],
+      ["HEAD", "/api/%70rofiles"],
+      ["POST", "/api/%70rofiles", { ...warm, name: "Intruder" }],
+      ["GET", `/api/%70rofiles/${id}`],
+      ["PUT", `/api/%70rofiles/${id}`, { ...warm, name: "Changed", revision: 1 }],
+      ["DELETE", `/api/%70rofiles/${id}`],
+      ["POST", "/api/%70rofiles/import", toProfileFile([{ ...warm, name: "Imported" }])],
+      ["GET", "/api/%73ync/full?limit=50"],
+      ["GET", "/api/%73ync/changes?cursor=0&limit=50"],
+      ["DELETE", `/api/%73ync/profiles/${id}?baseRevision=1`],
+    ];
+    for (const [method, path, body] of routes) {
+      const response = await call(method, path, undefined, body);
+      expect(response.status, `${method} ${path}`).toBe(401);
+    }
+    for (const target of ["/api/profiles#x", `${base}/api/profiles`, `${base}/api/%70rofiles`]) {
+      expect(await rawCall("GET", target), `GET ${target}`).toBe(401);
+    }
+    expect(await rawCall("DELETE", `/api/profiles/${id}#x`), "DELETE …#x").toBe(401);
+    expect(await profileCount()).toBe(before);
+    expect((await call("GET", `/api/profiles/${id}`, good())).status).toBe(200);
+  });
+});
+
 describe("another subject (AC2)", () => {
   it("gets 403 on every profile route, changes nothing, and no log line holds its subject", async () => {
     const before = await profileCount();

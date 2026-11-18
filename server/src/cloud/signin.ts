@@ -179,6 +179,14 @@ export function createSignin(deps: SigninDeps): Signin {
           refresh_token: file.refreshToken,
         });
         if (tokens === "offline") return { kind: "offline" };
+        // Disconnected, or connected afresh, while this request was out: its answer is about a
+        // session that no longer exists, so it neither writes nor revokes (AC24).
+        const latest = deps.store.read();
+        if (latest.kind !== "connected" || latest.refreshToken !== file.refreshToken) {
+          const state = signin.state();
+          if (state === "connected" && idToken !== null) return { kind: "token", token: idToken };
+          return { kind: state === "connected" ? "offline" : state };
+        }
         if (tokens === "refused") {
           signin.rejected();
           return { kind: "signed_out" };

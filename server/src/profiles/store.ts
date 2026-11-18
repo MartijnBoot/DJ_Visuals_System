@@ -517,7 +517,8 @@ export function createProfileStore(
           const current = fromRow(row);
           if (!current) return { kind: "unusable" };
           // A repeat of a push the cloud already took, whose answer was lost: harmless (AC16).
-          const repeat = row.name === profile.name && row.definition === definitionOf(profile);
+          // Compared under the name the cloud gave it, which may be "Name (2)" (AC15).
+          const repeat = row.name === name && row.definition === definitionOf(profile);
           return repeat ? { kind: "ok", profile: current } : { kind: "stale", current };
         }
         if (row) {

@@ -157,6 +157,28 @@ describe("the ID token on demand (PD9, PD20)", () => {
     expect(await signin.idToken()).toEqual({ kind: "not_connected" });
   });
 
+  it("a disconnect while a renewal is in flight stays disconnected (AC24, review finding 3)", async () => {
+    const signin = await connected();
+    const renewal = signin.renew();
+    signin.disconnect();
+    expect(await renewal).toEqual({ kind: "not_connected" });
+    expect(store.read()).toEqual({ kind: "none" });
+    expect(signin.state()).toBe("not_connected");
+    expect(await signin.idToken()).toEqual({ kind: "not_connected" });
+  });
+
+  it("a refusal of the old token does not revoke a session made while it was in flight", async () => {
+    const signin = await connected();
+    fake.refuseRefresh = true;
+    const renewal = signin.renew();
+    store.write("fresh-refresh-token-of-a-new-connect");
+    expect((await renewal).kind).not.toBe("signed_out");
+    expect(store.read()).toEqual({
+      kind: "connected",
+      refreshToken: "fresh-refresh-token-of-a-new-connect",
+    });
+  });
+
   it("never logs a code, a token or a refresh token (AC26)", async () => {
     const signin = await connected();
     now += 3600_000;
