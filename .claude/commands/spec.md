@@ -1,7 +1,7 @@
 ---
 description: Interview me about a phase or feature, then write its spec
 argument-hint: [phase id, e.g. 3 or b-07]
-model: claude-fable-5-2
+model: opus
 ---
 
 Write the spec for: **$ARGUMENTS**
