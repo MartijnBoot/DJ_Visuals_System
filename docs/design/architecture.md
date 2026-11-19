@@ -419,7 +419,8 @@ media passes it.
   covers those.
 - **Render scale** (SD8). The engine estimates the display's refresh rate once from the median
   interval of its first 60 frames, snapped to the nearest standard rate. It renders into two
-  ping-pong 8-bit RGBA targets at canvas size x scale and blits up with linear filtering. The
+  ping-pong 8-bit RGBA targets at canvas size x scale and draws up with linear filtering (a
+  draw that samples the target, never a blit to the canvas: D-14). The
   scale steps 100 -> 75 -> 50% after 2 s with the one-second mean frame time above 1.1 x the
   refresh period, and back up one step after 10 s not above it; a step up undone within 10 s
   doubles the next wait (to 80 s at most). The panel's quality cap bounds the maximum; the
