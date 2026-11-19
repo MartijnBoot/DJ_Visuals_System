@@ -2,6 +2,7 @@
 // the fake issuer in this process. Each refused request comes from its own forwarded address, so
 // the rate limit (tested on its own below) never decides a case.
 import { toProfileFile, type Profile } from "@djv/shared";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
@@ -246,7 +247,7 @@ describe("nothing of External control (AC4, PD10)", () => {
             connection: "Upgrade",
             upgrade: "websocket",
             "sec-websocket-version": "13",
-            "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+            "sec-websocket-key": randomBytes(16).toString("base64"),
             origin: base,
           },
         });
