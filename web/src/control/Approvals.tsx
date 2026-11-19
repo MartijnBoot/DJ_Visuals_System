@@ -6,7 +6,6 @@
 // AC8): "<hint> — Device n wants to send video" (or "audio", "video and audio").
 import type { DeviceEntry } from "@djv/shared";
 import { useEffect, useRef } from "react";
-import { styles } from "./styles.ts";
 
 export interface ApprovalsProps {
   pending: readonly DeviceEntry[];
@@ -24,18 +23,18 @@ export function requestText(entry: Pick<DeviceEntry, "hint" | "label" | "sends">
 
 export function ApprovalList({ pending, disabled, onAccept, onReject }: ApprovalsProps) {
   return (
-    <ul data-testid="approvals" style={{ ...styles.list, display: "grid", gap: 8 }}>
+    <ul data-testid="approvals" className="djv-list">
       {pending.map((entry) => (
-        <li key={entry.deviceId} data-device-id={entry.deviceId} style={styles.request}>
-          <span data-testid="approval-text" style={{ flex: "1 1 160px" }}>
+        <li key={entry.deviceId} data-device-id={entry.deviceId} className="djv-request">
+          <span data-testid="approval-text" className="djv-request-text">
             {requestText(entry)}
           </span>
-          <span style={{ display: "flex", gap: 8 }}>
+          <span className="djv-row">
             <button
               type="button"
               data-testid="approve"
               disabled={disabled}
-              style={styles.button}
+              className="djv-key"
               onClick={() => onAccept(entry.deviceId)}
             >
               Accept
@@ -44,7 +43,7 @@ export function ApprovalList({ pending, disabled, onAccept, onReject }: Approval
               type="button"
               data-testid="refuse"
               disabled={disabled}
-              style={styles.button}
+              className="djv-key"
               onClick={() => onReject(entry.deviceId)}
             >
               Reject
@@ -83,15 +82,11 @@ export function WaitingBadge(
       <dialog
         ref={dialog}
         aria-label="Devices waiting for approval"
-        style={styles.dialog}
+        className="djv-dialog"
         onClose={() => props.onOpen(false)}
       >
         <ApprovalList {...props} />
-        <button
-          type="button"
-          style={{ ...styles.button, marginTop: 12, width: "100%" }}
-          onClick={() => props.onOpen(false)}
-        >
+        <button type="button" className="djv-key djv-close" onClick={() => props.onOpen(false)}>
           Close
         </button>
       </dialog>

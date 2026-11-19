@@ -1,9 +1,11 @@
-// B-19 T6 (spec SD4, SD10, SD11, AC16, AC17, AC19, AC21; plan PD10, PD11): the pinned status bar
-// on a real `/control` — its colour by the link's group, its text at least 4.5:1 on it — and DJ
-// mode's waiting badge in it, against the in-process server.
+// B-19 T6, T7 (spec SD4, SD8, SD10, SD11, AC11, AC16, AC17, AC19, AC20, AC21; plan PD10, PD11):
+// the look of a real `/control` against the in-process server — the pinned status bar coloured by
+// the link's group with its text at least 4.5:1 on it, DJ mode's waiting badge in it, the active
+// choices marked by more than colour, a focus ring on every control, and the wheel by keyboard.
 import {
   expect,
   test,
+  type APIRequestContext,
   type Browser,
   type BrowserContext,
   type BrowserContextOptions,
@@ -12,18 +14,27 @@ import {
 } from "@playwright/test";
 import { contrast } from "../contrast.ts";
 import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-server.ts";
+import { createProfile, flat } from "./fixtures/profiles.ts";
+import { start } from "./helpers.ts";
+import { remote, type Remote } from "./remote-fixtures.ts";
 
 const PHONE = { width: 320, height: 568 };
 
 let server: ControlServer;
+let api: APIRequestContext;
+let r: Remote;
 const contexts: BrowserContext[] = [];
 
-test.beforeEach(async () => {
+test.beforeEach(async ({ playwright }) => {
   server = await startControlServer();
+  api = await playwright.request.newContext({ baseURL: server.origin });
+  r = remote(server);
 });
 
 test.afterEach(async () => {
   for (const c of contexts.splice(0)) await c.close();
+  await r.dispose();
+  await api.dispose();
   await server.dispose();
 });
 
@@ -192,4 +203,176 @@ test("in DJ mode the waiting badge is in the status bar, opens the approvals and
   await phone.getByTestId("approve").click();
   await expect(second.getByTestId("profile-tile").first()).toBeEnabled();
   await expect(phone.getByTestId("waiting-badge")).toHaveCount(0);
+});
+
+/**
+ * A started screen with two profiles, a remote sender of video and audio (so main audio and a
+ * second camera tile show) and a real `/control` paired from the panel, in VJ mode.
+ */
+async function everything(page: Page, browser: Browser): Promise<Page> {
+  await createProfile(api, flat("Second", "#336699"));
+  const { code, url } = await r.screen(page);
+  await r.pairedSender(page, code, ["video", "audio"]);
+  const phone = await r.phone(page, browser, url);
+  await start(page);
+  await expect(phone.getByTestId("main-audio")).toBeVisible();
+  await expect(phone.getByTestId("camera-tile")).toHaveCount(2, { timeout: 20_000 });
+  await expect(phone.getByTestId("camera-tile").first()).toBeEnabled();
+  await phone.getByTestId("mode-vj").click();
+  return phone;
+}
+
+const look = (locator: Locator) =>
+  locator.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { border: s.borderTopWidth, weight: s.fontWeight, background: s.backgroundColor };
+  });
+
+test("the active profile, camera, mode and main audio are marked by more than colour, the mark 3:1 against an inactive tile (AC20)", async ({
+  page,
+  browser,
+}) => {
+  const phone = await everything(page, browser);
+  const groups: [string, Locator][] = [
+    ["profile", phone.getByTestId("profile-tile")],
+    ["camera", phone.getByTestId("camera-tile")],
+    ["mode", phone.getByRole("group", { name: "Mode" }).getByRole("button")],
+    ["main audio", phone.getByTestId("main-audio").getByRole("button")],
+  ];
+  for (const [name, all] of groups) {
+    const active = all.and(phone.locator('[aria-pressed="true"]'));
+    const inactive = all.and(phone.locator('[aria-pressed="false"]')).first();
+    await expect(active, name).toHaveCount(1);
+    const lit = await look(active);
+    const rest = await look(inactive);
+    // More than colour: the edge is three times heavier and the type heavier (the brief).
+    expect(lit.border, name).toBe("3px");
+    expect(rest.border, name).toBe("1px");
+    expect(Number(lit.weight), name).toBeGreaterThan(Number(rest.weight));
+    expect(contrast(lit.background, rest.background), name).toBeGreaterThanOrEqual(3);
+  }
+});
+
+/** What the focused element shows: its ring, and the colour the ring lands on. */
+const focusRing = (phone: Page) =>
+  phone.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el || el === document.body) return null;
+    const s = getComputedStyle(el);
+    const opaque = (c: string) => c !== "transparent" && !/rgba\(.*,\s*0\)$/.test(c);
+    const reach = parseFloat(s.outlineOffset) + parseFloat(s.outlineWidth);
+    // A ring drawn inside lands on the element; one outside on what is behind it.
+    let behind: Element | null = reach <= 0 ? el : el.parentElement;
+    let background = "rgb(0, 0, 0)";
+    while (behind) {
+      const c = getComputedStyle(behind).backgroundColor;
+      if (opaque(c)) {
+        background = c;
+        break;
+      }
+      behind = behind.parentElement;
+    }
+    return {
+      what: el.dataset.testid ?? el.getAttribute("aria-label") ?? el.textContent?.slice(0, 30),
+      style: s.outlineStyle,
+      width: parseFloat(s.outlineWidth),
+      colour: s.outlineColor,
+      background,
+    };
+  });
+
+type Ring = NonNullable<Awaited<ReturnType<typeof focusRing>>>;
+
+/** Tabs forward until the focus comes round again; every element it rested on, in order. */
+async function tabThrough(phone: Page, max: number): Promise<Ring[]> {
+  const seen: Ring[] = [];
+  for (let i = 0; i < max; i++) {
+    await phone.keyboard.press("Tab");
+    const ring = await focusRing(phone);
+    if (!ring) continue;
+    const index = await phone.evaluate(() => {
+      const w = window as unknown as { __tabbed?: Element[] };
+      w.__tabbed ??= [];
+      const at = w.__tabbed.indexOf(document.activeElement!);
+      if (at < 0) w.__tabbed.push(document.activeElement!);
+      return at;
+    });
+    if (index >= 0) break;
+    seen.push(ring);
+  }
+  await phone.evaluate(() => delete (window as unknown as { __tabbed?: Element[] }).__tabbed);
+  return seen;
+}
+
+test("every control shows a focus ring 3:1 against its surroundings, the wheel's too (AC21)", async ({
+  page,
+  browser,
+}) => {
+  const phone = await everything(page, browser);
+  const seen = await tabThrough(phone, 80);
+  expect(seen.map((s) => s.what)).toEqual(
+    expect.arrayContaining([
+      "mode-dj",
+      "profile-tile",
+      "refresh",
+      "camera-tile",
+      "main-audio-remote",
+      "primary-colour",
+      "swatch",
+      "dial-recognisability",
+      "dial-reactivity",
+    ]),
+  );
+  for (const ring of seen) {
+    expect(ring.style, ring.what).toBe("solid");
+    expect(ring.width, ring.what).toBeGreaterThanOrEqual(2);
+    expect(contrast(ring.colour, ring.background), ring.what).toBeGreaterThanOrEqual(3);
+  }
+
+  await phone.locator('[data-testid=swatch][data-slot="0"]').click();
+  await expect(phone.getByTestId("wheel")).toBeVisible();
+  const inWheel = await tabThrough(phone, 12);
+  expect(inWheel.map((s) => s.what)).toEqual(
+    expect.arrayContaining(["wheel-disc", "wheel-brightness", "wheel-reset", "wheel-done"]),
+  );
+  for (const ring of inWheel) {
+    expect(ring.style, ring.what).toBe("solid");
+    expect(contrast(ring.colour, ring.background), ring.what).toBeGreaterThanOrEqual(3);
+  }
+});
+
+test("the wheel works by keyboard alone: disc, brightness, Reset and Done as before (AC11)", async ({
+  page,
+  browser,
+}) => {
+  const phone = await everything(page, browser);
+  const swatch = phone.locator('[data-testid=swatch][data-slot="1"]');
+  const stored = (await swatch.getAttribute("data-colour"))!;
+  await swatch.focus();
+  await phone.keyboard.press("Enter");
+  await expect(phone.getByTestId("wheel")).toHaveAttribute("data-slot", "1");
+  const current = phone.getByTestId("wheel-current");
+  const focusOn = async (id: string) => {
+    for (let i = 0; i < 12; i++) {
+      if (await phone.getByTestId(id).evaluate((el) => el === document.activeElement)) return;
+      await phone.keyboard.press("Tab");
+    }
+    await expect(phone.getByTestId(id)).toBeFocused();
+  };
+  await focusOn("wheel-disc");
+  for (let i = 0; i < 6; i++) await phone.keyboard.press("ArrowUp"); // more saturation
+  await phone.keyboard.press("ArrowRight"); // another hue
+  await expect(current).not.toHaveAttribute("data-colour", stored);
+  const disc = (await current.getAttribute("data-colour"))!;
+  await focusOn("wheel-brightness");
+  await phone.keyboard.press("PageDown");
+  await expect(current).not.toHaveAttribute("data-colour", disc);
+  await expect(swatch).toHaveAttribute("data-colour", (await current.getAttribute("data-colour"))!);
+  await focusOn("wheel-reset");
+  await phone.keyboard.press("Enter");
+  await expect(current).toHaveAttribute("data-colour", stored);
+  await expect(swatch).toHaveAttribute("data-colour", stored);
+  await focusOn("wheel-done");
+  await phone.keyboard.press("Enter");
+  await expect(phone.getByTestId("wheel")).toHaveCount(0);
 });

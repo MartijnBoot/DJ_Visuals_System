@@ -15,7 +15,6 @@ import {
   pointToHueSat,
   type Hsv,
 } from "./wheel-math.ts";
-import { styles } from "./styles.ts";
 
 export interface WheelProps {
   slot: number;
@@ -55,15 +54,6 @@ function drawDisc(canvas: HTMLCanvasElement, v: number) {
   }
   g.putImageData(image, 0, 0);
 }
-
-const swatch = (colour: string) =>
-  ({
-    width: 56,
-    height: 56,
-    borderRadius: 8,
-    border: "2px solid #fff",
-    background: colour,
-  }) as const;
 
 export function Wheel(props: WheelProps) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -115,11 +105,11 @@ export function Wheel(props: WheelProps) {
       data-testid="wheel"
       data-slot={props.slot}
       aria-label={`Colour ${props.slot + 1}`}
-      style={styles.dialog}
+      className="djv-dialog"
       onClose={props.onDone}
     >
-      <div style={{ display: "grid", gap: 12, justifyItems: "center" }}>
-        <div style={{ position: "relative", width: "min(240px, 70vw)", aspectRatio: "1" }}>
+      <div className="djv-wheel">
+        <div className="djv-disc">
           <canvas
             ref={disc}
             data-testid="wheel-disc"
@@ -128,7 +118,7 @@ export function Wheel(props: WheelProps) {
             tabIndex={0}
             role="application"
             aria-label="Hue and saturation: arrow keys move hue left and right, saturation up and down"
-            style={{ width: "100%", height: "100%", touchAction: "none", borderRadius: "50%" }}
+            className="djv-disc-canvas"
             onPointerDown={(e) => {
               if (props.disabled) return;
               e.currentTarget.setPointerCapture(e.pointerId);
@@ -155,21 +145,14 @@ export function Wheel(props: WheelProps) {
           />
           <span
             aria-hidden
+            className="djv-marker"
             style={{
-              position: "absolute",
               left: `${50 + (marker.x / SIZE) * 100}%`,
               top: `${50 + (marker.y / SIZE) * 100}%`,
-              width: 16,
-              height: 16,
-              margin: -8,
-              borderRadius: "50%",
-              border: "2px solid #fff",
-              boxShadow: "0 0 0 2px #000",
-              pointerEvents: "none",
             }}
           />
         </div>
-        <div style={{ width: "100%" }}>
+        <div className="djv-wheel-fader">
           <Fader
             testId="wheel-brightness"
             label="Brightness"
@@ -178,33 +161,35 @@ export function Wheel(props: WheelProps) {
             onSend={(v) => change({ ...hsv, v }, true)}
           />
         </div>
-        <div style={styles.row}>
-          <span style={{ display: "grid", gap: 4, justifyItems: "center" }}>
+        <div className="djv-row">
+          <span className="djv-pair">
             <span
               data-testid="wheel-current"
               data-colour={props.current}
-              style={swatch(props.current)}
+              className="djv-pair-swatch"
+              style={{ background: props.current }}
             />
             on screen
           </span>
-          <span style={{ display: "grid", gap: 4, justifyItems: "center" }}>
+          <span className="djv-pair">
             <span
               data-testid="wheel-stored"
               data-colour={props.stored}
-              style={swatch(props.stored)}
+              className="djv-pair-swatch"
+              style={{ background: props.stored }}
             />
             stored
           </span>
-          <span data-testid="wheel-value" style={styles.note}>
+          <span data-testid="wheel-value" className="djv-note">
             {value}
           </span>
         </div>
-        <div style={styles.row}>
+        <div className="djv-row">
           <button
             type="button"
             data-testid="wheel-reset"
             disabled={props.disabled}
-            style={styles.button}
+            className="djv-key"
             onClick={() => {
               setHsv(hexToHsv(props.stored));
               props.onReset();
@@ -215,7 +200,7 @@ export function Wheel(props: WheelProps) {
           <button
             type="button"
             data-testid="wheel-done"
-            style={styles.active}
+            className="djv-key is-lit"
             onClick={() => dialog.current?.close()}
           >
             Done

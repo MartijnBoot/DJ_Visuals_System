@@ -8,7 +8,9 @@
 // locked (SD12), and the page shows the screen's state, never its own guess (SD5). Remote input
 // (B-06 SD8, AC14, AC20, AC24): a sender's camera tile carries a remote mark and, like every tile,
 // waits for Start; "Main audio: laptop / screen machine" shows while an audio sender is approved.
-// No control for the screen machine's input or System audio.
+// No control for the screen machine's input or System audio. The look is the style brief's
+// (`docs/design/controller-style.md`), in `controller.css`; inline styles only for data-driven
+// values (B-19 SD8, SD11).
 import type { ScreenState } from "@djv/shared";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
@@ -18,7 +20,6 @@ import { Wheel } from "./Wheel.tsx";
 import { useArrangement } from "./arrangement.ts";
 import { createDeviceLink, LINK_GROUP, openSocket, type DeviceLink } from "./device-link.ts";
 import { keyStore, modeStore, type Mode } from "./remembered.ts";
-import { styles } from "./styles.ts";
 // The controller's look (B-19 PD2): a <style> inside this page's own root, never a linked file,
 // so no other route has a rule of it and none requests anything new.
 import css from "./controller.css?inline";
@@ -126,13 +127,13 @@ export function Controller() {
       <div data-testid="control-scroll" className="djv-scroll">
         {asking && (
           <form
-            style={styles.row}
+            className="djv-row"
             onSubmit={(e) => {
               e.preventDefault();
               link.submitCode(code);
             }}
           >
-            <label style={styles.row}>
+            <label className="djv-row">
               Code
               <input
                 data-testid="code-input"
@@ -141,24 +142,24 @@ export function Controller() {
                 autoCapitalize="characters"
                 autoComplete="off"
                 spellCheck={false}
-                style={styles.input}
+                className="djv-code"
                 onChange={(e) => setCode(e.target.value)}
               />
             </label>
-            <button type="submit" data-testid="code-submit" style={styles.button}>
+            <button type="submit" data-testid="code-submit" className="djv-key">
               Connect
             </button>
           </form>
         )}
 
-        <div style={styles.row} role="group" aria-label="Mode">
+        <div className="djv-row" role="group" aria-label="Mode">
           {(["dj", "vj"] as const).map((m) => (
             <button
               key={m}
               type="button"
               data-testid={`mode-${m}`}
               aria-pressed={mode === m}
-              style={mode === m ? styles.active : styles.button}
+              className="djv-key djv-mode"
               onClick={() => choose(m)}
             >
               {m === "dj" ? "DJ" : "VJ"}
@@ -168,25 +169,25 @@ export function Controller() {
 
         {state && (
           <>
-            <section aria-label="Profiles" style={{ display: "grid", gap: 8 }}>
-              <div style={styles.row}>
-                <h2 style={styles.heading}>Profile</h2>
+            <section aria-label="Profiles" className="djv-section">
+              <div className="djv-row">
+                <h2 className="djv-legend">Profile</h2>
                 <button
                   type="button"
                   data-testid="refresh"
                   disabled={locked}
-                  style={styles.button}
+                  className="djv-key"
                   onClick={() => link.send({ type: "refresh" })}
                 >
                   Refresh
                 </button>
               </div>
               {state.reason && (
-                <div data-testid="controller-reason" style={styles.note}>
+                <div data-testid="controller-reason" className="djv-note">
                   {state.reason}
                 </div>
               )}
-              <div style={styles.grid}>
+              <div className="djv-grid">
                 {state.profiles.map((p) => (
                   <button
                     key={p.id}
@@ -195,7 +196,7 @@ export function Controller() {
                     data-profile-id={p.id}
                     aria-pressed={p.id === state.activeId}
                     disabled={locked}
-                    style={p.id === state.activeId ? styles.activeTile : styles.tile}
+                    className="djv-key djv-tile"
                     onClick={() => link.send({ type: "pick", id: p.id })}
                   >
                     {p.name}
@@ -204,14 +205,14 @@ export function Controller() {
               </div>
             </section>
 
-            <section aria-label="Camera" style={{ display: "grid", gap: 8 }}>
-              <h2 style={styles.heading}>Camera</h2>
+            <section aria-label="Camera" className="djv-section">
+              <h2 className="djv-legend">Camera</h2>
               {!state.started && (
-                <div data-testid="camera-note" style={styles.note}>
+                <div data-testid="camera-note" className="djv-note">
                   Start on the screen machine
                 </div>
               )}
-              <div style={styles.grid}>
+              <div className="djv-grid">
                 {state.cameras.map((c, i) => (
                   <button
                     key={c.deviceId || i}
@@ -220,12 +221,12 @@ export function Controller() {
                     data-camera-id={c.deviceId}
                     aria-pressed={c.deviceId === state.cameraId}
                     disabled={locked || !state.started}
-                    style={c.deviceId === state.cameraId ? styles.activeTile : styles.tile}
+                    className="djv-key djv-tile"
                     onClick={() => link.send({ type: "camera", deviceId: c.deviceId })}
                   >
                     {c.label || `Camera ${i + 1}`}
                     {c.remote && (
-                      <span data-testid="remote-mark" style={{ marginLeft: 6, fontSize: 12 }}>
+                      <span data-testid="remote-mark" className="djv-remote">
                         · remote
                       </span>
                     )}
@@ -235,13 +236,9 @@ export function Controller() {
             </section>
 
             {state.mainAudio && (
-              <section
-                aria-label="Main audio"
-                data-testid="main-audio"
-                style={{ display: "grid", gap: 8 }}
-              >
-                <div style={styles.row}>
-                  <h2 style={styles.heading}>Main audio</h2>
+              <section aria-label="Main audio" data-testid="main-audio" className="djv-section">
+                <div className="djv-row">
+                  <h2 className="djv-legend">Main audio</h2>
                   {MAIN_AUDIO.map(([source, label]) => (
                     <button
                       key={source}
@@ -249,41 +246,38 @@ export function Controller() {
                       data-testid={`main-audio-${source}`}
                       aria-pressed={state.mainAudio?.choice === source}
                       disabled={locked}
-                      style={state.mainAudio?.choice === source ? styles.active : styles.button}
+                      className="djv-key"
                       onClick={() => link.send({ type: "mainAudio", source })}
                     >
                       {label}
                     </button>
                   ))}
                 </div>
-                <div data-testid="main-audio-line" style={styles.note}>
+                <div data-testid="main-audio-line" className="djv-note">
                   {mainAudioLine(state.mainAudio)}
                 </div>
               </section>
             )}
 
-            <section aria-label="Colour" style={styles.row}>
-              <button
-                type="button"
-                data-testid="primary-colour"
-                disabled={locked}
-                style={{ ...styles.button, display: "flex", gap: 8, alignItems: "center" }}
-                onClick={() => setWheel(state.primary)}
-              >
-                <span
-                  aria-hidden
-                  data-testid="primary-swatch"
-                  data-colour={state.palette[state.primary]}
-                  style={{
-                    width: 24,
-                    height: 24,
-                    borderRadius: 4,
-                    border: "1px solid #fff",
-                    background: state.palette[state.primary],
-                  }}
-                />
-                Primary colour
-              </button>
+            <section aria-label="Colour" className="djv-section">
+              <div className="djv-row">
+                <button
+                  type="button"
+                  data-testid="primary-colour"
+                  disabled={locked}
+                  className="djv-key djv-colour-key"
+                  onClick={() => setWheel(state.primary)}
+                >
+                  <span
+                    aria-hidden
+                    data-testid="primary-swatch"
+                    data-colour={state.palette[state.primary]}
+                    className="djv-chip"
+                    style={{ background: state.palette[state.primary] }}
+                  />
+                  Primary colour
+                </button>
+              </div>
             </section>
 
             {mode === "vj" && (

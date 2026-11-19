@@ -341,8 +341,9 @@
   text-align: center;
 }
 
-/* The focus ring (SD11, AC21): white outside a black halo, 3:1 wherever it lands. */
-.djv-control .djv-fader-slider:focus-visible {
+/* ---- The focus ring (SD11, AC21): every control, white outside a black halo, 3:1 wherever it
+   lands. The waiting badge draws it inside (above). ---- */
+.djv-control :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
   box-shadow: 0 0 0 2px var(--focus-halo);
@@ -358,4 +359,223 @@
 }
 .djv-control .djv-fader-slider[aria-disabled="true"] .djv-fader-fill {
   background: var(--fill-locked);
+}
+
+/* ---- Sections: framed blocks with a legend printed on the panel ---- */
+.djv-control .djv-section {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-panel);
+}
+.djv-control .djv-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.djv-control .djv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-2);
+}
+.djv-control .djv-note {
+  font-size: var(--fs-note);
+  line-height: 18px;
+  color: var(--text-muted);
+}
+.djv-control .djv-section.djv-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-4);
+  font-size: var(--fs-note);
+  line-height: 18px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.djv-control .djv-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+.djv-control .djv-request {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+}
+.djv-control .djv-request-text {
+  flex: 1 1 160px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Keys and tiles; the lit key is the active mark (AC20): a light surface, a 3 px edge
+   instead of 1 px, and heavier type — more than colour ---- */
+.djv-control .djv-key {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  min-width: var(--target);
+  min-height: var(--target);
+  padding: 8px 14px;
+  font: 600 var(--fs-body) / 20px var(--font);
+  color: var(--text);
+  background: var(--key);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-key);
+  cursor: pointer;
+}
+.djv-control .djv-key[aria-pressed="true"],
+.djv-control .djv-key.is-lit {
+  padding: 6px 12px;
+  font-weight: 800;
+  color: var(--on-select);
+  background: var(--select);
+  border: 3px solid var(--text);
+}
+.djv-control .djv-key:disabled {
+  color: var(--text-disabled);
+  border-style: dashed;
+  cursor: default;
+}
+.djv-control .djv-key[aria-pressed="true"]:disabled {
+  color: var(--on-select);
+}
+.djv-control .djv-mode {
+  min-width: 72px;
+}
+.djv-control .djv-tile {
+  min-width: 0;
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.djv-control .djv-remote {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.djv-control .djv-key[aria-pressed="true"] .djv-remote {
+  color: var(--on-select);
+}
+.djv-control .djv-key.djv-close {
+  width: 100%;
+}
+.djv-control .djv-colour-key {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+.djv-control .djv-chip {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+  border-radius: 4px;
+  border: 1px solid var(--text);
+}
+.djv-control .djv-swatch {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 2px solid var(--text-muted);
+  border-radius: var(--radius-key);
+  cursor: pointer;
+}
+.djv-control .djv-swatch.is-primary {
+  border: 4px solid var(--select);
+}
+.djv-control .djv-swatch:disabled {
+  border-style: dashed;
+  cursor: default;
+}
+.djv-control .djv-code {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  width: 8em;
+  min-height: var(--target);
+  padding: 8px 12px;
+  font: 600 var(--fs-body) / 20px var(--font);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-key);
+}
+
+/* ---- Dialogs (approvals, colour wheel): the page behind dimmed ---- */
+.djv-control .djv-dialog {
+  box-sizing: border-box;
+  max-width: min(480px, calc(100vw - 32px));
+  padding: var(--space-4);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-dialog);
+  font: var(--fs-body) / 20px var(--font);
+}
+.djv-control .djv-dialog[open] {
+  display: grid;
+  gap: var(--space-3);
+}
+.djv-control .djv-dialog::backdrop {
+  background: rgb(0 0 0 / 72%);
+}
+.djv-control .djv-wheel {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: center;
+}
+.djv-control .djv-disc {
+  position: relative;
+  width: min(240px, 70vw);
+  aspect-ratio: 1;
+}
+.djv-control .djv-disc-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  border-radius: 50%;
+}
+.djv-control .djv-marker {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 2px #000000;
+  pointer-events: none;
+}
+.djv-control .djv-wheel-fader {
+  width: 100%;
+}
+.djv-control .djv-pair {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  font-size: var(--fs-note);
+}
+.djv-control .djv-pair-swatch {
+  width: 56px;
+  height: 56px;
+  box-sizing: border-box;
+  border-radius: var(--radius-key);
+  border: 2px solid var(--text-muted);
 }
