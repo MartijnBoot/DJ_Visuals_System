@@ -203,9 +203,16 @@ Text pairs need at least 4.5:1, non-text pairs at least 3:1 (SD11). The table is
 | N13 | `--stop` | `--bg` | 3 | 3.48 | Status bar, stop, against the page |
 | N14 | `--cap-locked` | `--track` | 3 | 4.58 | Locked cap against its track |
 | N15 | `--cap-locked` | `--hatch` | 3 | 3.82 | Locked cap against the hatching |
+| N16 | `--focus-halo` | `--attention` | 3 | 10.09 | Focus ring's halo on the waiting badge, inside the attention bar |
+| N17 | `--focus` | `--stop` | 3 | 5.62 | Focus ring on the waiting badge, inside the stop bar |
 
-The waiting badge is only enabled — and so only focusable — while the link is live, so its ring
-lands on the ok bar (N9). A disabled key's text is not held to 4.5:1 (WCAG 1.4.3 exempts inactive
+The waiting badge is never disabled: the lock disables only Accept and Reject, and the pending list
+lasts until pairing ends (`web/src/control/device-link.ts:122`), so the badge stays focusable
+while the bar reads "Reconnecting…" or "Screen not connected". Its ring can land on any of the
+three bar colours. On the ok bar (N9) and the stop bar (N17) the white ring carries the contrast. On
+the attention bar the white ring is only 2.08:1, so the black halo carries it (N16). This is the
+two-tone ring of the focus-ring part above. The lock must not disable the badge to avoid this case
+(SD10 and SD13: behaviour unchanged). A disabled key's text is not held to 4.5:1 (WCAG 1.4.3 exempts inactive
 controls); it still reads at 3.13:1 on `--key`.
 
 ## Budget (SD6, SD9, AC12, AC16)
