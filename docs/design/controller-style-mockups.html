@@ -1,0 +1,1378 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Controller style — mockups (B-19)</title>
+    <style>
+      /* ---- Page chrome: only for looking at the mockups; not part of the look. ---- */
+      html {
+        background: #3a3d42;
+        color: #e8e8e8;
+        font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+          sans-serif;
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+      }
+      .mock-intro {
+        max-width: 720px;
+      }
+      .mock-intro h1 {
+        font-size: 22px;
+        margin: 0 0 8px;
+      }
+      .mock-toc a {
+        color: #9fd8ff;
+      }
+      .mock-group {
+        margin: 32px 0;
+      }
+      .mock-group > h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+      }
+      .mock-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 24px;
+        align-items: flex-start;
+      }
+      .mock-frame {
+        margin: 0;
+      }
+      .mock-frame figcaption {
+        font-size: 13px;
+        margin: 0 0 6px;
+        max-width: 320px;
+        color: #d4d4d4;
+      }
+      .mock-screen {
+        position: relative;
+        overflow: hidden;
+        box-shadow:
+          0 0 0 1px #000,
+          0 0 0 5px #1d1f22;
+      }
+      .mock-320x568 {
+        width: 320px;
+        height: 568px;
+      }
+      .mock-568x320 {
+        width: 568px;
+        height: 320px;
+      }
+      .mock-768x1024 {
+        width: 768px;
+        height: 1024px;
+      }
+      /* The page itself is position: fixed, inset 0; a frame stands in for the viewport. */
+      .mock-screen > .djv-control {
+        position: absolute;
+        inset: 0;
+      }
+      .mock-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.72);
+      }
+      .mock-dialog {
+        position: absolute;
+        left: 16px;
+        right: 16px;
+        top: 40px;
+      }
+      /* The real disc is a canvas drawn pixel by pixel; this only suggests it. */
+      .mock-disc {
+        position: relative;
+        width: 240px;
+        height: 240px;
+        margin: 0 auto;
+        border-radius: 50%;
+        background:
+          radial-gradient(circle closest-side, #fff, rgba(255, 255, 255, 0)),
+          conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+      }
+      .mock-marker {
+        position: absolute;
+        left: 72%;
+        top: 30%;
+        width: 16px;
+        height: 16px;
+        margin: -8px;
+        border-radius: 50%;
+        border: 2px solid #fff;
+        box-shadow: 0 0 0 2px #000;
+      }
+      .mock-bars.djv-control {
+        display: grid;
+        gap: 8px;
+        width: 320px;
+        padding: 8px;
+        box-sizing: border-box;
+      }
+      .mock-bars.djv-control > .djv-status {
+        grid-area: auto;
+      }
+
+      /* ---- The look: tokens (docs/design/controller-style.md, same names). ---- */
+      .djv-control {
+        --bg: #0b0c0e;
+        --panel: #15181c;
+        --line-soft: #2e343c;
+        --line: #69727e;
+        --key: #23272e;
+        --text: #eef1f4;
+        --text-muted: #a3acb7;
+        --text-disabled: #6b737e;
+        --select: #3db8f5;
+        --on-select: #04141c;
+        --ok: #1a7f45;
+        --on-ok: #ffffff;
+        --attention: #f0a500;
+        --on-attention: #120d00;
+        --stop: #c62828;
+        --on-stop: #ffffff;
+        --track: #191c21;
+        --hatch: #262b32;
+        --fill: #3db8f5;
+        --cap: #e6e9ed;
+        --cap-line: #0b0c0e;
+        --cap-locked: #7d8590;
+        --fill-locked: #4a525c;
+        --focus: #ffffff;
+        --focus-halo: #000000;
+
+        --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        --fs-body: 16px;
+        --fs-note: 14px;
+        --fs-legend: 12px;
+        --fs-label: 13px;
+        --fs-readout: 18px;
+        --target: 48px;
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --radius-key: 6px;
+        --radius-panel: 8px;
+        --radius-dialog: 10px;
+        --radius-track: 4px;
+        --radius-cap: 3px;
+        --bar-min: 48px;
+        --fader-cross: 56px;
+        --fader-edge: 2px;
+        --cap-along: 22px;
+        --cap-across: 30px;
+        --groove: 6px;
+        --label-band: 18px;
+        --readout-band: 22px;
+        --bank-legend: 16px;
+        --bank-gap: 6px;
+        --bank-pad-block: 6px;
+        --bank-pad-inline: 8px;
+
+        display: grid;
+        overflow: hidden;
+        color: var(--text);
+        background: var(--bg);
+        font: var(--fs-body) / 20px var(--font);
+      }
+
+      /* ---- The shell: pinned bar, scrolling middle, pinned bank (PD3: keyed off the root). ---- */
+      .djv-control[data-arrangement="horizontal"] {
+        grid-template:
+          "bar" auto
+          "scroll" minmax(0, 1fr)
+          "bank" auto
+          / minmax(0, 1fr);
+      }
+      .djv-control[data-arrangement="vertical"] {
+        grid-template:
+          "bar bar" auto
+          "scroll bank" minmax(0, 1fr)
+          / minmax(0, 1fr) auto;
+      }
+
+      /* ---- Status bar ---- */
+      .djv-control .djv-status {
+        grid-area: bar;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-height: var(--bar-min);
+        box-sizing: border-box;
+        padding: 6px 0 6px var(--space-3);
+        font-weight: 700;
+      }
+      .djv-control .djv-status[data-link-group="ok"] {
+        background: var(--ok);
+        color: var(--on-ok);
+      }
+      .djv-control .djv-status[data-link-group="attention"] {
+        background: var(--attention);
+        color: var(--on-attention);
+      }
+      .djv-control .djv-status[data-link-group="stop"] {
+        background: var(--stop);
+        color: var(--on-stop);
+      }
+      .djv-control .djv-status-text {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding-right: var(--space-3);
+        overflow-wrap: anywhere;
+      }
+      .djv-control .djv-badge {
+        -webkit-appearance: none;
+        appearance: none;
+        flex: none;
+        align-self: stretch;
+        margin: -6px 0;
+        white-space: nowrap;
+        min-width: var(--target);
+        min-height: var(--bar-min);
+        padding: 0 var(--space-3);
+        font: 800 var(--fs-body) / 20px var(--font);
+        color: var(--attention);
+        background: var(--bg);
+        border: 2px solid var(--attention);
+        border-radius: 0;
+        cursor: pointer;
+      }
+
+      /* ---- Scrolling middle ---- */
+      .djv-control .djv-scroll {
+        grid-area: scroll;
+        min-width: 0;
+        min-height: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        padding: var(--space-2);
+        display: grid;
+        gap: var(--space-2);
+        align-content: start;
+      }
+      .djv-control .djv-section {
+        display: grid;
+        gap: var(--space-2);
+        min-width: 0;
+        padding: 10px;
+        background: var(--panel);
+        border: 1px solid var(--line-soft);
+        border-radius: var(--radius-panel);
+      }
+      .djv-control .djv-legend {
+        margin: 0;
+        font: 700 var(--fs-legend) / 16px var(--font);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+      }
+      .djv-control .djv-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        align-items: center;
+      }
+      .djv-control .djv-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: var(--space-2);
+      }
+      .djv-control .djv-note {
+        font-size: var(--fs-note);
+        line-height: 18px;
+        color: var(--text-muted);
+      }
+      .djv-control .djv-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px var(--space-4);
+        font-size: var(--fs-note);
+        line-height: 18px;
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .djv-control .djv-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: var(--space-2);
+      }
+      .djv-control .djv-request {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      /* ---- Keys and tiles; the lit key is the active mark (AC20) ---- */
+      .djv-control .djv-key {
+        -webkit-appearance: none;
+        appearance: none;
+        box-sizing: border-box;
+        min-width: var(--target);
+        min-height: var(--target);
+        padding: 8px 14px;
+        font: 600 var(--fs-body) / 20px var(--font);
+        color: var(--text);
+        background: var(--key);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-key);
+        cursor: pointer;
+      }
+      .djv-control .djv-key[aria-pressed="true"],
+      .djv-control .djv-key.is-lit {
+        padding: 6px 12px;
+        font-weight: 800;
+        color: var(--on-select);
+        background: var(--select);
+        border: 3px solid var(--text);
+      }
+      .djv-control .djv-key:disabled {
+        color: var(--text-disabled);
+        border-style: dashed;
+        cursor: default;
+      }
+      .djv-control .djv-key[aria-pressed="true"]:disabled {
+        color: var(--on-select);
+      }
+      .djv-control .djv-mode {
+        min-width: 72px;
+      }
+      .djv-control .djv-tile {
+        min-width: 0;
+        text-align: left;
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+      .djv-control .djv-remote {
+        margin-left: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-muted);
+      }
+      .djv-control .djv-key[aria-pressed="true"] .djv-remote {
+        color: var(--on-select);
+      }
+      .djv-control .djv-colour-key {
+        display: flex;
+        gap: var(--space-2);
+        align-items: center;
+      }
+      .djv-control .djv-chip {
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+        border: 1px solid var(--text);
+      }
+      .djv-control .djv-swatch {
+        -webkit-appearance: none;
+        appearance: none;
+        box-sizing: border-box;
+        width: 56px;
+        height: 56px;
+        padding: 0;
+        border: 2px solid var(--text-muted);
+        border-radius: var(--radius-key);
+        cursor: pointer;
+      }
+      .djv-control .djv-swatch.is-primary {
+        border: 4px solid var(--select);
+      }
+      .djv-control .djv-code {
+        -webkit-appearance: none;
+        appearance: none;
+        box-sizing: border-box;
+        width: 8em;
+        min-height: var(--target);
+        padding: 8px 12px;
+        font: 600 var(--fs-body) / 20px var(--font);
+        letter-spacing: 4px;
+        text-transform: uppercase;
+        color: var(--text);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-key);
+      }
+
+      /* ---- Focus ring (AC21). `.is-focus` only shows it statically in these mockups. ---- */
+      .djv-control :focus-visible,
+      .djv-control .is-focus {
+        outline: 3px solid var(--focus);
+        outline-offset: 2px;
+        box-shadow: 0 0 0 2px var(--focus-halo);
+      }
+
+      /* ---- Dialogs ---- */
+      .djv-control .djv-dialog {
+        box-sizing: border-box;
+        display: grid;
+        gap: var(--space-3);
+        max-width: min(480px, calc(100% - 32px));
+        padding: var(--space-4);
+        color: var(--text);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-dialog);
+      }
+      .djv-control .djv-pair {
+        display: grid;
+        gap: 4px;
+        justify-items: center;
+        font-size: var(--fs-note);
+      }
+      .djv-control .djv-pair > span:first-child {
+        width: 56px;
+        height: 56px;
+        border-radius: var(--radius-key);
+        border: 2px solid var(--text-muted);
+        box-sizing: border-box;
+      }
+
+      /* ---- Fader bank (SD1, SD6) ---- */
+      .djv-control .djv-bank {
+        grid-area: bank;
+        display: flex;
+        flex-direction: column;
+        gap: var(--bank-gap);
+        min-width: 0;
+        min-height: 0;
+        box-sizing: border-box;
+        padding: var(--bank-pad-block) var(--bank-pad-inline);
+        background: var(--panel);
+      }
+      .djv-control[data-arrangement="horizontal"] .djv-bank {
+        border-top: var(--fader-edge) solid var(--line);
+      }
+      .djv-control[data-arrangement="vertical"] .djv-bank {
+        border-left: var(--fader-edge) solid var(--line);
+      }
+      .djv-control .djv-bank-legend {
+        display: flex;
+        align-items: center;
+        height: var(--bank-legend);
+        flex: none;
+      }
+      .djv-control .djv-locked-tag {
+        padding: 0 6px;
+        font: 700 var(--fs-label) / 16px var(--font);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--on-attention);
+        background: var(--attention);
+        border-radius: 3px;
+      }
+      .djv-control .djv-bank-faders {
+        display: flex;
+        flex-direction: column;
+        gap: var(--bank-gap);
+      }
+      .djv-control[data-arrangement="vertical"] .djv-bank-faders {
+        flex: 1 1 auto;
+        flex-direction: row;
+        min-height: 0;
+      }
+
+      /* ---- The fader (SD2, SD7): horizontal by default ---- */
+      .djv-control .djv-fader {
+        position: relative;
+        flex: none;
+        height: var(--fader-cross);
+      }
+      .djv-control .djv-fader-slider {
+        position: absolute;
+        inset: 0;
+        box-sizing: border-box;
+        background: var(--track);
+        border: var(--fader-edge) solid var(--line);
+        border-radius: var(--radius-track);
+        touch-action: none;
+      }
+      .djv-control .djv-fader-slider::before,
+      .djv-control .djv-fader-fill {
+        content: "";
+        position: absolute;
+        left: calc(var(--cap-along) / 2);
+        top: calc(var(--label-band) + (100% - var(--label-band) - var(--groove)) / 2);
+        height: var(--groove);
+        border-radius: 3px;
+      }
+      .djv-control .djv-fader-slider::before {
+        right: calc(var(--cap-along) / 2);
+        background: var(--bg);
+      }
+      .djv-control .djv-fader-fill {
+        width: calc(var(--level) * (100% - var(--cap-along)));
+        background: var(--fill);
+      }
+      .djv-control .djv-fader-cap {
+        position: absolute;
+        box-sizing: border-box;
+        left: calc(var(--level) * (100% - var(--cap-along)));
+        top: calc(var(--label-band) + (100% - var(--label-band) - var(--cap-across)) / 2);
+        width: var(--cap-along);
+        height: var(--cap-across);
+        background: var(--cap);
+        border: 2px solid var(--cap-line);
+        border-radius: var(--radius-cap);
+      }
+      .djv-control .djv-fader-cap::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 2px;
+        bottom: 2px;
+        width: 2px;
+        margin-left: -1px;
+        background: var(--cap-line);
+      }
+      .djv-control .djv-fader-label,
+      .djv-control .djv-fader-readout {
+        position: absolute;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      .djv-control .djv-fader-label {
+        left: 10px;
+        top: 3px;
+        font: 700 var(--fs-label) / 16px var(--font);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+      }
+      .djv-control .djv-fader-readout {
+        right: 10px;
+        top: 2px;
+        font: 700 var(--fs-readout) / 18px var(--font);
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+      }
+
+      /* ---- Vertical faders: only in the bank, only in the vertical arrangement ---- */
+      .djv-control[data-arrangement="vertical"] .djv-bank .djv-fader {
+        height: auto;
+        width: var(--fader-cross);
+      }
+      .djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-slider::before,
+      .djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-fill {
+        left: calc(var(--label-band) + (100% - var(--label-band) - var(--groove)) / 2);
+        width: var(--groove);
+        top: auto;
+        bottom: calc(var(--cap-along) / 2);
+      }
+      .djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-slider::before {
+        right: auto;
+        top: calc(var(--readout-band) + var(--cap-along) / 2);
+        height: auto;
+      }
+      .djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-fill {
+        height: calc(var(--level) * (100% - var(--readout-band) - var(--cap-along)));
+      }
+      .djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-cap {
+        left: calc(var(--label-band) + (100% - var(--label-band) - var(--cap-across)) / 2);
+        top: auto;
+        bottom: calc(var(--level) * (100% - var(--readout-band) - var(--cap-along)));
+        width: var(--cap-across);
+        height: var(--cap-along);
+      }
+      .djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-cap::after {
+        left: 2px;
+        right: 2px;
+        top: 50%;
+        bottom: auto;
+        width: auto;
+        height: 2px;
+        margin: -1px 0 0;
+      }
+      .djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-label {
+        left: 3px;
+        top: auto;
+        bottom: 10px;
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+      }
+      .djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-readout {
+        left: 0;
+        right: 0;
+        top: 4px;
+        text-align: center;
+      }
+
+      /* ---- The locked look (AC18): hatching, dimmed caps, "Locked" ---- */
+      .djv-control .djv-bank.is-locked .djv-fader-slider {
+        background: repeating-linear-gradient(
+          135deg,
+          var(--track) 0 6px,
+          var(--hatch) 6px 12px
+        );
+      }
+      .djv-control .djv-bank.is-locked .djv-fader-cap {
+        background: var(--cap-locked);
+      }
+      .djv-control .djv-bank.is-locked .djv-fader-fill {
+        background: var(--fill-locked);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mock-intro">
+      <h1>Controller style — mockups</h1>
+      <p>
+        B-19, plan task T1. The look of <code>/control</code> from
+        <code>docs/design/controller-style.md</code>, at real CSS pixels. Each frame stands in for
+        the whole screen and scrolls inside itself. On a phone, turn it to landscape to see the
+        568×320 frames at full size. Static: nothing here moves, sends or loads.
+      </p>
+      <p class="mock-toc">
+        <a href="#portrait">Phone portrait</a> · <a href="#landscape">Phone landscape</a> ·
+        <a href="#tablet">Tablet</a> · <a href="#bars">Status bar, every link state</a>
+      </p>
+    </div>
+
+    <!-- ================================================================ Phone portrait -->
+    <section class="mock-group" id="portrait">
+      <h2>Phone portrait, 320×568 — horizontal arrangement</h2>
+      <div class="mock-row">
+        <figure class="mock-frame" id="frame-portrait-dj">
+          <figcaption>DJ mode · Connected · one device waiting (badge in the bar)</figcaption>
+          <div class="mock-screen mock-320x568">
+            <main class="djv-control" data-arrangement="horizontal">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+                <button type="button" class="djv-badge">1 waiting</button>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Neon Grid</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Late-night warehouse strobe, slow build</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Camera</h2>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">USB Camera</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Phone<span class="djv-remote">· remote</span></button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Main audio</h2>
+                    <button type="button" class="djv-key" aria-pressed="true">laptop</button>
+                    <button type="button" class="djv-key" aria-pressed="false">screen machine</button>
+                  </div>
+                  <div class="djv-note">audio: remote (laptop) ok</div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <button type="button" class="djv-key djv-colour-key">
+                      <span class="djv-chip" style="background: #ff3fa4"></span>Primary colour
+                    </button>
+                  </div>
+                </section>
+              </div>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-portrait-vj">
+          <figcaption>VJ mode · Connected · scrolled to the palette and status</figcaption>
+          <div class="mock-screen mock-320x568">
+            <main class="djv-control" data-arrangement="horizontal">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Palette</h2>
+                  <div class="djv-row">
+                    <button type="button" class="djv-swatch is-primary" style="background: #ff3fa4"></button>
+                    <button type="button" class="djv-swatch" style="background: #2b6bff"></button>
+                    <button type="button" class="djv-swatch" style="background: #19d3c5"></button>
+                    <button type="button" class="djv-swatch" style="background: #ffd23f"></button>
+                    <button type="button" class="djv-swatch" style="background: #ffffff"></button>
+                    <button type="button" class="djv-swatch" style="background: #111111"></button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-strip">
+                    <span>camera: on</span><span>audio: remote</span><span>started</span>
+                    <span>link: Connected</span><span>round trip 38 ms / p95 61 ms</span>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Waiting for approval</h2>
+                  <ul class="djv-list">
+                    <li class="djv-request">
+                      <span>Tablet · device 3</span>
+                      <span class="djv-row">
+                        <button type="button" class="djv-key">Accept</button>
+                        <button type="button" class="djv-key">Reject</button>
+                      </span>
+                    </li>
+                  </ul>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                  </div>
+                </section>
+              </div>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-portrait-locked">
+          <figcaption>DJ mode · link dropped: “Reconnecting…”, every control locked</figcaption>
+          <div class="mock-screen mock-320x568">
+            <main class="djv-control" data-arrangement="horizontal">
+              <div class="djv-status" data-link-group="attention">
+                <span class="djv-status-text">Reconnecting…</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key" disabled>Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true" disabled>Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false" disabled>Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false" disabled>Neon Grid</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Camera</h2>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true" disabled>USB Camera</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false" disabled>Phone<span class="djv-remote">· remote</span></button>
+                  </div>
+                </section>
+              </div>
+              <div class="djv-bank is-locked">
+                <div class="djv-bank-legend"><span class="djv-locked-tag">Locked</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-portrait-four">
+          <figcaption>DJ mode · four faders (capacity for B-18; faders 3 and 4 are placeholders) — bank 278 px of 568</figcaption>
+          <div class="mock-screen mock-320x568">
+            <main class="djv-control" data-arrangement="horizontal">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Neon Grid</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Camera</h2>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">USB Camera</button>
+                  </div>
+                </section>
+              </div>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.15">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Fader 3</span>
+                    <span class="djv-fader-readout">15</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 1">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Fader 4</span>
+                    <span class="djv-fader-readout">100</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-portrait-pairing">
+          <figcaption>Opened without a code: the code field; no bank until the screen's state arrives</figcaption>
+          <div class="mock-screen mock-320x568">
+            <main class="djv-control" data-arrangement="horizontal">
+              <div class="djv-status" data-link-group="attention">
+                <span class="djv-status-text">Scan the code on the screen machine</span>
+              </div>
+              <div class="djv-scroll">
+                <form class="djv-row">
+                  <label class="djv-row">Code <input class="djv-code" maxlength="8" autocomplete="off" value="K7Q2" /></label>
+                  <button type="button" class="djv-key">Connect</button>
+                </form>
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">VJ</button>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-portrait-wheel">
+          <figcaption>VJ mode · the colour wheel's dialog, brightness as a fader</figcaption>
+          <div class="mock-screen mock-320x568">
+            <main class="djv-control" data-arrangement="horizontal">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">VJ</button>
+                </div>
+              </div>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+              <div class="mock-backdrop"></div>
+              <div class="djv-dialog mock-dialog">
+                <div class="mock-disc"><span class="mock-marker"></span></div>
+                <div class="djv-fader" style="--level: 0.8">
+                  <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                  <span class="djv-fader-label">Brightness</span>
+                  <span class="djv-fader-readout">80</span>
+                </div>
+                <div class="djv-row">
+                  <span class="djv-pair"><span style="background: #e0328f"></span>on screen</span>
+                  <span class="djv-pair"><span style="background: #ff3fa4"></span>stored</span>
+                  <span class="djv-note">#e0328f</span>
+                </div>
+                <div class="djv-row">
+                  <button type="button" class="djv-key">Reset</button>
+                  <button type="button" class="djv-key is-lit">Done</button>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ================================================================ Phone landscape -->
+    <section class="mock-group" id="landscape">
+      <h2>Phone landscape, 568×320 — vertical arrangement</h2>
+      <div class="mock-row">
+        <figure class="mock-frame" id="frame-landscape-dj">
+          <figcaption>DJ mode · Connected</figcaption>
+          <div class="mock-screen mock-568x320">
+            <main class="djv-control" data-arrangement="vertical">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Neon Grid</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Late-night warehouse strobe, slow build</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Camera</h2>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">USB Camera</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Phone<span class="djv-remote">· remote</span></button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <button type="button" class="djv-key djv-colour-key">
+                      <span class="djv-chip" style="background: #ff3fa4"></span>Primary colour
+                    </button>
+                  </div>
+                </section>
+              </div>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-landscape-vj">
+          <figcaption>VJ mode · Connected</figcaption>
+          <div class="mock-screen mock-568x320">
+            <main class="djv-control" data-arrangement="vertical">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Palette</h2>
+                  <div class="djv-row">
+                    <button type="button" class="djv-swatch is-primary" style="background: #ff3fa4"></button>
+                    <button type="button" class="djv-swatch" style="background: #2b6bff"></button>
+                    <button type="button" class="djv-swatch" style="background: #19d3c5"></button>
+                    <button type="button" class="djv-swatch" style="background: #ffd23f"></button>
+                    <button type="button" class="djv-swatch" style="background: #ffffff"></button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-strip">
+                    <span>camera: on</span><span>audio: remote</span><span>started</span>
+                    <span>link: Connected</span><span>round trip 38 ms / p95 61 ms</span>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Neon Grid</button>
+                  </div>
+                </section>
+              </div>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-landscape-locked">
+          <figcaption>DJ mode · “Reconnecting…”, locked</figcaption>
+          <div class="mock-screen mock-568x320">
+            <main class="djv-control" data-arrangement="vertical">
+              <div class="djv-status" data-link-group="attention">
+                <span class="djv-status-text">Reconnecting…</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key" disabled>Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true" disabled>Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false" disabled>Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false" disabled>Neon Grid</button>
+                  </div>
+                </section>
+              </div>
+              <div class="djv-bank is-locked">
+                <div class="djv-bank-legend"><span class="djv-locked-tag">Locked</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-landscape-four">
+          <figcaption>DJ mode · four faders (capacity for B-18) — bank 260 px of 568</figcaption>
+          <div class="mock-screen mock-568x320">
+            <main class="djv-control" data-arrangement="vertical">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                  </div>
+                </section>
+              </div>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.15">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Fader 3</span>
+                    <span class="djv-fader-readout">15</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 1">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Fader 4</span>
+                    <span class="djv-fader-readout">100</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ================================================================ Tablet -->
+    <section class="mock-group" id="tablet">
+      <h2>Tablet, 768×1024 — vertical arrangement</h2>
+      <div class="mock-row">
+        <figure class="mock-frame" id="frame-tablet-dj">
+          <figcaption>DJ mode · Connected · keyboard focus on Refresh and on a fader (focus rings)</figcaption>
+          <div class="mock-screen mock-768x1024">
+            <main class="djv-control" data-arrangement="vertical">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+                <button type="button" class="djv-badge">1 waiting</button>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key is-focus">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Neon Grid</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Late-night warehouse strobe, slow build</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Mirror Hall</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Ink Bloom</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Camera</h2>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">USB Camera</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Phone<span class="djv-remote">· remote</span></button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Main audio</h2>
+                    <button type="button" class="djv-key" aria-pressed="false">laptop</button>
+                    <button type="button" class="djv-key" aria-pressed="true">screen machine</button>
+                  </div>
+                  <div class="djv-note">audio: local</div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <button type="button" class="djv-key djv-colour-key">
+                      <span class="djv-chip" style="background: #ff3fa4"></span>Primary colour
+                    </button>
+                  </div>
+                </section>
+              </div>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider is-focus"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-tablet-vj">
+          <figcaption>VJ mode · Connected · a device waiting (VJ lists it inline)</figcaption>
+          <div class="mock-screen mock-768x1024">
+            <main class="djv-control" data-arrangement="vertical">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Neon Grid</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Mirror Hall</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Camera</h2>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">USB Camera</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Phone<span class="djv-remote">· remote</span></button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Main audio</h2>
+                    <button type="button" class="djv-key" aria-pressed="true">laptop</button>
+                    <button type="button" class="djv-key" aria-pressed="false">screen machine</button>
+                  </div>
+                  <div class="djv-note">audio: remote (laptop) ok</div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <button type="button" class="djv-key djv-colour-key">
+                      <span class="djv-chip" style="background: #ff3fa4"></span>Primary colour
+                    </button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Palette</h2>
+                  <div class="djv-row">
+                    <button type="button" class="djv-swatch is-primary" style="background: #ff3fa4"></button>
+                    <button type="button" class="djv-swatch" style="background: #2b6bff"></button>
+                    <button type="button" class="djv-swatch" style="background: #19d3c5"></button>
+                    <button type="button" class="djv-swatch" style="background: #ffd23f"></button>
+                    <button type="button" class="djv-swatch" style="background: #ffffff"></button>
+                    <button type="button" class="djv-swatch" style="background: #111111"></button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-strip">
+                    <span>camera: on</span><span>audio: remote</span><span>started</span>
+                    <span>link: Connected</span><span>round trip 38 ms / p95 61 ms</span>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Waiting for approval</h2>
+                  <ul class="djv-list">
+                    <li class="djv-request">
+                      <span>Laptop · device 4</span>
+                      <span class="djv-row">
+                        <button type="button" class="djv-key">Accept</button>
+                        <button type="button" class="djv-key">Reject</button>
+                      </span>
+                    </li>
+                  </ul>
+                </section>
+              </div>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ================================================================ Status bar -->
+    <section class="mock-group" id="bars">
+      <h2>Status bar — every link state, at 320 px</h2>
+      <div class="mock-bars djv-control" id="frame-bars">
+        <div class="djv-status" data-link-group="ok"><span class="djv-status-text">Connected</span></div>
+        <div class="djv-status" data-link-group="ok">
+          <span class="djv-status-text">Connected</span>
+          <button type="button" class="djv-badge">2 waiting</button>
+        </div>
+        <div class="djv-status" data-link-group="attention"><span class="djv-status-text">Scan the code on the screen machine</span></div>
+        <div class="djv-status" data-link-group="attention"><span class="djv-status-text">Connecting…</span></div>
+        <div class="djv-status" data-link-group="attention"><span class="djv-status-text">Waiting for approval</span></div>
+        <div class="djv-status" data-link-group="attention"><span class="djv-status-text">Reconnecting…</span></div>
+        <div class="djv-status" data-link-group="attention"><span class="djv-status-text">Screen not connected</span></div>
+        <div class="djv-status" data-link-group="stop"><span class="djv-status-text">Request rejected</span></div>
+        <div class="djv-status" data-link-group="stop"><span class="djv-status-text">Request expired — try again</span></div>
+        <div class="djv-status" data-link-group="stop"><span class="djv-status-text">Wrong code</span></div>
+        <div class="djv-status" data-link-group="stop"><span class="djv-status-text">Too many devices</span></div>
+        <div class="djv-status" data-link-group="stop"><span class="djv-status-text">Another device is sending audio</span></div>
+        <div class="djv-status" data-link-group="stop">
+          <span class="djv-status-text">Too many wrong codes — try again in a minute</span>
+          <button type="button" class="djv-badge">1 waiting</button>
+        </div>
+        <div class="djv-status" data-link-group="stop"><span class="djv-status-text">Pairing ended — scan the code again</span></div>
+      </div>
+    </section>
+  </body>
+</html>
