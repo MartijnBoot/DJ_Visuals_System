@@ -1,6 +1,6 @@
 # Controller style brief
 
-Status: Draft — awaiting the owner's approval (B-19 plan, H2) · Spec:
+Status: Approved by Martijn Boot on 2026-11-19 (B-19 plan, H2) · Spec:
 [phase-b-19-controller-lighting-desk](../specs/phase-b-19-controller-lighting-desk.md) (SD3, AC1) ·
 Plan: [phase-b-19-controller-lighting-desk](../plans/phase-b-19-controller-lighting-desk.md) (T1) ·
 Mockups: [controller-style-mockups.html](controller-style-mockups.html)

@@ -393,7 +393,7 @@ unchanged).
   a docs branch, as for B-03, B-06 and B-12. `/build` needs a clean tree.
 - **H2 — after T1, before any other task** (AC1, SD3; spec Verification 2). The owner reads
   `docs/design/controller-style.md` and opens the mockups on a phone (portrait and landscape) and
-  a tablet, and approves or returns it. Record here: *Brief approved by ______ on ______.*
+  a tablet, and approves or returns it. Record here: *Brief approved by Martijn Boot on 2026-11-19.*
   Until that line is filled, `/build` starts nothing after T1.
 - **H3 — after T8** (spec Verification 3, the exit condition; AC6, AC12, AC17 and AC20 judged
   by eye). On the screen machine, phone and tablet, in a darkened room at arm's length: pair
