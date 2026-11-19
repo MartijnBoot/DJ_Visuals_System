@@ -90,6 +90,8 @@ export function Builder() {
   }, []);
 
   const entries = [builtinEntry(), ...stored];
+  /** B-12 PD3: copies a sync conflict made, until each is renamed or saved once. */
+  const conflicts = stored.filter((p) => p.conflictCopy).length;
   // The built-in is not stored, but its name is not for a stored profile to take either.
   const takenNames = () => ["Built-in", ...stored.map((p) => p.name)];
   const readOnly = load !== "ready";
@@ -223,6 +225,11 @@ export function Builder() {
           "Profiles unavailable: the server cannot be reached. Only the built-in is shown."}
         {load === "ready" && stored.length === 0 && "No profiles yet. Create one to start."}
       </p>
+      {conflicts > 0 && (
+        <p data-testid="conflict-line" style={{ margin: "0 0 8px", color: "#fc6" }}>
+          {conflicts} conflicts kept as copies
+        </p>
+      )}
       {notice && (
         <p role="alert" data-testid="notice" style={{ color: "#f88" }}>
           {notice}

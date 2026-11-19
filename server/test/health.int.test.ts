@@ -33,14 +33,14 @@ async function bootWith(migrationsDir?: string): Promise<number> {
 }
 
 describe("GET /api/health (AC9)", () => {
-  it("answers 200 with a body that validates against the shared schema, version 2", async () => {
+  it("answers 200 with a body that validates against the shared schema, version 3", async () => {
     const port = await bootWith();
     const response = await fetch(`http://127.0.0.1:${port}/api/health`);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toMatch(/application\/json/);
     const body = healthResponseSchema.parse(await response.json());
     expect(body.status).toBe("ok");
-    expect(body.schemaVersion).toBe(2);
+    expect(body.schemaVersion).toBe(3);
     expect(body.uptimeSeconds).toBeGreaterThanOrEqual(0);
     expect(body.uptimeSeconds).toBeLessThan(30);
   });
@@ -55,6 +55,14 @@ describe("GET /api/health (AC9)", () => {
       await (await fetch(`http://127.0.0.1:${port}/api/health`)).json(),
     );
     expect(body.schemaVersion).toBe(2);
+  });
+
+  it("answers the mode, no cloud and no sign-in for a local install (B-12 PD8)", async () => {
+    const port = await bootWith();
+    const body = healthResponseSchema.parse(
+      await (await fetch(`http://127.0.0.1:${port}/api/health`)).json(),
+    );
+    expect(body).toMatchObject({ mode: "local", cloud: false, signIn: null });
   });
 
   it("logs the request's lines under one reqId", async () => {

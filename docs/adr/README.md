@@ -15,5 +15,6 @@ next number, never reuse one.
 
 | # | Title | Status |
 |---|---|---|
-| [0001](0001-setup-decision-record.md) | Setup Decision Record | Approved; question 2 partly superseded by 0002 |
+| [0001](0001-setup-decision-record.md) | Setup Decision Record | Approved; question 2 partly superseded by 0002; §7's hosting, hosted database, auth and observability rows superseded by 0003 |
 | [0002](0002-remote-input-over-the-lan.md) | Remote input may cross the LAN, opt-in and peer to peer | Accepted |
+| [0003](0003-hosting-on-oracle-synced-profiles.md) | Hosting on Oracle Cloud, profiles synced from local installs | Accepted |

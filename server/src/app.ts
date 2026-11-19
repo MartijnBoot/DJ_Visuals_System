@@ -8,9 +8,38 @@ import type { Logger } from "./log.ts";
  */
 export const BODY_LIMIT = 128 * 1024;
 
-export function createApp(log: Logger) {
-  // Fastify's request id (`reqId`) on every log line belongs to the request (SD17).
-  const app = Fastify({ loggerInstance: log, bodyLimit: BODY_LIMIT });
+export interface AppOptions {
+  /**
+   * The proxy whose `X-Forwarded-For` names the client (B-12 PD11): in hosted mode Caddy on
+   * 127.0.0.1, so `request.ip` is the caller, never the proxy. Absent on a local install.
+   */
+  trustProxy?: string;
+}
+
+/** A request as its log lines show it (B-12 PD12): the path without its query string, so a
+ *  sign-in's `code` and `state` or a sync `cursor` never reach a log line. */
+const requestLine = (req: {
+  method: string;
+  url: string;
+  host?: string;
+  ip?: string;
+  socket?: { remotePort?: number };
+}) => ({
+  method: req.method,
+  url: req.url.split("?")[0],
+  host: req.host,
+  remoteAddress: req.ip,
+  remotePort: req.socket?.remotePort,
+});
+
+export function createApp(log: Logger, { trustProxy }: AppOptions = {}) {
+  // Fastify's request id (`reqId`) on every log line belongs to the request (SD17). A `req`
+  // serializer on the logger handed in replaces Fastify's own.
+  const app = Fastify({
+    loggerInstance: log.child({}, { serializers: { req: requestLine } }),
+    bodyLimit: BODY_LIMIT,
+    ...(trustProxy === undefined ? {} : { trustProxy }),
+  });
 
   // JSON only (B-02 SD18, AC21, plan PD11): a page on another origin cannot write with a simple
   // request, because `text/plain` is not a parser here. Checked before any body is read, so a

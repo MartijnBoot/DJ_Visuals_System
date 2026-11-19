@@ -6,10 +6,11 @@ at 23:00 without the author present.
 
 | Runbook | Covers | Last rehearsed |
 |---|---|---|
-| `deploy.md` | Shipping a tagged artifact to each environment | — |
-| `rollback.md` | Back to the previous artifact, and the target time | — |
-| `restore.md` | A backup into a scratch database, end to end | — |
-| `incident.md` | Detect, declare, mitigate, communicate, resolve, post-mortem | — |
+| [`hosting.md`](hosting.md) | Setting up the cloud: Oracle VM, domain, sign-in provider, bucket, deploy key and its rotation, uptime monitor (B-12) | — |
+| [`deploy.md`](deploy.md) | What a merge to `main` does, and reading a failed deploy (B-12) | — |
+| [`rollback.md`](rollback.md) | Back to the previous release by hand; target 5 minutes (B-12) | — |
+| [`restore.md`](restore.md) | The newest backup into the cloud, and rebuilding a reclaimed VM (B-12) | — (H9) |
+| `incident.md` | Detect, declare, mitigate, communicate, resolve, post-mortem | not written yet |
 
 A rollback that has not been rehearsed does not exist (non-negotiable 13). Every rehearsal leaves
 a record in [rehearsals/](rehearsals/).

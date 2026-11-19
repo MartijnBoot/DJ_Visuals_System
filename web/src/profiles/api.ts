@@ -2,6 +2,9 @@
 // `fetch` like `web/src/health.ts`, sending JSON with its content type, parsing every answer
 // with the shared schemas and returning a result union. None throws: a dead server can never
 // stop the screen.
+// B-12 (PD9, AC21–AC23): in hosted use every request carries the session's ID token, renewed on
+// demand; a 401 renews once and retries once, then the request fails as `signed_out`; a 403 is
+// `not_allowed`. A local install sends no header, as before.
 import {
   conflictErrorSchema,
   invalidErrorSchema,
@@ -13,6 +16,7 @@ import {
   type ProfileFile,
   type StoredProfile,
 } from "@djv/shared";
+import { hostedSession } from "../auth/session.ts";
 
 export type Failure =
   | { kind: "invalid"; issues: Issue[] }
@@ -23,7 +27,11 @@ export type Failure =
   /** An import file with a format version this server does not know (422). */
   | { kind: "unsupported_version" }
   /** The request failed, timed out or the server errored. */
-  | { kind: "unreachable" };
+  | { kind: "unreachable" }
+  /** Hosted: no token, or renewal failed (B-12 PD9). */
+  | { kind: "signed_out" }
+  /** Hosted: the account is not the allowed one (403). */
+  | { kind: "not_allowed" };
 
 export type ListResult = { kind: "ok"; profiles: StoredProfile[] } | Failure;
 export type ProfileResult = { kind: "ok"; profile: StoredProfile } | Failure;
@@ -39,19 +47,42 @@ interface Answer {
   body: unknown;
 }
 
+/** The answer a request refused for want of a token stands for: read as `signed_out`. */
+const SIGNED_OUT: Answer = { status: 401, body: null };
+
 async function call(
   fetchImpl: FetchLike,
   method: string,
   path: string,
   body?: unknown,
 ): Promise<Answer | null> {
+  const session = hostedSession();
+  if (!session) return send(fetchImpl, method, path, body, null);
+  const token = await session.token();
+  if (token === null) return SIGNED_OUT;
+  const answer = await send(fetchImpl, method, path, body, token);
+  if (answer?.status !== 401) return answer;
+  const renewed = await session.renew();
+  return renewed === null ? SIGNED_OUT : send(fetchImpl, method, path, body, renewed);
+}
+
+async function send(
+  fetchImpl: FetchLike,
+  method: string,
+  path: string,
+  body: unknown,
+  token: string | null,
+): Promise<Answer | null> {
+  const headers: Record<string, string> = {
+    ...(body === undefined ? {} : { "content-type": "application/json" }),
+    ...(token === null ? {} : { authorization: `Bearer ${token}` }),
+  };
   try {
     const response = await fetchImpl(path, {
       method,
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      ...(body === undefined
-        ? {}
-        : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      ...(Object.keys(headers).length === 0 ? {} : { headers }),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     let parsed: unknown = null;
     try {
@@ -72,6 +103,8 @@ function failure(answer: Answer): Failure {
     const parsed = invalidErrorSchema.safeParse(body);
     return parsed.success ? { kind: "invalid", issues: parsed.data.issues } : { kind: "unusable" };
   }
+  if (status === 401) return { kind: "signed_out" };
+  if (status === 403) return { kind: "not_allowed" };
   if (status === 404) return { kind: "missing" };
   if (status === 409) {
     const parsed = conflictErrorSchema.safeParse(body);

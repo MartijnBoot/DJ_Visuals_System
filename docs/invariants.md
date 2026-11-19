@@ -30,6 +30,11 @@ breaks; "review only" is honest but is a debt, and the next task near it should 
 | B-04, B-06 | Every control message is validated against `shared/src/control.ts` on receipt; only an approved controller's socket may send a control, and a sender's socket only setup messages (B-04 SD28, B-06 SD6, SD26) | `server/src/control/channel.test.ts`; `server/test/control-screen.int.test.ts`; `server/test/control-device.int.test.ts` (AC17, AC34); `server/test/control-sender.int.test.ts` (B-06 AC9, AC11); `tests/browser/control-e2e.spec.ts` (AC34) |
 | B-06 | The local CA's private keys stay in `DATA_DIR/tls/`: never served, logged or committed (B-06 SD26, AC35) | `tests/meta/tls-boundary.test.ts` (git ignores `data/tls/*.key`; only `server/src/tls/store.ts` names a key file); `server/src/tls/store.test.ts`, `server/test/control-tls.int.test.ts` (no log line holds a key); `tests/browser/remote-e2e.spec.ts` (B-06 AC34: no server or browser log line of a whole run holds a key, an SDP, a candidate, a code, a session key, the User-Agent or a device label) |
 | B-03 | Profile code is GLSL only: it is never evaluated as JavaScript and reaches the browser only through `shaderSource` (B-03 SD1) | ESLint `no-eval`, `no-implied-eval`, `no-new-func` on every file (`eslint.config.js`); `tests/meta/profile-code-boundary.test.ts` (each rule fires in `web/`, `engine/`, `scripts/`; a custom effect's `code` is read only in the shader builder, the program keys and the builder's editor); the `shaderSource` test in `engine/src/index.test.ts` (B-03 T4) |
+| B-12 | A hosted server (`APP_MODE=hosted`) never serves or opens External control, the local CA or a device socket: `/control`, `/send`, `/trust`, `/api/control/*` and every WebSocket upgrade answer 404, no LAN listener starts and `DATA_DIR/tls/` is never created; it still binds `127.0.0.1` only (B-12 AC4, AC27) | `server/test/hosted.int.test.ts`; `server/test/boot.int.test.ts` |
+| B-12 | No token, refresh token, subject, email or authorisation code in a log line, a response body or the browser console; no profile definition in a log line or the console (B-12 AC26, PD13). Request lines log the path without its query | `server/test/secrets.int.test.ts` (a scripted connect, sync, conflict and sign-out); `tests/browser/hosted.spec.ts` (every server line, console message and response body of each test); `server/test/cloud-connect.int.test.ts`, `server/test/hosted.int.test.ts` |
+| B-12 | The local install's refresh token lives only in `DATA_DIR/cloud/session.json`: never served, logged or committed; only `server/src/cloud/session-store.ts` names the file (the `tls-boundary` pattern; B-12 SD15) | `tests/meta/cloud-boundary.test.ts` (git ignores `data/cloud/session.json`; only the store names it); `server/src/cloud/session-store.test.ts` |
+| B-12 | In hosted use a running set requests only `GET /`, `/assets/*`, `/api/health`, `/api/profiles` and `/api/profiles/:id` (the last two only on a user action), opens no socket, and reaches the sign-in provider's token endpoint only within a user's profile action; a local install's sync makes no request while the screen reports `started: true` (B-12 AC9, AC23, SD2) | `tests/browser/hosted.spec.ts` (AC23); `server/test/sync-schedule.int.test.ts` (AC9); `server/src/cloud/scheduler.test.ts` |
+| B-12 | The environment rule above covers `.ts`, `.tsx` and `.js` files; `infra/` shell scripts and systemd units read the VM's env file by design, and `infra/deploy.ts` takes paths as arguments, never the environment | `tests/meta/config-boundary.test.ts` (scans `infra/*.ts` too); review for `infra/*.sh` |
 
 ## Guarded areas
 
@@ -40,9 +45,7 @@ is an owner stop (CLAUDE.md).
 
 | Paths | Extra check (`/verify`) | Guardian (`/review`) | Why |
 |---|---|---|---|
-
-None yet: after Phase 0 the system holds nothing a person made (Phase 0 plan, PD17).
-`.claude/agents/invariant-guardian.md` is left as a template for the day something qualifies.
+| `server/src/auth/` (the bearer check, the allowed subject, the rate limit), and its wiring in `server/src/boot.ts` (`guardProfiles`) and `server/src/rate-window.ts` | `pnpm run test --project unit server/src/auth server/src/rate-window.test.ts` and `pnpm run test --project integration server/test/hosted.int.test.ts server/test/sync-api.int.test.ts` | `invariant-guardian` | The permission matrix of the only internet-facing server: a silent change lets a stranger read or overwrite the owner's profiles (B-12, accepted at the audit 2026-11-17; drafted in T19 for the owner's approval) |
 
 ## Interview probes
 

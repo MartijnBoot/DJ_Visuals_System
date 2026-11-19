@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkHealth } from "./health.ts";
+import { checkHealth, readHealth } from "./health.ts";
 
 const json = (body: unknown, status = 200) =>
   Promise.resolve(
@@ -38,5 +38,39 @@ describe("checkHealth (spec AC12, AC13)", () => {
 
   it("reads unreachable when the body is not JSON", async () => {
     expect(await checkHealth(() => Promise.resolve(new Response("<html>")))).toBe("unreachable");
+  });
+});
+
+describe("readHealth (B-12 PD8)", () => {
+  it("reads the mode, cloud and sign-in settings from /api/health", async () => {
+    const urls: string[] = [];
+    const signIn = { issuer: "https://issuer.example.test", clientId: "c" };
+    const info = await readHealth((input) => {
+      urls.push(String(input));
+      return json({ ...validBody, mode: "hosted", cloud: false, signIn });
+    });
+    expect(info).toEqual({ mode: "hosted", cloud: false, signIn });
+    expect(urls).toEqual(["/api/health"]);
+  });
+
+  it("reads a local install with cloud settings", async () => {
+    const info = await readHealth(() =>
+      json({ ...validBody, mode: "local", cloud: true, signIn: null }),
+    );
+    expect(info).toEqual({ mode: "local", cloud: true, signIn: null });
+  });
+
+  it.each([
+    ["the fetch rejects", () => Promise.reject(new TypeError("Failed to fetch"))],
+    ["status 500", () => json(validBody, 500)],
+    ["a body without the fields", () => json(validBody)],
+    ["a body that is not JSON", () => Promise.resolve(new Response("<html>"))],
+    ["hosted without sign-in settings", () => json({ ...validBody, mode: "hosted", signIn: null })],
+  ])("reads the local page with no cloud row when %s", async (_name, answer) => {
+    expect(await readHealth(answer as typeof fetch)).toEqual({
+      mode: "local",
+      cloud: false,
+      signIn: null,
+    });
   });
 });

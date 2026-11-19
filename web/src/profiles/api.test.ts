@@ -1,6 +1,7 @@
 // T8 (B-02 plan PD10): each status maps to its result, with a fake fetch.
 import type { Profile, StoredProfile } from "@djv/shared";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setHostedSession } from "../auth/session.ts";
 import {
   createProfile,
   deleteProfile,
@@ -157,4 +158,109 @@ describe("delete", () => {
       kind: "missing",
     });
   });
+});
+
+// B-12 T12 (AC21–AC23, PD9): hosted, every profile request carries the session's ID token; a 401
+// renews once and retries once; then the request fails as signed out. 403 is "not allowed".
+describe("hosted: the bearer (B-12 PD9)", () => {
+  let tokens: (string | null)[];
+  let renewals: (string | null)[];
+  let renewCalls: number;
+
+  beforeEach(() => {
+    tokens = ["tok-1"];
+    renewals = ["tok-2"];
+    renewCalls = 0;
+    setHostedSession({
+      start: async () => "signed_in",
+      signIn: async () => {},
+      token: async () => tokens.shift() ?? null,
+      renew: async () => {
+        renewCalls += 1;
+        return renewals.shift() ?? null;
+      },
+      isSignedOut: () => false,
+      onSignedOut: () => () => {},
+    });
+  });
+  afterEach(() => setHostedSession(null));
+
+  const auth = (init: RequestInit | undefined) =>
+    (init?.headers as Record<string, string> | undefined)?.authorization;
+
+  it("sends the token on GET, DELETE and PUT", async () => {
+    const list = reply(200, { profiles: [stored] });
+    await listProfiles(list);
+    expect(auth(list.mock.calls[0]![1])).toBe("Bearer tok-1");
+
+    tokens = ["tok-1"];
+    const del = reply(204);
+    expect(await deleteProfile("abc", del)).toEqual({ kind: "ok" });
+    expect(del.mock.calls[0]![1]?.headers).toEqual({ authorization: "Bearer tok-1" });
+
+    tokens = ["tok-1"];
+    const put = reply(200, stored);
+    await updateProfile("abc", profile, 1, put);
+    expect(put.mock.calls[0]![1]?.headers).toEqual({
+      "content-type": "application/json",
+      authorization: "Bearer tok-1",
+    });
+  });
+
+  it("renews once on a 401 and retries once with the new token", async () => {
+    const answers = [401, 200];
+    const fetchImpl = vi.fn<typeof fetch>(async () => {
+      const status = answers.shift()!;
+      return new Response(JSON.stringify(status === 200 ? { profiles: [] } : {}), { status });
+    });
+    expect(await listProfiles(fetchImpl)).toEqual({ kind: "ok", profiles: [] });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(auth(fetchImpl.mock.calls[1]![1])).toBe("Bearer tok-2");
+    expect(renewCalls).toBe(1);
+  });
+
+  it("is signed_out after a second 401, renewing only once", async () => {
+    const fetchImpl = reply(401, { error: "unauthorized" });
+    expect(await getProfile("abc", fetchImpl)).toEqual({ kind: "signed_out" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(renewCalls).toBe(1);
+  });
+
+  it("is signed_out with no retry when renewal fails", async () => {
+    renewals = [null];
+    const fetchImpl = reply(401, { error: "unauthorized" });
+    expect(await listProfiles(fetchImpl)).toEqual({ kind: "signed_out" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("is signed_out and asks nothing when there is no token", async () => {
+    tokens = [null];
+    const fetchImpl = reply(200, { profiles: [] });
+    expect(await listProfiles(fetchImpl)).toEqual({ kind: "signed_out" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("reads 403 as not_allowed", async () => {
+    expect(await listProfiles(reply(403, { error: "forbidden" }))).toEqual({
+      kind: "not_allowed",
+    });
+  });
+});
+
+describe("local: no bearer (B-12 AC19)", () => {
+  it("sends no authorization header on any request", async () => {
+    const calls: RequestInit[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+      calls.push(init ?? {});
+      return new Response(JSON.stringify({ profiles: [] }), { status: 200 });
+    });
+    await listProfiles(fetchImpl);
+    await getProfile("abc", fetchImpl);
+    await createProfile(profile, fetchImpl);
+    await updateProfile("abc", profile, 1, fetchImpl);
+    await deleteProfile("abc", fetchImpl);
+    for (const init of calls) expect(auth(init)).toBeUndefined();
+  });
+  const auth = (init: RequestInit) =>
+    (init.headers as Record<string, string> | undefined)?.authorization;
 });

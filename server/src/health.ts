@@ -8,6 +8,10 @@ export interface HealthState {
   schemaVersion: number;
   /** Whole seconds since the server started listening. */
   uptimeSeconds(): number;
+  /** B-12 PD8: the mode, whether a local install has cloud settings, the hosted sign-in. */
+  mode: "local" | "hosted";
+  cloud: boolean;
+  signIn: { issuer: string; clientId: string } | null;
 }
 
 export function registerHealth(app: App, state: HealthState): void {
@@ -16,6 +20,9 @@ export function registerHealth(app: App, state: HealthState): void {
       status: "ok",
       schemaVersion: state.schemaVersion,
       uptimeSeconds: state.uptimeSeconds(),
+      mode: state.mode,
+      cloud: state.cloud,
+      signIn: state.signIn,
     });
   });
 }

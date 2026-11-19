@@ -25,6 +25,23 @@ export class Db {
     return this.#db.prepare(sql).all(...params) as T[];
   }
 
+  /**
+   * Runs `fn` inside `BEGIN IMMEDIATE` … `COMMIT`, or `ROLLBACK` when it throws (B-12 T3). Inside
+   * a transaction already open it runs `fn` in that one, so writes compose into one commit.
+   */
+  transaction<T>(fn: () => T): T {
+    if (this.#db.isTransaction) return fn();
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = fn();
+      this.#db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   close(): void {
     this.#db.close();
   }
@@ -39,6 +56,23 @@ export function isUniqueViolation(error: unknown): boolean {
     error instanceof Error &&
     (error as Error & { errcode?: unknown }).errcode === SQLITE_CONSTRAINT_UNIQUE
   );
+}
+
+/**
+ * B-12 T15: whether `file` is a database that `PRAGMA integrity_check` calls `ok`. Opened read
+ * only, so checking a copy never changes it; a file that will not open is not ok.
+ */
+export function integrityCheckOk(file: string): boolean {
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(file, { readOnly: true, timeout: 0 });
+    const rows = db.prepare("PRAGMA integrity_check").all() as { integrity_check: string }[];
+    return rows.length === 1 && rows[0]!.integrity_check === "ok";
+  } catch {
+    return false;
+  } finally {
+    db?.close();
+  }
 }
 
 /** Opens (creating if absent) the file with WAL and foreign keys on. */

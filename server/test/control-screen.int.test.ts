@@ -181,6 +181,7 @@ describe("shutdown", () => {
       loadConfig({
         APP_ENV: "test",
         LOG_LEVEL: "warn",
+        APP_MODE: "local",
         PORT: String(inProcess),
         CONTROL_PORT: "8001",
         DATA_DIR: join(tmp, "in-process"),

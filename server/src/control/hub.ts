@@ -29,6 +29,11 @@ export interface HubDeps {
   now(): number;
   pairing: Pairing;
   lan: Lan;
+  /**
+   * B-12 SD2, PD19: called when the target screen's `started` changes — a state message, a new
+   * screen attaching (not running until it says so) or the target's close. Sync pauses on it.
+   */
+  onRunning?(running: boolean): void;
 }
 
 export interface Hub extends DeviceHub {
@@ -54,10 +59,19 @@ const REFUSED = 4001;
 /** `WebSocket.OPEN`. */
 const OPEN = 1;
 
-export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub {
+export function createHub({ log, controlPort, now, pairing, lan, onRunning }: HubDeps): Hub {
   const screens = new Set<WebSocket>();
   let target: WebSocket | null = null;
   let cached: ScreenState | null = null;
+  let running = false;
+  /** Every change of the cached state goes through here, so `onRunning` hears each edge. */
+  const setCached = (next: ScreenState | null) => {
+    cached = next;
+    if ((next?.started === true) !== running) {
+      running = !running;
+      onRunning?.(running);
+    }
+  };
   const links = new Map<string, Link>();
   let expiry: ReturnType<typeof setTimeout> | null = null;
   // Panel actions run one at a time: two quick `enable`s must not bind twice.
@@ -258,7 +272,7 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
   const onScreen = async (message: ScreenMessage) => {
     switch (message.type) {
       case "state":
-        cached = message.state;
+        setCached(message.state);
         return toControllers({ type: "state", state: message.state });
       case "applied":
         for (const { deviceId, seq } of message.entries) {
@@ -312,7 +326,7 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
         toApproved({ type: "screen", connected: false });
       }
       target = socket;
-      cached = null; // a new page sends its own state; the old one is no longer true (SD13)
+      setCached(null); // a new page sends its own state; the old one is no longer true (SD13)
       log.info("screen connected");
       toSenders({ type: "screen", connected: true }); // they offer to it (B-06 SD18)
       receive(socket, {
@@ -330,7 +344,7 @@ export function createHub({ log, controlPort, now, pairing, lan }: HubDeps): Hub
         screens.delete(socket);
         if (socket !== target) return;
         target = null;
-        cached = null;
+        setCached(null);
         log.info("screen disconnected");
         toApproved({ type: "screen", connected: false });
       });

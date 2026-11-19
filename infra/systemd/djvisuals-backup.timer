@@ -1,0 +1,10 @@
+# Daily at 03:00 UTC (B-12 SD10); a run missed while the VM was down runs at the next boot.
+[Unit]
+Description=DJ Visuals System nightly backup, daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

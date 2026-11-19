@@ -74,6 +74,7 @@ export async function runUnderLoad({
     const config = loadConfig({
       APP_ENV: "test",
       LOG_LEVEL: "warn",
+      APP_MODE: "local",
       PORT: String(port),
       // Never bound: nothing listens on it until External control is switched on (B-04 AC1).
       CONTROL_PORT: String(port + 2),

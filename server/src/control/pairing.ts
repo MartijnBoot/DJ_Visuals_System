@@ -15,6 +15,7 @@ import {
   type DeviceEntry,
   type SendKind,
 } from "@djv/shared";
+import { createRateWindow } from "../rate-window.ts";
 
 export interface PairingDeps {
   now(): number;
@@ -90,8 +91,14 @@ export function createPairing({ now, random }: PairingDeps): Pairing {
   const pending = new Map<string, Pending>();
   const approved = new Map<string, Approved>();
   const byKey = new Map<string, string>();
-  const wrong = new Map<string, number[]>();
-  const throttledUntil = new Map<string, number>();
+  // The wrong-code throttle (SD19): the fifth wrong code within the window refuses the IP for
+  // 60 s. The window is shared with the cloud's token guard (B-12 PD11).
+  const throttle = createRateWindow({
+    limit: PAIRING_LIMITS.wrongCodes,
+    windowMs: PAIRING_LIMITS.wrongCodeWindowMs,
+    blockMs: PAIRING_LIMITS.throttleMs,
+    now,
+  });
 
   /** Rejection sampling keeps every character equally likely (SD19). */
   const drawCode = (): string => {
@@ -148,17 +155,6 @@ export function createPairing({ now, random }: PairingDeps): Pairing {
     return true;
   };
 
-  /** Records a wrong code; the fifth within the window refuses the IP for 60 s (SD19). */
-  const wrongCode = (ip: string, at: number) => {
-    const recent = (wrong.get(ip) ?? []).filter((t) => at - t < PAIRING_LIMITS.wrongCodeWindowMs);
-    recent.push(at);
-    wrong.set(ip, recent);
-    if (recent.length >= PAIRING_LIMITS.wrongCodes) {
-      throttledUntil.set(ip, at + PAIRING_LIMITS.throttleMs);
-      wrong.delete(ip);
-    }
-  };
-
   return {
     isOn: () => on,
     code: () => code,
@@ -171,8 +167,7 @@ export function createPairing({ now, random }: PairingDeps): Pairing {
     disable() {
       on = false;
       code = null;
-      wrong.clear();
-      throttledUntil.clear();
+      throttle.clear();
       return endAll();
     },
 
@@ -185,11 +180,9 @@ export function createPairing({ now, random }: PairingDeps): Pairing {
     request(ip, presented, hint, sends = []) {
       if (!on || code === null) return { kind: "refused", reason: "ended" };
       const at = now();
-      const until = throttledUntil.get(ip);
-      if (until !== undefined && at < until) return { kind: "refused", reason: "throttled" };
-      if (until !== undefined) throttledUntil.delete(ip);
+      if (throttle.blocked(ip)) return { kind: "refused", reason: "throttled" };
       if (presented !== code) {
-        wrongCode(ip, at);
+        throttle.record(ip);
         return { kind: "refused", reason: "wrong_code" };
       }
       const refusal = roleRefusal(sends);

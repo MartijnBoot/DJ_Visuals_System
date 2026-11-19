@@ -1,7 +1,7 @@
 ---
 description: Brainstorm a feature idea into the backlog, or show, order and promote backlog items
 argument-hint: [an idea in your own words | order | spec B-nn]
-model: claude-fable-5-2
+model: opus
 ---
 
 Backlog request: **$ARGUMENTS**

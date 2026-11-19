@@ -32,6 +32,7 @@ import type { SenderEntry, SenderState } from "./control/ExternalControl.tsx";
 import { createVideo, hasFrame, videoReady } from "./capture/video.ts";
 import { createApplier } from "./control/apply.ts";
 import { openSocket } from "./control/device-link.ts";
+import { hostedSession } from "./auth/session.ts";
 import { createScreenLink, toScreenState } from "./control/screen-link.ts";
 import type { AudioSource } from "./remote/main-audio.ts";
 import { createPeers } from "./remote/peers.ts";
@@ -107,7 +108,8 @@ function legReader(
   };
 }
 
-export function Screen() {
+/** `cloud`: a local install with cloud settings shows the panel's cloud row (B-12 PD8). */
+export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const sessionRef = useRef<Session | null>(null);
@@ -220,10 +222,16 @@ export function Screen() {
     };
     return { applier, link, peers, senders: () => senders, senderState };
   });
+  // B-12 SD1, AC21: hosted use has no External control and no remote input, so the screen link
+  // never starts and `/api/control/screen` is never asked for.
+  const [hosted] = useState(() => hostedSession());
+  const [signedOut, setSignedOut] = useState(() => hosted?.isSignedOut() ?? false);
+  useEffect(() => hosted?.onSignedOut(() => setSignedOut(true)), [hosted]);
   useEffect(() => {
+    if (hosted) return;
     control.link.start();
     return () => control.link.stop();
-  }, [control]);
+  }, [control, hosted]);
   const [controlView, setControlView] = useState(() => control.link.view());
   useEffect(() => control.link.subscribe(() => setControlView(control.link.view())), [control]);
   // Mirrors `panel` so a key handler can tell an opening from a closing without an updater side effect.
@@ -443,6 +451,8 @@ export function Screen() {
           onProfile={(id) => void active.pick(id)}
           control={controlView}
           onControl={(action) => void control.link.send(action)}
+          {...(hosted ? { hosted: { signedOut, onSignInAgain: () => void hosted.signIn() } } : {})}
+          cloud={cloud}
         />
       )}
     </>

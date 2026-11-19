@@ -17,6 +17,11 @@ export function describeFailure(failure: Failure, doing: string): string {
       return `${doing}: the server cannot be reached`;
     case "unsupported_version":
       return "unsupported file version";
+    // B-12 PD4: hosted use.
+    case "signed_out":
+      return `${doing}: sign in again`;
+    case "not_allowed":
+      return `${doing}: this account has no access`;
     default:
       return `${doing}: the server's answer could not be used`;
   }

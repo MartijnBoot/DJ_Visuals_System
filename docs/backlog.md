@@ -18,13 +18,16 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 
 | # | ID | Feature | Size | Status |
 |---|---|---|---|---|
-| 1 | B-14 | Image assets in profiles | M | idea |
-| 2 | B-07 | Scenes | M | idea |
-| 3 | B-09 | Transitions | M | idea |
-| 4 | B-10 | Global colour layer | S | idea |
-| 5 | B-11 | "No camera" as a feed option | S | idea |
-| 6 | B-12 | Hosted home on Oracle Cloud (free tier trial) | L | idea |
-| 7 | B-13 | Selling it | L | idea |
+| 1 | B-16 | Primary colour wheel always on the controller | S | idea |
+| 2 | B-17 | Echo as a built-in effect | S | idea |
+| 3 | B-18 | Effect strength sliders on the controller | M | idea |
+| 4 | B-14 | Image assets in profiles | M | idea |
+| 5 | B-07 | Scenes | M | idea |
+| 6 | B-09 | Transitions | M | idea |
+| 7 | B-10 | Global colour layer | S | idea |
+| 8 | B-11 | "No camera" as a feed option | S | idea |
+| 9 | B-13 | Selling it | L | idea |
+| 10 | B-15 | iPad as an audio source | L | idea |
 
 ## Items
 
@@ -458,7 +461,8 @@ Depends on B-04.
 
 ### B-12 — Hosted home on Oracle Cloud (free tier trial)
 
-- **Status:** idea
+- **Status:** built → `docs/plans/phase-b-12-hosted-home-oracle.md` (2026-11-17; T1–T19 on
+  stacked branches, awaiting review and the owner's human steps H0–H12)
 - **Added:** 2026-11-15
 - **Size:** L
 
@@ -552,3 +556,141 @@ database. Assets referenced by file path (SDR constraint).
 **Touches.** B-03's custom effect contract (texture inputs), `shared/` file format, `server/`
 storage and an endpoint, `docs/invariants.md` request row. Depends on B-03. Split out of B-03 at
 its spec interview (B-03 SD2).
+
+### B-15 — iPad as an audio source
+
+- **Status:** idea
+- **Added:** 2026-11-17
+- **Size:** L
+
+**Problem.** Found in B-06's H1 (2026-11-16): on the iPad, `/send` stops its camera and microphone
+as soon as another app comes to the front, so the iPad cannot run its own app (a DJ app, say) and
+send at the same time. Safari on iPadOS has no system-audio capture either, so what the iPad
+plays cannot reach the screen machine.
+
+**Idea.** The iPad sends audio to the screen machine like the laptop does in B-06: its input or
+what it plays, kept running while another app is in front.
+
+**Why it matters.** A DJ or VJ who plays from an iPad gets the same clean main audio the laptop
+gives, without a microphone in front of a speaker.
+
+**Not this.** Rendering or analysis on the iPad. A second main audio at the same time (B-06
+SD-rules stand).
+
+**Open questions.**
+
+- Whether a web page can do this at all: iPadOS suspends capture in a hidden page (B-06 SD9) and
+  Safari has no `getDisplayMedia` audio. If not, this needs a native app, which B-06's spec
+  ruled out ("an app or extension on any device").
+- If a native app: whether it speaks the same `/send` pairing and WebRTC setup, how it is
+  distributed and signed, and whether ReplayKit or an audio share from the DJ app is the source.
+- Whether a wired path (iPad audio out into the screen machine's input) is enough instead.
+
+**Touches.** A guess: the `/send` protocol in `shared/src/control.ts`, pairing, ADR 0001/0002;
+a new client outside `web/`. Depends on B-06.
+
+### B-16 — Primary colour wheel always on the controller
+
+- **Status:** idea
+- **Added:** 2026-11-17
+- **Size:** S
+
+**Problem.** Mid-set I want to switch quickly between the abstraction dial and the primary
+colour. On `/control` the colour wheel is a pop-up over the whole controller, so every colour
+change ends with tapping Done before the dial can be reached again: one action too many.
+
+**Idea.** The primary colour wheel is always visible on the controller, next to the dials, in DJ
+and VJ mode alike. No pop-up, no Done: drag the colour, move the abstraction dial, back to the
+colour, without opening or closing anything. Reset stays.
+
+**Why it matters.** Colour and abstraction become one quick gesture by hand instead of a sequence
+of taps, so the visuals follow the music faster.
+
+**Not this.** Anything that has to be opened or closed before a dial can be reached. A wheel too
+small to hit a colour by hand. Scrolling between the wheel and the abstraction dial (on a phone
+that is the same extra action in another form).
+
+**Open questions.**
+
+- Whether VJ mode's other palette swatches still open a pop-up, or point the inline wheel at
+  their slot instead.
+- How the wheel and both dials fit on a phone in portrait at 320 CSS px wide (B-04: no
+  horizontal scrolling), and in landscape.
+- Whether the wheel's size or the layout differs per mode.
+- This amends B-04 SD11 and its UI rule "Colour wheel: modal over the controller"; the spec
+  records the amendment.
+
+**Touches.** `web/src/control/` (`Controller.tsx`, `Wheel.tsx`, `styles.ts`), the B-04 spec and
+its wheel browser tests (AC23). A guess: no new control message, no change to the server or
+`engine/`. Depends on B-04.
+
+### B-17 — Echo as a built-in effect
+
+- **Status:** idea
+- **Added:** 2026-11-19
+- **Size:** S
+
+**Problem.** The echo in the Neon Silhouette profile (`profiles/neon-silhouette.md`) lives inside
+that one profile's custom code. In it, a moving silhouette leaves fading copies of itself that
+fan out into colour. When I build another profile in the builder I cannot add it. The nearest
+built-in, `smear`, mixes in 85% of the previous frame, which gives a soft blur, not separate
+trails.
+
+**Idea.** Echo is one more effect in the builder's list, next to pixelate and RGB split, usable in
+any profile. It keeps Neon Silhouette's look. The last frame fades and is kept where it is
+brighter than the new one, and the trail's red and blue drift apart so it fans out into colour.
+Its strength is how long the trails last, from none to about half a second.
+
+**Why it matters.** The best motion effect so far is locked in one profile. As a built-in it is
+available to every profile, and it gets a live strength slider through B-18.
+
+**Not this.** A renamed `smear`. Trails that build up until the screen goes white (the max, never
+a sum, keeps the feedback below 1).
+
+**Open questions.**
+
+- Whether the colour fan-out is part of Echo or a separate setting (a colour slot, or none).
+- Whether Neon Silhouette is rewritten to use the built-in echo.
+- Whether a new effect type means a new profile file `formatVersion`.
+- How strength maps to trail length, and where Echo sits among the built-ins' fixed order.
+
+**Touches.** `engine/` (a new pass reading the previous frame), `shared/src/profile.ts` (the
+effect list), the builder's effect list, `pnpm profile:check`, `docs/custom-effects.md`, the
+B-02 effect table. A guess: no server change.
+
+### B-18 — Effect strength sliders on the controller
+
+- **Status:** idea
+- **Added:** 2026-11-19
+- **Size:** M
+
+**Problem.** Mid-set I want to push one effect's strength up or down, for example more echo on a
+breakdown. On `/control` I only have profiles, cameras, the two dials and colour, so an effect's
+strength is fixed at whatever the profile stored.
+
+**Idea.** In the builder every effect gets two toggles, **DJ** and **VJ**. When one is on, that
+effect's strength shows as a slider on `/control` in that mode, for the active profile. Pushing it
+changes the screen live. Switching profiles starts again from the stored values: live changes
+are never saved into profiles (ADR 0001).
+
+**Why it matters.** The profile's author decides which effects can be played live, and keeps DJ
+mode to the one or two that matter, with one hand free. The set stops being locked to the stored
+strengths.
+
+**Not this.** A full effect editor on the controller: no adding, removing or reordering effects,
+and no other parameters. Saving live strengths back into the profile. A DJ mode that fills up
+with sliders until it needs scrolling.
+
+**Open questions.**
+
+- How the sliders fit on a phone in portrait at 320 CSS px wide next to the two dials and B-16's
+  always-visible wheel (B-04: no horizontal scrolling), and whether there is a cap per mode.
+- Whether a custom effect's own parameters can be ticked too, or only its strength.
+- How a slider is labelled: the type's name, or a custom effect's label.
+- Whether a ticked effect with an audio binding shows the stored amount or the bound result.
+- Which new control message it needs (`shared/src/control.ts`), and how the screen applies it.
+- This amends B-04 SD9 and its mode layouts; the spec records the amendment.
+
+**Touches.** `shared/src/profile.ts` (two flags per effect), the builder, `shared/src/control.ts`,
+`web/src/control/`, the screen applying it, the B-04 spec. Depends on B-04, sits next to B-16 in
+the controller layout.

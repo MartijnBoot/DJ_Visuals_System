@@ -1,0 +1,7 @@
+# /etc/caddy/Caddyfile (B-12 SD6): HTTPS for the owner's domain with a free certificate, and
+# every request forwarded to Node on 127.0.0.1. DJV_DOMAIN and DJV_PORT come from the caddy
+# service's drop-in, written by rebuild.sh. Caddy sets X-Forwarded-For to the client it saw;
+# the app trusts that header from 127.0.0.1 only (plan PD11).
+{$DJV_DOMAIN} {
+	reverse_proxy 127.0.0.1:{$DJV_PORT}
+}
