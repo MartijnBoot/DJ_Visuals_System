@@ -50,6 +50,18 @@ jobs:
       - name: Run the gate
         run: bash scripts/check.sh
 
+      # A failed browser test keeps its Playwright trace (playwright.config.ts, retain-on-failure)
+      # in test-results/; without this upload it dies with the runner, and a one-off Linux failure
+      # leaves nothing to find its cause with (D-13, D-15). Uploaded only when the gate failed.
+      - name: Keep the browser test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
   secret-scan:
     name: secret-scan
     runs-on: ubuntu-latest
