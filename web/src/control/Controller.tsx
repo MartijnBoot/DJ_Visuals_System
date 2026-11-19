@@ -1,6 +1,8 @@
 // The controller page, `/control` (B-04 spec SD8, SD9, SD12, SD22, SD23, UI "/control"; plan T12):
 // the link line, the code field when opened without a code or key, the DJ/VJ toggle, and the
-// controls. It talks only to the device socket; it never starts the engine or audio and never
+// controls. B-19 (SD1, SD5, PD3): the link line in a status bar pinned at the top, everything else
+// in a scrolling middle, and the faders in a bank pinned at the bottom or the right edge as the
+// viewport's arrangement decides. It talks only to the device socket; it never starts the engine or audio and never
 // asks for a camera or microphone. Every control is disabled while the link is locked (SD12),
 // and the page shows the screen's state, never its own guess (SD5). Remote input (B-06 SD8, AC14,
 // AC20, AC24): a sender's camera tile carries a remote mark and, like every tile, waits for Start;
@@ -9,9 +11,10 @@
 import type { ScreenState } from "@djv/shared";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
-import { Fader } from "./Fader.tsx";
+import { FaderBank } from "./FaderBank.tsx";
 import { VjPanel } from "./VjPanel.tsx";
 import { Wheel } from "./Wheel.tsx";
+import { useArrangement } from "./arrangement.ts";
 import { createDeviceLink, openSocket, type DeviceLink } from "./device-link.ts";
 import { keyStore, modeStore, type Mode } from "./remembered.ts";
 import { styles } from "./styles.ts";
@@ -61,6 +64,7 @@ export function Controller() {
   const [link] = useState(createLink);
   const [modes] = useState(() => modeStore());
   const [mode, setMode] = useState<Mode>(() => modes.initial(window.innerWidth));
+  const arrangement = useArrangement();
   const [code, setCode] = useState("");
   const [approvalsOpen, setApprovalsOpen] = useState(false);
   /** The palette slot the wheel is open on, or null. */
@@ -96,13 +100,15 @@ export function Controller() {
       ].includes(view.status);
 
   return (
-    <main data-testid="controller" className="djv-control" style={styles.page}>
+    <main data-testid="controller" className="djv-control" data-arrangement={arrangement}>
       <style>{css}</style>
-      <div style={styles.column}>
-        <div data-testid="link-line" role="status" style={styles.linkLine}>
+      <div data-testid="status-bar" className="djv-status">
+        <div data-testid="link-line" role="status" className="djv-status-text">
           {view.text}
         </div>
+      </div>
 
+      <div data-testid="control-scroll" className="djv-scroll">
         {asking && (
           <form
             style={styles.row}
@@ -251,19 +257,6 @@ export function Controller() {
               </section>
             )}
 
-            <section aria-label="Dials" style={{ display: "grid", gap: 12 }}>
-              {DIALS.map(([dial, label]) => (
-                <Fader
-                  key={dial}
-                  testId={`dial-${dial}`}
-                  label={label}
-                  value={state.dials[dial]}
-                  disabled={locked}
-                  onSend={(value) => link.send({ type: "dials", [dial]: value })}
-                />
-              ))}
-            </section>
-
             <section aria-label="Colour" style={styles.row}>
               <button
                 type="button"
@@ -316,6 +309,19 @@ export function Controller() {
           </>
         )}
       </div>
+
+      {state && (
+        <FaderBank
+          arrangement={arrangement}
+          locked={locked}
+          faders={DIALS.map(([dial, label]) => ({
+            testId: `dial-${dial}`,
+            label,
+            value: state.dials[dial],
+            onSend: (value: number) => link.send({ type: "dials", [dial]: value }),
+          }))}
+        />
+      )}
     </main>
   );
 }

@@ -2,7 +2,8 @@
 // `role="slider"` whose whole track is the touch target, grabbed anywhere and moved by the drag
 // (`fader.ts`), never to the touch point. Its cap and readout follow the finger only while its
 // own pointer holds it and show `value` — the screen's — otherwise: after a release, a cancel, a
-// blur, a lock. Locked, it stays focusable with `aria-disabled` and ignores keys and pointers.
+// blur, a lock, a change of axis (the page re-laid out). Locked, it stays focusable with
+// `aria-disabled` and ignores keys and pointers. Horizontal: right is more; vertical: up is more.
 // Nothing animates.
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createFaderGesture, onGrid, readout } from "./fader.ts";
@@ -15,9 +16,12 @@ export interface FaderProps {
   disabled: boolean;
   /** A new value: at most one per frame while dragging, the last at once on release. */
   onSend(value: number): void;
+  /** The axis; the stylesheet lays it out from the page's arrangement (PD3). */
+  orientation?: "horizontal" | "vertical";
 }
 
 export function Fader(props: FaderProps) {
+  const vertical = props.orientation === "vertical";
   const labelId = useId();
   const send = useRef(props.onSend);
   send.current = props.onSend;
@@ -45,6 +49,13 @@ export function Fader(props: FaderProps) {
   useEffect(() => {
     if (props.disabled) letGo();
   }, [props.disabled]);
+  // So does a change of axis: the drag's distances no longer mean what they did (SD9).
+  useEffect(() => {
+    if (holder.current !== null) letGo();
+  }, [vertical]);
+
+  /** The pointer's position along the axis, growing toward more. */
+  const along = (e: { clientX: number; clientY: number }) => (vertical ? -e.clientY : e.clientX);
 
   const shown = held ?? props.value;
   const level = Math.min(1, Math.max(0, shown));
@@ -62,18 +73,19 @@ export function Fader(props: FaderProps) {
         aria-valuemax={1}
         aria-valuenow={shown}
         aria-valuetext={String(number)}
-        aria-orientation="horizontal"
+        aria-orientation={vertical ? "vertical" : "horizontal"}
         aria-disabled={props.disabled}
         onPointerDown={(e) => {
           if (props.disabled || (e.pointerType === "mouse" && e.button !== 0)) return;
           const box = e.currentTarget.getBoundingClientRect();
-          if (!gesture.down(e.pointerId, e.clientX, props.value, box.width)) return;
+          const travel = vertical ? box.height : box.width;
+          if (!gesture.down(e.pointerId, along(e), props.value, travel)) return;
           holder.current = e.pointerId;
           e.currentTarget.setPointerCapture(e.pointerId);
           setHeld(onGrid(props.value));
         }}
         onPointerMove={(e) => {
-          const next = gesture.move(e.pointerId, e.clientX);
+          const next = gesture.move(e.pointerId, along(e));
           if (next !== null) setHeld(next);
         }}
         onPointerUp={(e) => {

@@ -63,6 +63,115 @@
   --bank-pad-inline: 8px;
 }
 
+/* ---- The shell (SD1, SD5): pinned bar, scrolling middle, pinned bank, keyed off the root ---- */
+.djv-control {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--bg);
+  font: var(--fs-body) / 20px var(--font);
+}
+.djv-control[data-arrangement="horizontal"] {
+  grid-template:
+    "bar" auto
+    "scroll" minmax(0, 1fr)
+    "bank" auto
+    / minmax(0, 1fr);
+}
+.djv-control[data-arrangement="vertical"] {
+  grid-template:
+    "bar bar" auto
+    "scroll bank" minmax(0, 1fr)
+    / minmax(0, 1fr) auto;
+}
+
+/* ---- Status bar (SD4): pinned at the top, wrapping rather than truncating ---- */
+.djv-control .djv-status {
+  grid-area: bar;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--bar-min);
+  box-sizing: border-box;
+  padding: 6px 0 6px var(--space-3);
+  font-weight: 700;
+  background: var(--panel);
+}
+.djv-control .djv-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-right: var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Scrolling middle ---- */
+.djv-control .djv-scroll {
+  grid-area: scroll;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: var(--space-2);
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+.djv-control .djv-legend {
+  margin: 0;
+  font: 700 var(--fs-legend) / 16px var(--font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ---- Fader bank (SD1, SD6): up to four faders within half the viewport ---- */
+.djv-control .djv-bank {
+  grid-area: bank;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bank-gap);
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: var(--bank-pad-block) var(--bank-pad-inline);
+  background: var(--panel);
+}
+.djv-control[data-arrangement="horizontal"] .djv-bank {
+  border-top: var(--fader-edge) solid var(--line);
+}
+.djv-control[data-arrangement="vertical"] .djv-bank {
+  border-left: var(--fader-edge) solid var(--line);
+}
+.djv-control .djv-bank-legend {
+  display: flex;
+  align-items: center;
+  height: var(--bank-legend);
+  flex: none;
+}
+.djv-control .djv-locked-tag {
+  padding: 0 6px;
+  font: 700 var(--fs-label) / 16px var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--on-attention);
+  background: var(--attention);
+  border-radius: 3px;
+}
+.djv-control .djv-bank-faders {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bank-gap);
+}
+.djv-control[data-arrangement="vertical"] .djv-bank-faders {
+  flex: 1 1 auto;
+  flex-direction: row;
+  min-height: 0;
+}
+
 /* ---- The fader (SD2, SD7, SD9): the whole track is the slider and the touch target ---- */
 .djv-control .djv-fader {
   position: relative;
@@ -142,6 +251,56 @@
   font: 700 var(--fs-readout) / 18px var(--font);
   font-variant-numeric: tabular-nums;
   color: var(--text);
+}
+
+/* ---- Vertical faders: only in the bank, only in the vertical arrangement (PD3) ---- */
+.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader {
+  height: auto;
+  width: var(--fader-cross);
+}
+.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-slider::before,
+.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-fill {
+  left: calc(var(--label-band) + (100% - var(--label-band) - var(--groove)) / 2);
+  width: var(--groove);
+  top: auto;
+  bottom: calc(var(--cap-along) / 2);
+}
+.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-slider::before {
+  right: auto;
+  top: calc(var(--readout-band) + var(--cap-along) / 2);
+  height: auto;
+}
+.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-fill {
+  height: calc(var(--level) * (100% - var(--readout-band) - var(--cap-along)));
+}
+.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-cap {
+  left: calc(var(--label-band) + (100% - var(--label-band) - var(--cap-across)) / 2);
+  top: auto;
+  bottom: calc(var(--level) * (100% - var(--readout-band) - var(--cap-along)));
+  width: var(--cap-across);
+  height: var(--cap-along);
+}
+.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-cap::after {
+  left: 2px;
+  right: 2px;
+  top: 50%;
+  bottom: auto;
+  width: auto;
+  height: 2px;
+  margin: -1px 0 0;
+}
+.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-label {
+  left: 3px;
+  top: auto;
+  bottom: 10px;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-readout {
+  left: 0;
+  right: 0;
+  top: 4px;
+  text-align: center;
 }
 
 /* The focus ring (SD11, AC21): white outside a black halo, 3:1 wherever it lands. */

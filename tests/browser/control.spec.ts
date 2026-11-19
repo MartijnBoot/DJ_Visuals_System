@@ -249,7 +249,7 @@ test("starts in DJ mode at 390 px and VJ at 1024 px, and keeps a choice across r
   await expect(narrow.getByTestId("mode-vj")).toHaveAttribute("aria-pressed", "true");
 });
 
-test("no horizontal scroll at 320 px, and every target at least 48×48 (UI, Non-functional)", async ({
+test("no horizontal scroll at 320 px, and every target at least 48×48, sliders included (UI, Non-functional; B-19 AC15)", async ({
   page,
   browser,
 }) => {
@@ -257,14 +257,15 @@ test("no horizontal scroll at 320 px, and every target at least 48×48 (UI, Non-
   const phone = await paired(page, browser, { width: 320, height: 640 });
   await page.getByTestId("panel").getByRole("button", { name: "Start" }).click();
   await expect(phone.getByTestId("camera-tile").first()).toBeEnabled();
-  const main = phone.getByTestId("controller");
-  const { scrollWidth, clientWidth } = await main.evaluate((m) => ({
-    scrollWidth: m.scrollWidth,
-    clientWidth: m.clientWidth,
-  }));
-  expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+  for (const id of ["controller", "control-scroll"]) {
+    const { scrollWidth, clientWidth } = await phone.getByTestId(id).evaluate((m) => ({
+      scrollWidth: m.scrollWidth,
+      clientWidth: m.clientWidth,
+    }));
+    expect(scrollWidth, id).toBeLessThanOrEqual(clientWidth);
+  }
   const small: string[] = [];
-  for (const target of await phone.locator("button, input").all()) {
+  for (const target of await phone.locator("button, input, [role=slider]").all()) {
     if (!(await target.isVisible())) continue;
     const box = (await target.boundingBox())!;
     if (box.width < 48 || box.height < 48) {
