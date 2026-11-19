@@ -6,7 +6,7 @@
 // `aria-disabled` and ignores keys and pointers. Horizontal: right is more; vertical: up is more.
 // Nothing animates.
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
-import { createFaderGesture, onGrid, readout } from "./fader.ts";
+import { createFaderGesture, readout } from "./fader.ts";
 
 export interface FaderProps {
   testId: string;
@@ -82,7 +82,8 @@ export function Fader(props: FaderProps) {
           if (!gesture.down(e.pointerId, along(e), props.value, travel)) return;
           holder.current = e.pointerId;
           e.currentTarget.setPointerCapture(e.pointerId);
-          setHeld(onGrid(props.value));
+          // Held but not yet moved: the cap stays where the screen put it, on the grid or not.
+          setHeld(props.value);
         }}
         onPointerMove={(e) => {
           const next = gesture.move(e.pointerId, along(e));

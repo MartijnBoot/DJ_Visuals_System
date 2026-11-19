@@ -14,7 +14,7 @@ import {
 } from "@playwright/test";
 import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-server.ts";
 import { dragFader, setFader } from "./fader.ts";
-import { createProfile, twelveEffects } from "./fixtures/profiles.ts";
+import { createProfile, flat, twelveEffects } from "./fixtures/profiles.ts";
 
 const PORTRAIT = { width: 320, height: 568 };
 const LANDSCAPE = { width: 568, height: 320 };
@@ -204,6 +204,10 @@ test("scrolled to its end, the status bar and the whole bank stay in view, DJ an
       expect(await inView(phone.page, phone.page.getByTestId("status-bar")), where).toBe(true);
       expect(await inView(phone.page, phone.page.getByTestId("fader-bank")), where).toBe(true);
       // Scrolled, something did move: the middle scrolls, not the page.
+      expect(
+        await phone.page.getByTestId("control-scroll").evaluate((el) => el.scrollTop),
+        where,
+      ).toBeGreaterThan(0);
       expect(await phone.page.evaluate(() => document.scrollingElement!.scrollTop)).toBe(0);
     }
   }
@@ -263,6 +267,37 @@ test("a re-layout mid-drag lets go: the screen's value shows and nothing follows
   await phone.page.waitForTimeout(300);
   expect(phone.dials().length).toBe(sent);
   await expect(panel).toHaveValue("0.2");
+});
+
+test("a screen value off the 0.01 grid: a touch without a move keeps the cap at its exact position, the readout rounds (spec Edge cases)", async ({
+  page,
+  browser,
+}) => {
+  // The panel steps by 0.01; a profile's starting dials need not.
+  const offGrid = await createProfile(
+    api,
+    flat("Off grid", "#ff0000", { recognisability: 0.425, reactivity: 0.5 }),
+  );
+  const phone = await paired(page, browser, PORTRAIT);
+  const tile = phone.page.locator(`[data-testid=profile-tile][data-profile-id="${offGrid.id}"]`);
+  await tile.click();
+  await expect(tile).toHaveAttribute("aria-pressed", "true");
+  const fader = phone.page.getByTestId("dial-recognisability");
+  await expect(fader).toHaveAttribute("aria-valuenow", "0.425");
+  const readout = String(Math.round(0.425 * 100));
+  await expect(phone.page.getByTestId("dial-recognisability-readout")).toHaveText(readout);
+  const sent = phone.dials().length;
+
+  const b = await box(fader);
+  await phone.page.mouse.move(b.x + b.width * 0.9, b.y + b.height / 2);
+  await phone.page.mouse.down();
+  await phone.page.waitForTimeout(300);
+  await expect(fader).toHaveAttribute("aria-valuenow", "0.425");
+  await expect(phone.page.getByTestId("dial-recognisability-readout")).toHaveText(readout);
+  await phone.page.mouse.up();
+  await phone.page.waitForTimeout(300);
+  await expect(fader).toHaveAttribute("aria-valuenow", "0.425");
+  expect(phone.dials().length).toBe(sent);
 });
 
 test("no sideways scroll and every target at least 48×48 at five sizes, DJ and VJ, started, with a long name (AC15)", async ({
