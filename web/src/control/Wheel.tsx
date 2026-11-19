@@ -1,10 +1,12 @@
 // The colour wheel (B-04 spec SD11, AC20, AC21, AC23, UI "Colour wheel"): a modal over the
-// controller with a hue and saturation disc drawn by hand on a canvas, a brightness slider, the
-// current and the stored colour side by side, Reset and Done. Touch-drag first, with pointer
+// controller with a hue and saturation disc drawn by hand on a canvas, a brightness fader (the
+// controller's own fader, horizontal: B-19 AC11), the current and the stored colour side by side,
+// Reset and Done. Touch-drag first, with pointer
 // capture; arrow keys move hue (left, right) and saturation (up, down) for a laptop without a
 // mouse. While dragging, at most one change per animation frame and always the last position
 // (`wheel-math.ts`). It edits the active profile's palette in memory only; nothing is saved.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Fader } from "./Fader.tsx";
 import {
   createSendThrottle,
   hexToHsv,
@@ -167,23 +169,15 @@ export function Wheel(props: WheelProps) {
             }}
           />
         </div>
-        <label style={{ display: "grid", gap: 4, width: "100%" }}>
-          Brightness
-          <input
-            type="range"
-            data-testid="wheel-brightness"
-            min={0}
-            max={1}
-            step={0.01}
-            disabled={props.disabled}
+        <div style={{ width: "100%" }}>
+          <Fader
+            testId="wheel-brightness"
+            label="Brightness"
             value={hsv.v}
-            style={styles.slider}
-            onChange={(e) => change({ ...hsv, v: Number(e.target.value) }, false)}
-            onPointerUp={() => throttle.release()}
-            onKeyUp={() => throttle.release()}
-            onBlur={() => throttle.release()}
+            disabled={props.disabled}
+            onSend={(v) => change({ ...hsv, v }, true)}
           />
-        </label>
+        </div>
         <div style={styles.row}>
           <span style={{ display: "grid", gap: 4, justifyItems: "center" }}>
             <span

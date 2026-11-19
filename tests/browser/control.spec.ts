@@ -10,6 +10,7 @@ import {
   type Page,
 } from "@playwright/test";
 import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-server.ts";
+import { dragFader, setFader } from "./fader.ts";
 import { createProfile, twelveEffects, type Stored } from "./fixtures/profiles.ts";
 import { record, recorded, start } from "./helpers.ts";
 
@@ -88,7 +89,7 @@ test("a profile tile switches the screen as the panel does, and every surface ag
   await expect(page.getByTestId("profile-picker")).toHaveValue(stored.id);
   // The profile's starting dials are applied and mirrored (AC18).
   await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.5");
-  await expect(phone.getByTestId("dial-recognisability")).toHaveValue("0.5");
+  await expect(phone.getByTestId("dial-recognisability")).toHaveAttribute("aria-valuenow", "0.5");
 });
 
 test("a slider moves the screen's dial and the panel's slider (AC19)", async ({
@@ -96,17 +97,17 @@ test("a slider moves the screen's dial and the panel's slider (AC19)", async ({
   browser,
 }) => {
   const phone = await paired(page, browser);
-  await phone.getByTestId("dial-recognisability").fill("0.9");
+  await setFader(phone.getByTestId("dial-recognisability"), 0.9);
   await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.9");
-  await phone.getByTestId("dial-reactivity").fill("0.15");
+  await setFader(phone.getByTestId("dial-reactivity"), 0.15);
   await expect(page.getByTestId("slider-reactivity")).toHaveValue("0.15");
   await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.9");
   // And the other way: the panel's move reaches the controller.
   await page.getByTestId("slider-recognisability").fill("0.2");
-  await expect(phone.getByTestId("dial-recognisability")).toHaveValue("0.2");
+  await expect(phone.getByTestId("dial-recognisability")).toHaveAttribute("aria-valuenow", "0.2");
 });
 
-test("a dial shows the screen's value whenever no finger holds it: after a fill, a key, a cancelled touch (SD5, AC25)", async ({
+test("a fader shows the screen's value whenever no finger holds it: after a key, a release, a cancelled touch (SD5, AC25; B-19 AC9)", async ({
   page,
   browser,
 }) => {
@@ -114,28 +115,30 @@ test("a dial shows the screen's value whenever no finger holds it: after a fill,
   const dial = phone.getByTestId("dial-recognisability");
   const panel = page.getByTestId("slider-recognisability");
 
-  // Set without a pointer, and still focused: the panel's later move shows.
-  await dial.fill("0.9");
-  await expect(panel).toHaveValue("0.9");
-  await panel.fill("0.2");
-  await expect(dial).toHaveValue("0.2");
-
-  // A key, still focused.
+  // A key, still focused: the panel's later move shows.
+  await setFader(dial, 0.2);
   await dial.press("ArrowRight");
   await expect(panel).toHaveValue("0.21");
   await panel.fill("0.6");
-  await expect(dial).toHaveValue("0.6");
+  await expect(dial).toHaveAttribute("aria-valuenow", "0.6");
 
-  // A drag the browser cancels (a touch that became a scroll), the pointer not yet up.
+  // A release.
+  await dragFader(phone, dial, { from: 0.9, by: -0.1 });
+  await expect(panel).toHaveValue("0.5");
+  await panel.fill("0.4");
+  await expect(dial).toHaveAttribute("aria-valuenow", "0.4");
+
+  // A drag that starts away from the cap and is cancelled by the browser (a touch that became a
+  // scroll), the pointer not yet up.
   const box = (await dial.boundingBox())!;
   const y = box.y + box.height / 2;
-  await phone.mouse.move(box.x + box.width * 0.5, y);
+  await phone.mouse.move(box.x + box.width * 0.9, y);
   await phone.mouse.down();
-  await phone.mouse.move(box.x + box.width * 0.9, y, { steps: 4 });
-  await expect(panel).not.toHaveValue("0.6");
-  await dial.dispatchEvent("pointercancel");
+  await phone.mouse.move(box.x + box.width * 0.95, y, { steps: 4 });
+  await expect(dial).toHaveAttribute("aria-valuenow", "0.45");
+  await dial.dispatchEvent("pointercancel", { pointerId: 1 });
   await panel.fill("0.3");
-  await expect(dial).toHaveValue("0.3");
+  await expect(dial).toHaveAttribute("aria-valuenow", "0.3");
   await phone.mouse.up();
 });
 

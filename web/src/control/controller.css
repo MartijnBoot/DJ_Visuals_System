@@ -1,0 +1,164 @@
+/*
+ * The controller's look (B-19 spec SD3, SD8, SD11, SD12; plan PD2), from the style brief
+ * `docs/design/controller-style.md`: its tokens under the same names, then the parts. Rendered
+ * as a <style> inside `/control`'s own root and nowhere else; every selector starts at
+ * `.djv-control`, and nothing here loads a file (`tests/meta/control-look.test.ts`).
+ */
+
+/* ---- Tokens (the brief's tables; a change here is a change to the brief) ---- */
+.djv-control {
+  --bg: #0b0c0e;
+  --panel: #15181c;
+  --line-soft: #2e343c;
+  --line: #69727e;
+  --key: #23272e;
+  --text: #eef1f4;
+  --text-muted: #a3acb7;
+  --text-disabled: #6b737e;
+  --select: #3db8f5;
+  --on-select: #04141c;
+  --ok: #1a7f45;
+  --on-ok: #ffffff;
+  --attention: #f0a500;
+  --on-attention: #120d00;
+  --stop: #c62828;
+  --on-stop: #ffffff;
+  --track: #191c21;
+  --hatch: #262b32;
+  --fill: #3db8f5;
+  --cap: #e6e9ed;
+  --cap-line: #0b0c0e;
+  --cap-locked: #7d8590;
+  --fill-locked: #4a525c;
+  --focus: #ffffff;
+  --focus-halo: #000000;
+
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --fs-body: 16px;
+  --fs-note: 14px;
+  --fs-legend: 12px;
+  --fs-label: 13px;
+  --fs-readout: 18px;
+  --target: 48px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --radius-key: 6px;
+  --radius-panel: 8px;
+  --radius-dialog: 10px;
+  --radius-track: 4px;
+  --radius-cap: 3px;
+  --bar-min: 48px;
+  --fader-cross: 56px;
+  --fader-edge: 2px;
+  --cap-along: 22px;
+  --cap-across: 30px;
+  --groove: 6px;
+  --label-band: 18px;
+  --readout-band: 22px;
+  --bank-legend: 16px;
+  --bank-gap: 6px;
+  --bank-pad-block: 6px;
+  --bank-pad-inline: 8px;
+}
+
+/* ---- The fader (SD2, SD7, SD9): the whole track is the slider and the touch target ---- */
+.djv-control .djv-fader {
+  position: relative;
+  flex: none;
+  height: var(--fader-cross);
+}
+.djv-control .djv-fader-slider {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  background: var(--track);
+  border: var(--fader-edge) solid var(--line);
+  border-radius: var(--radius-track);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: grab;
+}
+.djv-control .djv-fader-slider::before,
+.djv-control .djv-fader-fill {
+  content: "";
+  position: absolute;
+  left: calc(var(--cap-along) / 2);
+  top: calc(var(--label-band) + (100% - var(--label-band) - var(--groove)) / 2);
+  height: var(--groove);
+  border-radius: 3px;
+  pointer-events: none;
+}
+.djv-control .djv-fader-slider::before {
+  right: calc(var(--cap-along) / 2);
+  background: var(--bg);
+}
+.djv-control .djv-fader-fill {
+  width: calc(var(--level) * (100% - var(--cap-along)));
+  background: var(--fill);
+}
+.djv-control .djv-fader-cap {
+  position: absolute;
+  box-sizing: border-box;
+  left: calc(var(--level) * (100% - var(--cap-along)));
+  top: calc(var(--label-band) + (100% - var(--label-band) - var(--cap-across)) / 2);
+  width: var(--cap-along);
+  height: var(--cap-across);
+  background: var(--cap);
+  border: 2px solid var(--cap-line);
+  border-radius: var(--radius-cap);
+  pointer-events: none;
+}
+.djv-control .djv-fader-cap::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--cap-line);
+}
+.djv-control .djv-fader-label,
+.djv-control .djv-fader-readout {
+  position: absolute;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.djv-control .djv-fader-label {
+  left: 10px;
+  top: 3px;
+  font: 700 var(--fs-label) / 16px var(--font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.djv-control .djv-fader-readout {
+  right: 10px;
+  top: 2px;
+  font: 700 var(--fs-readout) / 18px var(--font);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* The focus ring (SD11, AC21): white outside a black halo, 3:1 wherever it lands. */
+.djv-control .djv-fader-slider:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--focus-halo);
+}
+
+/* The locked look (SD4, AC18): hatching and a dimmed cap, never a colour alone. */
+.djv-control .djv-fader-slider[aria-disabled="true"] {
+  background: repeating-linear-gradient(135deg, var(--track) 0 6px, var(--hatch) 6px 12px);
+  cursor: default;
+}
+.djv-control .djv-fader-slider[aria-disabled="true"] .djv-fader-cap {
+  background: var(--cap-locked);
+}
+.djv-control .djv-fader-slider[aria-disabled="true"] .djv-fader-fill {
+  background: var(--fill-locked);
+}

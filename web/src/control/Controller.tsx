@@ -7,13 +7,17 @@
 // "Main audio: laptop / screen machine" shows while an audio sender is approved. No control for
 // the screen machine's input or System audio.
 import type { ScreenState } from "@djv/shared";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
+import { Fader } from "./Fader.tsx";
 import { VjPanel } from "./VjPanel.tsx";
 import { Wheel } from "./Wheel.tsx";
 import { createDeviceLink, openSocket, type DeviceLink } from "./device-link.ts";
 import { keyStore, modeStore, type Mode } from "./remembered.ts";
 import { styles } from "./styles.ts";
+// The controller's look (B-19 PD2): a <style> inside this page's own root, never a linked file,
+// so no other route has a rule of it and none requests anything new.
+import css from "./controller.css?inline";
 
 function createLink(): DeviceLink {
   return createDeviceLink({
@@ -41,8 +45,6 @@ const DIALS = [
   ["reactivity", "Audio reactivity"],
 ] as const;
 
-type DialName = (typeof DIALS)[number][0];
-
 /** B-06 SD8, SD22: the switch, in DJ and VJ mode while an audio sender is approved. */
 const MAIN_AUDIO = [
   ["remote", "laptop"],
@@ -63,10 +65,6 @@ export function Controller() {
   const [approvalsOpen, setApprovalsOpen] = useState(false);
   /** The palette slot the wheel is open on, or null. */
   const [wheel, setWheel] = useState<number | null>(null);
-  // A dial's own value only while a pointer holds it, so the thumb follows the finger; the
-  // screen's value otherwise (SD5): after a key, a release, a cancelled touch, a blur, a lock.
-  const [moving, setMoving] = useState<Partial<Record<DialName, number>>>({});
-  const held = useRef<Partial<Record<DialName, boolean>>>({});
   const view = useSyncExternalStore(
     (fn) => link.subscribe(fn),
     () => link.view(),
@@ -78,22 +76,6 @@ export function Controller() {
     return () => link.stop();
   }, [link]);
 
-  const letGo = (dial: DialName) => {
-    held.current[dial] = false;
-    setMoving((m) => ({ ...m, [dial]: undefined }));
-  };
-  const hold = (dial: DialName) => {
-    held.current[dial] = true;
-    // On the window: a release outside the slider, or on a disabled one, still lets go.
-    const up = () => {
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
-      letGo(dial);
-    };
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-  };
-
   const choose = (next: Mode) => {
     setMode(next);
     modes.save(next);
@@ -101,12 +83,6 @@ export function Controller() {
 
   const state: ScreenState | null = view.state;
   const locked = view.locked;
-
-  useEffect(() => {
-    if (!locked) return;
-    held.current = {};
-    setMoving({});
-  }, [locked]);
   const asking = !locked
     ? false
     : [
@@ -120,7 +96,8 @@ export function Controller() {
       ].includes(view.status);
 
   return (
-    <main data-testid="controller" style={styles.page}>
+    <main data-testid="controller" className="djv-control" style={styles.page}>
+      <style>{css}</style>
       <div style={styles.column}>
         <div data-testid="link-line" role="status" style={styles.linkLine}>
           {view.text}
@@ -276,26 +253,14 @@ export function Controller() {
 
             <section aria-label="Dials" style={{ display: "grid", gap: 12 }}>
               {DIALS.map(([dial, label]) => (
-                <label key={dial} style={{ display: "grid", gap: 4 }}>
-                  {label}
-                  <input
-                    type="range"
-                    data-testid={`dial-${dial}`}
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    disabled={locked}
-                    value={moving[dial] ?? state.dials[dial]}
-                    style={styles.slider}
-                    onPointerDown={() => hold(dial)}
-                    onChange={(e) => {
-                      const value = Number(e.target.value);
-                      if (held.current[dial]) setMoving((m) => ({ ...m, [dial]: value }));
-                      link.send({ type: "dials", [dial]: value });
-                    }}
-                    onBlur={() => letGo(dial)}
-                  />
-                </label>
+                <Fader
+                  key={dial}
+                  testId={`dial-${dial}`}
+                  label={label}
+                  value={state.dials[dial]}
+                  disabled={locked}
+                  onSend={(value) => link.send({ type: "dials", [dial]: value })}
+                />
               ))}
             </section>
 
