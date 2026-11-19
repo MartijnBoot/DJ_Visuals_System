@@ -1,13 +1,14 @@
 // The controller page, `/control` (B-04 spec SD8, SD9, SD12, SD22, SD23, UI "/control"; plan T12):
 // the link line, the code field when opened without a code or key, the DJ/VJ toggle, and the
-// controls. B-19 (SD1, SD5, PD3): the link line in a status bar pinned at the top, everything else
-// in a scrolling middle, and the faders in a bank pinned at the bottom or the right edge as the
-// viewport's arrangement decides. It talks only to the device socket; it never starts the engine or audio and never
-// asks for a camera or microphone. Every control is disabled while the link is locked (SD12),
-// and the page shows the screen's state, never its own guess (SD5). Remote input (B-06 SD8, AC14,
-// AC20, AC24): a sender's camera tile carries a remote mark and, like every tile, waits for Start;
-// "Main audio: laptop / screen machine" shows while an audio sender is approved. No control for
-// the screen machine's input or System audio.
+// controls. B-19 (SD1, SD4, SD5, SD10, PD3, PD10): the link line in a status bar pinned at the top,
+// coloured by the link's group, with DJ mode's waiting badge at its end; everything else in a
+// scrolling middle, and the faders in a bank pinned at the bottom or the right edge as the
+// viewport's arrangement decides. It talks only to the device socket; it never starts the engine or
+// audio and never asks for a camera or microphone. Every control is disabled while the link is
+// locked (SD12), and the page shows the screen's state, never its own guess (SD5). Remote input
+// (B-06 SD8, AC14, AC20, AC24): a sender's camera tile carries a remote mark and, like every tile,
+// waits for Start; "Main audio: laptop / screen machine" shows while an audio sender is approved.
+// No control for the screen machine's input or System audio.
 import type { ScreenState } from "@djv/shared";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
@@ -15,7 +16,7 @@ import { FaderBank } from "./FaderBank.tsx";
 import { VjPanel } from "./VjPanel.tsx";
 import { Wheel } from "./Wheel.tsx";
 import { useArrangement } from "./arrangement.ts";
-import { createDeviceLink, openSocket, type DeviceLink } from "./device-link.ts";
+import { createDeviceLink, LINK_GROUP, openSocket, type DeviceLink } from "./device-link.ts";
 import { keyStore, modeStore, type Mode } from "./remembered.ts";
 import { styles } from "./styles.ts";
 // The controller's look (B-19 PD2): a <style> inside this page's own root, never a linked file,
@@ -102,10 +103,24 @@ export function Controller() {
   return (
     <main data-testid="controller" className="djv-control" data-arrangement={arrangement}>
       <style>{css}</style>
-      <div data-testid="status-bar" className="djv-status">
+      <div
+        data-testid="status-bar"
+        className="djv-status"
+        data-link-group={LINK_GROUP[view.status]}
+      >
         <div data-testid="link-line" role="status" className="djv-status-text">
           {view.text}
         </div>
+        {mode === "dj" && (
+          <WaitingBadge
+            pending={view.pending}
+            disabled={locked}
+            open={approvalsOpen}
+            onOpen={setApprovalsOpen}
+            onAccept={(deviceId) => link.send({ type: "accept", deviceId })}
+            onReject={(deviceId) => link.send({ type: "reject", deviceId })}
+          />
+        )}
       </div>
 
       <div data-testid="control-scroll" className="djv-scroll">
@@ -149,16 +164,6 @@ export function Controller() {
               {m === "dj" ? "DJ" : "VJ"}
             </button>
           ))}
-          {mode === "dj" && (
-            <WaitingBadge
-              pending={view.pending}
-              disabled={locked}
-              open={approvalsOpen}
-              onOpen={setApprovalsOpen}
-              onAccept={(deviceId) => link.send({ type: "accept", deviceId })}
-              onReject={(deviceId) => link.send({ type: "reject", deviceId })}
-            />
-          )}
         </div>
 
         {state && (

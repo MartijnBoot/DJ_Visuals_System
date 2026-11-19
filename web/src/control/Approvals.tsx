@@ -1,8 +1,9 @@
 // Pending approval requests on a controller (B-04 spec SD18, AC8, AC10): each with its device hint
 // and sequence label, Accept and Reject. VJ mode lists them inline; DJ mode shows a "1 waiting"
-// badge that opens the same list as a prompt. A device never sees its own request here: it is
-// not approved while it waits. A sender's request names its role (B-06 AC8): "<hint> — Device n
-// wants to send video" (or "audio", "video and audio").
+// badge that opens the same list as a prompt; B-19 (SD10): the badge sits in the pinned status bar,
+// never disabled, so a waiting device is seen and reachable without scrolling. A device never sees
+// its own request here: it is not approved while it waits. A sender's request names its role (B-06
+// AC8): "<hint> — Device n wants to send video" (or "audio", "video and audio").
 import type { DeviceEntry } from "@djv/shared";
 import { useEffect, useRef } from "react";
 import { styles } from "./styles.ts";
@@ -73,7 +74,7 @@ export function WaitingBadge(
         <button
           type="button"
           data-testid="waiting-badge"
-          style={styles.badge}
+          className="djv-badge"
           onClick={() => props.onOpen(true)}
         >
           {count} waiting

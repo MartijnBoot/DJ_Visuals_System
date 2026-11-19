@@ -161,3 +161,23 @@ describe("the tokens meet the brief's contrast pairs (SD11, AC1)", () => {
     expect(Math.abs(ratio - pair.ratio)).toBeLessThan(0.006);
   });
 });
+
+// T6 (spec SD4, AC17; plan PD10): each group's bar is its token, its text the group's text token;
+// the text holds 4.5:1 on the bar and the bar 3:1 against the page.
+describe("the status bar's group colours (SD4, AC17)", () => {
+  const css = readFileSync(stylesheet, "utf8");
+  const declared = tokens(css);
+
+  it.each(["ok", "attention", "stop"])("%s", (group) => {
+    const rule = new RegExp(
+      String.raw`\.djv-control \.djv-status\[data-link-group="${group}"\]\s*\{([^}]*)\}`,
+    ).exec(css);
+    expect(rule, `a rule for data-link-group="${group}"`).not.toBeNull();
+    expect(rule![1]).toMatch(new RegExp(String.raw`background:\s*var\(--${group}\);`));
+    expect(rule![1]).toMatch(new RegExp(String.raw`(?<![-\w])color:\s*var\(--on-${group}\);`));
+    const bar = declared.get(`--${group}`)!;
+    const text = declared.get(`--on-${group}`)!;
+    expect(contrast(text, bar)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(bar, declared.get("--bg")!)).toBeGreaterThanOrEqual(3);
+  });
+});

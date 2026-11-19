@@ -100,11 +100,49 @@
   font-weight: 700;
   background: var(--panel);
 }
+.djv-control .djv-status[data-link-group="ok"] {
+  background: var(--ok);
+  color: var(--on-ok);
+}
+.djv-control .djv-status[data-link-group="attention"] {
+  background: var(--attention);
+  color: var(--on-attention);
+}
+.djv-control .djv-status[data-link-group="stop"] {
+  background: var(--stop);
+  color: var(--on-stop);
+}
 .djv-control .djv-status-text {
   flex: 1 1 auto;
   min-width: 0;
   padding-right: var(--space-3);
   overflow-wrap: anywhere;
+}
+
+/* The waiting badge (SD10): a key the bar's full height at its right end, apart from all three
+   bar colours. Never disabled. Its ring is drawn inside it, so the viewport's edge, which the
+   bar touches above and to the right, never clips it (T1 review R2). */
+.djv-control .djv-badge {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  align-self: stretch;
+  margin: -6px 0;
+  white-space: nowrap;
+  min-width: var(--target);
+  min-height: var(--bar-min);
+  padding: 0 var(--space-3);
+  font: 800 var(--fs-body) / 20px var(--font);
+  color: var(--attention);
+  background: var(--bg);
+  border: 2px solid var(--attention);
+  border-radius: 0;
+  cursor: pointer;
+}
+.djv-control .djv-badge:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: -5px;
+  box-shadow: inset 0 0 0 2px var(--focus-halo);
 }
 
 /* ---- Scrolling middle ---- */
