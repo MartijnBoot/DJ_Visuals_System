@@ -16,6 +16,8 @@ interface FakeProgram {
   /** `COMPLETION_STATUS_KHR`: the parallel link has finished. */
   complete: boolean;
   fails: boolean;
+  /** The program that puts a finished frame on the canvas (D-14): not a look, not numbered. */
+  present?: boolean;
 }
 
 interface FakeOptions {
@@ -27,6 +29,7 @@ function fakeCanvas(width: number, height: number, { parallel = true }: FakeOpti
   const calls: Call[] = [];
   const programs: FakeProgram[] = [];
   const control = { failLinks: false, shaderLog: "" };
+  const sources = new WeakMap<object, string>();
   const special: Record<string, (...args: unknown[]) => unknown> = {
     getExtension: (name) =>
       name === "KHR_parallel_shader_compile" && parallel
@@ -40,6 +43,22 @@ function fakeCanvas(width: number, height: number, { parallel = true }: FakeOpti
       };
       programs.push(program);
       return program;
+    },
+    // Sources are kept beside the shader objects, never on them: a recorded call that takes a
+    // shader must not appear to carry its code (B-03 T4's shaderSource check).
+    createShader: () => ({}),
+    shaderSource: (shader, source) => {
+      sources.set(shader as object, source as string);
+    },
+    // The present program is told apart by its fragment shader and takes no number, so the
+    // looks keep theirs: the built-in is 0 and each linked profile the next.
+    attachShader: (program, shader) => {
+      const p = program as FakeProgram;
+      if (!sources.get(shader as object)?.includes("uFrame") || p.present) return;
+      p.present = true;
+      p.fails = false;
+      programs.splice(programs.indexOf(p), 1);
+      p.id = -1;
     },
     getProgramParameter: (program, pname) => {
       const p = program as FakeProgram;
@@ -114,6 +133,37 @@ function frames(): Call[][] {
 const usedProgram = (frame: Call[]) =>
   (frame.find((c) => c.name === "useProgram")?.args[0] as FakeProgram | undefined)?.id;
 
+/** The look's draws in a frame: every `drawArrays` but the present's (D-14). */
+const lookDraws = (frame: Call[]) => {
+  let present = false;
+  let n = 0;
+  for (const c of frame) {
+    if (c.name === "useProgram") present = (c.args[0] as FakeProgram | null)?.present === true;
+    if (c.name === "drawArrays" && !present) n++;
+  }
+  return n;
+};
+
+/** Look programs created so far: every `createProgram` but the present's (D-14). */
+const looksLinked = (calls: Call[]) =>
+  calls.filter((c) => c.name === "createProgram").length -
+  new Set(
+    calls
+      .filter((c) => c.name === "attachShader" && (c.args[0] as FakeProgram).present)
+      .map((c) => c.args[0]),
+  ).size;
+
+/** Each render target's framebuffer → the texture attached to it, from every call so far. */
+const textureOf = (calls: Call[]) => {
+  const map = new Map<unknown, unknown>();
+  let bound: unknown = null;
+  for (const c of calls) {
+    if (c.name === "bindFramebuffer" && c.args[0] === "FRAMEBUFFER") bound = c.args[1];
+    if (c.name === "framebufferTexture2D") map.set(bound, c.args[3]);
+  }
+  return map;
+};
+
 const uniform = (frame: Call[], name: string) =>
   frame.find((c) => c.name.startsWith("uniform") && (c.args[0] as { name?: string }).name === name)
     ?.args[1];
@@ -182,15 +232,52 @@ describe("render scale in the frame loop (SD8)", () => {
     expect(engine.stats().renderScale).toBe(0.5);
   });
 
-  it("renders at canvas size × scale and blits up to the full canvas", () => {
+  it("renders at canvas size × scale and draws it up to the full canvas, linear-filtered", () => {
     const { engine, calls } = started(640, 360);
     engine.setScaleCap(0.75);
     frameAt(0);
-    const viewport = calls.filter((c) => c.name === "viewport").at(-1)!;
-    expect(viewport.args).toEqual([0, 0, 480, 270]);
-    const blit = calls.filter((c) => c.name === "blitFramebuffer").at(-1)!;
-    expect(blit.args.slice(0, 8)).toEqual([0, 0, 480, 270, 0, 0, 640, 360]);
-    expect(blit.args[9]).toBe("LINEAR");
+    const frame = frames().at(-1)!;
+    const viewports = frame.filter((c) => c.name === "viewport").map((c) => c.args);
+    expect(viewports).toEqual([
+      [0, 0, 480, 270], // the look, into the scaled target
+      [0, 0, 640, 360], // the present, onto the canvas
+    ]);
+    // The targets sample with LINEAR filtering, so the present scales up as the blit did.
+    expect(calls).toContainEqual({
+      name: "texParameteri",
+      args: ["TEXTURE_2D", "TEXTURE_MAG_FILTER", "LINEAR"],
+    });
+  });
+
+  // D-14: Chromium can run a blit into the canvas with its read binding on the canvas too
+  // (`glBlitFramebuffer: Blit feedback loop`); the blit is rejected and the frame shows black.
+  // The frame reaches the canvas by a draw that samples the target's texture instead.
+  it("puts the frame on the canvas with a draw from the target just drawn, never a blit (D-14)", () => {
+    const { calls } = started(640, 360);
+    frameAt(0);
+    frameAt(16);
+    for (const frame of frames()) {
+      expect(frame.filter((c) => c.name === "blitFramebuffer")).toEqual([]);
+      const look = frame.findIndex((c) => c.name === "drawArrays");
+      const lookTarget = frame
+        .slice(0, look)
+        .filter((c) => c.name === "bindFramebuffer" && c.args[0] === "FRAMEBUFFER")
+        .at(-1)!.args[1];
+      const after = frame.slice(look + 1);
+      const presentAt = after.findIndex((c) => c.name === "drawArrays");
+      expect(presentAt).toBeGreaterThan(-1);
+      const setup = after.slice(0, presentAt);
+      const program = setup.filter((c) => c.name === "useProgram").at(-1)!.args[0] as FakeProgram;
+      expect(program.present).toBe(true);
+      expect(setup.filter((c) => c.name === "bindFramebuffer").at(-1)!.args).toEqual([
+        "FRAMEBUFFER",
+        null,
+      ]);
+      expect(setup.filter((c) => c.name === "viewport").at(-1)!.args).toEqual([0, 0, 640, 360]);
+      const texture = setup.filter((c) => c.name === "bindTexture").at(-1)!.args[1];
+      expect(texture).toBe(textureOf(calls).get(lookTarget));
+      expect(lookDraws(frame)).toBe(1);
+    }
   });
 });
 
@@ -205,7 +292,7 @@ describe("setProfile and the prepared swap (B-02 SD15, PD4)", () => {
     const { calls } = started();
     frameAt(0);
     expect(usedProgram(frames()[0]!)).toBe(0);
-    expect(calls.filter((c) => c.name === "createProgram")).toHaveLength(1);
+    expect(looksLinked(calls)).toBe(1);
   });
 
   it("keeps drawing the old program until the link is ready, then swaps between two frames", async () => {
@@ -223,7 +310,7 @@ describe("setProfile and the prepared swap (B-02 SD15, PD4)", () => {
     const all = frames();
     expect(all.map(usedProgram)).toEqual([0, 0, 0, 0, 1, 1]);
     for (const frame of all) {
-      expect(frame.filter((c) => c.name === "drawArrays")).toHaveLength(1);
+      expect(lookDraws(frame)).toBe(1);
     }
     expect(uniform(all[4]!, "uZoom")).toBeCloseTo(1.12, 9);
   });
@@ -246,7 +333,7 @@ describe("setProfile and the prepared swap (B-02 SD15, PD4)", () => {
     };
     await engine.setProfile(louder);
     frameAt(16);
-    expect(calls.filter((c) => c.name === "createProgram")).toHaveLength(1);
+    expect(looksLinked(calls)).toBe(1);
     expect(frames().map(usedProgram)).toEqual([0, 0]);
     expect(uniform(frames()[0]!, "uZoom")).toBe(1);
     expect(uniform(frames()[1]!, "uZoom")).toBeCloseTo(1.12, 9);
@@ -339,7 +426,7 @@ describe("setProfile and the prepared swap (B-02 SD15, PD4)", () => {
     const again = engine.setProfile(zoomOnly);
     frameAt(48);
     await again;
-    expect(calls.filter((c) => c.name === "createProgram")).toHaveLength(2);
+    expect(looksLinked(calls)).toBe(2);
     expect(frames().map(usedProgram)).toEqual([0, 1, 0, 1]);
   });
 });
@@ -373,13 +460,13 @@ describe("custom effects in the engine (B-03)", () => {
     await first;
     await engine.setProfile(coded(CODE, 0.9));
     frameAt(32);
-    expect(calls.filter((c) => c.name === "createProgram")).toHaveLength(2);
+    expect(looksLinked(calls)).toBe(2);
     expect(uniform(frames().at(-1)!, "uCustomParam")).toEqual(expect.arrayContaining([0.9]));
     const other = engine.setProfile(coded("return source(uv);"));
     fake.completeLinks();
     frameAt(48);
     await other;
-    expect(calls.filter((c) => c.name === "createProgram")).toHaveLength(3);
+    expect(looksLinked(calls)).toBe(3);
     expect(frames().map(usedProgram)).toEqual([0, 1, 1, 2]);
   });
 
@@ -434,6 +521,7 @@ describe("the limiter's previous frame (B-03)", () => {
       },
     ],
   };
+  /** Copies between targets: since D-14 the frame reaches the canvas by a draw, not a blit. */
   const blits = (frame: Call[]) => frame.filter((c) => c.name === "blitFramebuffer").length;
 
   it("copies the last output into both recreated targets, only in a custom profile", async () => {
@@ -442,7 +530,7 @@ describe("the limiter's previous frame (B-03)", () => {
     frameAt(16);
     builtIn.engine.setScaleCap(0.75);
     frameAt(32);
-    expect(frames().map(blits)).toEqual([1, 1, 1]);
+    expect(frames().map(blits)).toEqual([0, 0, 0]);
 
     const custom = started();
     frameAt(0);
@@ -456,7 +544,7 @@ describe("the limiter's previous frame (B-03)", () => {
     frameAt(64);
     // The swap frame seeds the target it draws into; the recreate frame copies the old output
     // into the new previous target, then seeds the one it draws into.
-    expect(frames().map(blits)).toEqual([1, 2, 1, 3, 1]);
+    expect(frames().map(blits)).toEqual([0, 1, 0, 2, 0]);
   });
 
   it("copies nothing at a swap into a built-in-only profile", async () => {
@@ -469,7 +557,7 @@ describe("the limiter's previous frame (B-03)", () => {
     fake.completeLinks();
     frameAt(16);
     await switched;
-    expect(frames().map(blits)).toEqual([1, 1]);
+    expect(frames().map(blits)).toEqual([0, 0]);
   });
 });
 
@@ -643,7 +731,7 @@ describe("context loss (B-03)", () => {
       },
     ],
   };
-  const draws = (frame: Call[]) => frame.filter((c) => c.name === "drawArrays").length;
+  const draws = lookDraws;
   const created = (frame: Call[], name: string) => frame.filter((c) => c.name === name).length;
 
   async function playing(profile: Profile) {

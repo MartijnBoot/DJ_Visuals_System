@@ -12,6 +12,7 @@ import {
   createTexture,
   deleteTarget,
   FULLSCREEN_VERTEX,
+  PRESENT_FRAGMENT,
   programReady,
   type Linking,
   type ParallelCompile,
@@ -201,7 +202,8 @@ const keyOf = (profile: Profile) =>
 const typesOf = (profile: Profile) => profile.effects.map((e) => e.type).join(",");
 
 export function createEngine(canvas: HTMLCanvasElement): Engine {
-  // No multisampling: `blitFramebuffer` may not write to a multisampled default framebuffer.
+  // No multisampling: the look is drawn into single-sampled targets, so a multisampled canvas
+  // would only cost memory (and before D-14 a blit could not write to one).
   const gl = canvas.getContext("webgl2", { antialias: false });
   if (!gl) throw new WebGL2UnavailableError();
   let parallel = gl.getExtension(
@@ -315,6 +317,17 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 
   let sourceTexture = createTexture(gl);
 
+  /** The program that draws a finished target onto the canvas (D-14). */
+  const createPresent = () => {
+    const program = createProgram(gl, FULLSCREEN_VERTEX, PRESENT_FRAGMENT);
+    return {
+      program,
+      uFrame: gl.getUniformLocation(program, "uFrame"),
+      uCanvas: gl.getUniformLocation(program, "uCanvas"),
+    };
+  };
+  let present = createPresent();
+
   const frames = createFrameStats();
   const scaler = createScaleController(frames);
   const latency = createLatencyWindow();
@@ -422,6 +435,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     targets = null;
     current = 0;
     sourceTexture = createTexture(gl);
+    present = createPresent();
     const wanted = active.profile;
     const hadCustom = bypassed !== null || hasCustom(wanted);
     if (bypassed === null && hasCustom(wanted)) bypassed = keyOf(wanted);
@@ -471,7 +485,8 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   };
 
   const draw = (timestamp: number, canvasWidth: number, canvasHeight: number) => {
-    // The internal resolution (SD8): the pass runs at canvas size × scale, the blit scales up.
+    // The internal resolution (SD8): the pass runs at canvas size × scale; the present draw
+    // scales it up to the canvas (D-14).
     const scale = scaler.scale();
     const width = Math.max(1, Math.round(canvasWidth * scale));
     const height = Math.max(1, Math.round(canvasHeight * scale));
@@ -540,21 +555,15 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.framebuffer);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    gl.blitFramebuffer(
-      0,
-      0,
-      width,
-      height,
-      0,
-      0,
-      canvasWidth,
-      canvasHeight,
-      gl.COLOR_BUFFER_BIT,
-      gl.LINEAR,
-    );
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    // Onto the canvas by a draw, never a blit (D-14): the target's texture, scaled up LINEAR.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvasWidth, canvasHeight);
+    gl.useProgram(present.program);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, target.texture);
+    gl.uniform1i(present.uFrame, 0);
+    gl.uniform2f(present.uCanvas, canvasWidth, canvasHeight);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
     current = 1 - current;
   };
 

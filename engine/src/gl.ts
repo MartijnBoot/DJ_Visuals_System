@@ -9,6 +9,21 @@ void main() {
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
+/**
+ * Puts a finished frame on the canvas (D-14): the target's texture, sampled LINEAR across the
+ * whole canvas, so a scaled target is scaled up as a linear blit would. A draw, not a
+ * `blitFramebuffer`: Chromium can run a blit into the canvas with its read binding on the canvas
+ * too ("Blit feedback loop"), reject it, and show that frame black.
+ */
+export const PRESENT_FRAGMENT = `#version 300 es
+precision highp float;
+uniform sampler2D uFrame;
+uniform vec2 uCanvas;
+out vec4 colour;
+void main() {
+  colour = texture(uFrame, gl_FragCoord.xy / uCanvas);
+}`;
+
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) throw new Error("WebGL2: createShader failed");
