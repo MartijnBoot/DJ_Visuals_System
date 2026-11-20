@@ -53,7 +53,15 @@ export async function record(page: Page, options: RecorderOptions = {}) {
           cameraDenied && kind === "video" ? "NotAllowedError" : "NotFoundError",
         );
       }
-      return keep(await getUserMedia(constraints));
+      try {
+        return keep(await getUserMedia(constraints));
+      } catch (e) {
+        // The browser's own refusal, named in the trace: the product's line says only "no camera
+        // found" for every error but NotAllowedError (D-13).
+        const { name, message } = e instanceof Error ? e : { name: String(e), message: "" };
+        console.warn(`media getUserMedia ${kind} refused: ${name}: ${message}`);
+        throw e;
+      }
     };
     if (md.getDisplayMedia) {
       const getDisplayMedia = md.getDisplayMedia.bind(md);
