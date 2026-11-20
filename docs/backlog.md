@@ -694,3 +694,41 @@ with sliders until it needs scrolling.
 **Touches.** `shared/src/profile.ts` (two flags per effect), the builder, `shared/src/control.ts`,
 `web/src/control/`, the screen applying it, the B-04 spec. Depends on B-04, sits next to B-16 in
 the controller layout.
+
+### B-19 — Controller restyled as a venue lighting desk
+
+- **Status:** specced → `docs/specs/phase-b-19-controller-lighting-desk.md`
+- **Added:** 2026-11-19
+- **Size:** M
+
+**Problem.** In the booth, `/control` looks like a web form next to the decks, the mixer and the
+lighting gear around it, and its sliders (native ranges with a thin track,
+`web/src/control/styles.ts`) feel too small to grab mid-set.
+
+**Idea.** A new visual style for `/control` taken from venue lighting gear: VJ mode looks like a
+dark console with long faders, DJ mode like a compact controller, and both share one visual
+language (colours, type, buttons, tiles, fader style). The sliders become real faders, larger and
+easier to grab. The work starts from a style brief made with Claude's design skills.
+
+**Why it matters.** The controller belongs among the gear it sits next to, and the dials are
+easier to hit by hand in a dark booth.
+
+**Not this.** New controls, new behaviour or new control messages (the always-visible wheel is
+B-16, effect faders are B-18). Restyling the screen page, the builder or `/send`. A copy of a
+particular manufacturer's console. Giving up any B-04 rule: targets at least 48×48 CSS px, no
+horizontal scrolling at 320 CSS px wide, the wheel usable by keyboard.
+
+**Open questions.**
+
+- How a long fader fits DJ mode on a phone in portrait; whether faders are vertical or horizontal
+  per mode and orientation.
+- Whether the screen machine's External control panel and the pairing screens follow the style.
+- Legibility in a dark booth: contrast, the active-tile mark and the link-state line
+  ("Reconnecting…") readable at a glance.
+- The layout leaves room for B-16's wheel and B-18's faders, in either build order.
+- Which B-04 UI rules this amends; the spec records the amendment.
+
+**Touches.** `web/src/control/` (`styles.ts`, `Controller.tsx`, `VjPanel.tsx`, `Wheel.tsx`,
+`Approvals.tsx`) and the `/control` browser tests that read layout or style. A guess: no change
+to the server, `engine/`, `shared/` or the control messages. Depends on B-04; sits next to B-16
+and B-18.

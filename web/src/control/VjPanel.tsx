@@ -6,7 +6,6 @@ import type { DeviceEntry, ScreenState } from "@djv/shared";
 import { useEffect, useState } from "react";
 import { ApprovalList } from "./Approvals.tsx";
 import type { RoundTripReading } from "./round-trip.ts";
-import { styles } from "./styles.ts";
 
 export interface VjPanelProps {
   state: ScreenState;
@@ -33,9 +32,9 @@ export function VjPanel(props: VjPanelProps) {
 
   return (
     <>
-      <section aria-label="Palette" style={{ display: "grid", gap: 8 }}>
-        <h2 style={styles.heading}>Palette</h2>
-        <div style={styles.row}>
+      <section aria-label="Palette" className="djv-section">
+        <h2 className="djv-legend">Palette</h2>
+        <div className="djv-row">
           {state.palette.map((colour, slot) => (
             <button
               key={slot}
@@ -45,24 +44,15 @@ export function VjPanel(props: VjPanelProps) {
               data-colour={colour}
               aria-label={`Colour ${slot + 1}${slot === state.primary ? ", primary" : ""}`}
               disabled={props.locked}
-              style={{
-                ...styles.button,
-                width: 56,
-                height: 56,
-                background: colour,
-                border: slot === state.primary ? "3px solid #f5c518" : "2px solid #fff",
-              }}
+              className={slot === state.primary ? "djv-swatch is-primary" : "djv-swatch"}
+              style={{ background: colour }}
               onClick={() => props.onSwatch(slot)}
             />
           ))}
         </div>
       </section>
 
-      <section
-        aria-label="Status"
-        data-testid="status-strip"
-        style={{ ...styles.row, ...styles.note, gap: 16 }}
-      >
+      <section aria-label="Status" data-testid="status-strip" className="djv-section djv-strip">
         <span data-testid="status-camera">camera: {state.camera}</span>
         <span data-testid="status-audio">audio: {state.audio}</span>
         <span data-testid="status-started">{state.started ? "started" : "not started"}</span>
@@ -73,8 +63,8 @@ export function VjPanel(props: VjPanelProps) {
       </section>
 
       {props.pending.length > 0 && (
-        <section aria-label="Waiting for approval" style={{ display: "grid", gap: 8 }}>
-          <h2 style={styles.heading}>Waiting for approval</h2>
+        <section aria-label="Waiting for approval" className="djv-section">
+          <h2 className="djv-legend">Waiting for approval</h2>
           <ApprovalList
             pending={props.pending}
             disabled={props.locked}

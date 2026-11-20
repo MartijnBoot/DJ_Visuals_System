@@ -35,6 +35,27 @@ export const LINK_TEXT: Readonly<Record<LinkStatus, string>> = {
   live: "Connected",
 };
 
+/**
+ * The status bar's colour group for each link state (B-19 spec SD4; plan PD10): live is ok; needs
+ * action or in progress is attention; ended or refused is stop. The colour is a second signal,
+ * never the only one: the text is always shown.
+ */
+export const LINK_GROUP: Readonly<Record<LinkStatus, "ok" | "attention" | "stop">> = {
+  live: "ok",
+  needs_code: "attention",
+  connecting: "attention",
+  waiting: "attention",
+  reconnecting: "attention",
+  screen_off: "attention",
+  rejected: "stop",
+  expired: "stop",
+  wrong_code: "stop",
+  too_many: "stop",
+  audio_taken: "stop",
+  throttled: "stop",
+  ended: "stop",
+};
+
 export interface DeviceLinkDeps extends PairLinkDeps {
   now(): number;
 }

@@ -12,6 +12,9 @@ test("before Start the overlay reads idle, no latency and the lock off (PD19)", 
   page,
 }) => {
   await page.goto("/");
+  // The screen renders only once `/api/health` answers (B-12 PD8), after `goto`'s load: keys
+  // pressed before the panel shows reach no listener (D-16).
+  await expect(page.getByTestId("panel")).toBeVisible();
   await page.keyboard.press("s"); // the panel out of the way; the overlay does not need it
   await page.keyboard.press("o");
   await expect(page.getByTestId("overlay-audio")).toHaveText("audio: idle");

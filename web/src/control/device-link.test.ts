@@ -2,7 +2,13 @@
 // with a fake socket, fake timers, fake storage and fake page events.
 import type { ScreenState, ToDevice } from "@djv/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDeviceLink, LINK_TEXT, type DeviceLink } from "./device-link.ts";
+import {
+  createDeviceLink,
+  LINK_GROUP,
+  LINK_TEXT,
+  type DeviceLink,
+  type LinkStatus,
+} from "./device-link.ts";
 
 const KEY = "AAAAAAAAAAAAAAAAAAAAAA";
 const CODE = "ABC234";
@@ -396,5 +402,34 @@ describe("view snapshots", () => {
     expect(link.view()).toBe(first);
     latest().deliver({ type: "pending", requests: [] });
     expect(link.view()).not.toBe(first);
+  });
+});
+
+// B-19 T6 (spec SD4, AC17; plan PD10): every link state has the status bar colour of its group.
+describe("the status bar's group for every link state (SD4)", () => {
+  const table: [LinkStatus, string, "ok" | "attention" | "stop"][] = [
+    ["live", "Connected", "ok"],
+    ["needs_code", "Scan the code on the screen machine", "attention"],
+    ["connecting", "Connecting…", "attention"],
+    ["waiting", "Waiting for approval", "attention"],
+    ["reconnecting", "Reconnecting…", "attention"],
+    ["screen_off", "Screen not connected", "attention"],
+    ["rejected", "Request rejected", "stop"],
+    ["expired", "Request expired — try again", "stop"],
+    ["wrong_code", "Wrong code", "stop"],
+    ["too_many", "Too many devices", "stop"],
+    ["audio_taken", "Another device is sending audio", "stop"],
+    ["throttled", "Too many wrong codes — try again in a minute", "stop"],
+    ["ended", "Pairing ended — scan the code again", "stop"],
+  ];
+
+  it.each(table)("%s (%s) is %s", (status, text, group) => {
+    expect(LINK_TEXT[status]).toBe(text);
+    expect(LINK_GROUP[status]).toBe(group);
+  });
+
+  it("the table covers every status", () => {
+    expect(table.map(([s]) => s).sort()).toEqual(Object.keys(LINK_TEXT).sort());
+    expect(Object.keys(LINK_GROUP).sort()).toEqual(Object.keys(LINK_TEXT).sort());
   });
 });

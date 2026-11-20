@@ -66,6 +66,8 @@ export interface ThrottleDeps<T> {
   requestFrame(fn: () => void): number;
   cancelFrame(id: number): void;
   send(value: T): void;
+  /** The least time between two sends; 16 ms when not given (the wheel's disc). */
+  minGapMs?: number;
 }
 
 export interface SendThrottle<T> {
@@ -73,12 +75,15 @@ export interface SendThrottle<T> {
   push(value: T): void;
   /** The drag ended: the last position goes now. */
   release(): void;
+  /** The drag was let go (B-19 SD9): the frame is cancelled and the pending value forgotten. */
+  drop(): void;
 }
 
 export function createSendThrottle<T>(deps: ThrottleDeps<T>): SendThrottle<T> {
   let pending: { value: T } | null = null;
   let frame: number | null = null;
   let lastSent = -Infinity;
+  const gap = deps.minGapMs ?? MIN_GAP_MS;
 
   const flush = () => {
     if (!pending) return;
@@ -90,7 +95,7 @@ export function createSendThrottle<T>(deps: ThrottleDeps<T>): SendThrottle<T> {
   const onFrame = () => {
     frame = null;
     if (!pending) return;
-    if (deps.now() - lastSent >= MIN_GAP_MS) flush();
+    if (deps.now() - lastSent >= gap) flush();
     else frame = deps.requestFrame(onFrame);
   };
 
@@ -103,6 +108,11 @@ export function createSendThrottle<T>(deps: ThrottleDeps<T>): SendThrottle<T> {
       if (frame !== null) deps.cancelFrame(frame);
       frame = null;
       flush();
+    },
+    drop() {
+      if (frame !== null) deps.cancelFrame(frame);
+      frame = null;
+      pending = null;
     },
   };
 }

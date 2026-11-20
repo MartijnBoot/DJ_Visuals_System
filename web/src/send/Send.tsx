@@ -11,10 +11,10 @@ import { useCallback, useEffect, useState } from "react";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "../capture/devices.ts";
 import { openSocket } from "../control/pair-link.ts";
 import { sendChoiceStore, sendKeyStore, type SendChoice } from "../control/remembered.ts";
-import { styles } from "../control/styles.ts";
 import { createWakeLock } from "../wake-lock.ts";
 import { cameraChoices, openCapture } from "./capture.ts";
 import { createSendLink, type SendLink, type SendView } from "./send-link.ts";
+import { styles } from "./styles.ts";
 
 /** Statuses that end this attempt: the capture is stopped and Send is offered again. */
 const OVER = new Set([
