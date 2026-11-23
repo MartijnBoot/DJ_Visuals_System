@@ -202,10 +202,13 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     return true;
   };
 
-  const pick = async (id: string): Promise<void> => {
+  /** A person's pick uses the choice current at the pick (SD5). */
+  const pick = (id: string): Promise<void> =>
+    pickWith(id, deps.transition?.() ?? DEFAULT_TRANSITION);
+
+  const pickWith = async (id: string, choice: TransitionChoice): Promise<void> => {
     const mine = ++token;
     picking = mine;
-    const choice = deps.transition?.() ?? DEFAULT_TRANSITION; // the choice at the pick (SD5)
     try {
       await pickAs(id, mine, choice);
     } finally {
@@ -252,7 +255,9 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     if (!rememberedPicked) {
       rememberedPicked = true;
       const id = remembered();
-      if (id && stored.some((e) => e.id === id)) await pick(id);
+      // Restoring is no pick: the remembered profile is drawn alone, as before B-09 (spec, edge
+      // cases: "the reloaded page draws the remembered profile alone, as today").
+      if (id && stored.some((e) => e.id === id)) await pickWith(id, DEFAULT_TRANSITION);
     }
   };
 

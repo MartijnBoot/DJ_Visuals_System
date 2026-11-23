@@ -583,4 +583,16 @@ describe("picks with the transition choice (B-09)", () => {
     expect(lastProfile(setProfile).palette[0]).toBe("#654321"); // Keep colour applies
     expect(active.state().storedPalette).toEqual(warm.palette);
   });
+
+  it("restores the remembered profile alone, as before B-09, whatever the choice (spec edge case)", async () => {
+    const current = choice({ kind: "crossfade", keepColour: true });
+    const { active, setProfile, warm } = setup({ remembered: "w1", choice: current });
+    active.setColour(active.state().primary, "#ff8800"); // a live built-in primary to carry
+    await active.open();
+    expect(lastOptions(setProfile)).toEqual({ pick: true }); // a Cut, no transition
+    expect(lastProfile(setProfile).palette).toEqual(warm.palette);
+    expect(active.state()).toMatchObject({ activeId: "w1", palette: warm.palette });
+    await active.pick("c1"); // a person's pick still uses the choice
+    expect(lastOptions(setProfile).transition).toMatchObject({ kind: "crossfade" });
+  });
 });

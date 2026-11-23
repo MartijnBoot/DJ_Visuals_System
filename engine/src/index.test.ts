@@ -1305,22 +1305,32 @@ describe("transitions: two looks and the Crossfade (B-09)", () => {
   });
 
   it("keeps the outgoing look's program when a ninth program is linked (PD13)", async () => {
+    // The outgoing look's program must be the oldest one nothing else protects: Coded 1 goes
+    // out in a long crossfade, then Beat cut picks wait (audio ok, no beat) and are superseded
+    // one by one, each linked and cached, until the cache holds nine.
     const rig = started(640, 360, { parallel: false });
+    rig.engine.setAudioOk(true);
+    rig.engine.setFeatures({ ...ZERO_FEATURES, beat: 0, capturedAt: 1 });
     frameAt(0);
     let t = 0;
-    for (let n = 1; n <= 7; n++) {
-      const cut = rig.engine.setProfile(coded(n), { pick: true });
-      frameAt((t += 16));
-      await cut;
-    }
+    const cut = rig.engine.setProfile(coded(1), { pick: true });
+    frameAt((t += 16));
+    await cut;
     const outgoingProgram = rig.fake.programs.at(-1);
-    const switched = rig.engine.setProfile(coded(8), fade());
+    const switched = rig.engine.setProfile(coded(2), fade(8000));
     frameAt((t += 16));
     await switched;
+    const waits: Promise<void>[] = [];
+    let oldestWaiting: unknown;
+    for (let n = 3; n <= 8; n++) {
+      waits.push(rig.engine.setProfile(coded(n), fade(2000, "beatCut")).catch(() => {}));
+      frameAt((t += 16)); // linked and cached; it waits for a beat
+      if (n === 3) oldestWaiting = rig.fake.programs.at(-1);
+    }
     frameAt(t + 16);
     const removed = rig.calls.filter((c) => c.name === "deleteProgram").map((c) => c.args[0]);
-    expect(removed).toHaveLength(1); // the oldest, the first coded program
+    expect(removed).toEqual([oldestWaiting]); // Coded 3, not the outgoing Coded 1
     expect(removed).not.toContain(outgoingProgram);
-    expect(lookIds(frames().at(-1)!)).toEqual([7, 8]);
+    expect(lookIds(frames().at(-1)!)).toEqual([1, 2]); // the crossfade still draws both
   });
 });
