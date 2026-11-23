@@ -17,6 +17,7 @@ import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-s
 import { createProfile, flat } from "./fixtures/profiles.ts";
 import { start } from "./helpers.ts";
 import { remote, type Remote } from "./remote-fixtures.ts";
+import { dropNetwork, keepSockets } from "./sockets.ts";
 
 const PHONE = { width: 320, height: 568 };
 
@@ -38,8 +39,6 @@ test.afterEach(async () => {
   await server.dispose();
 });
 
-type SocketWindow = { __sockets: WebSocket[] };
-
 async function screen(page: Page): Promise<string> {
   await page.goto(`${server.origin}/`);
   await page.getByTestId("control-switch").click();
@@ -50,17 +49,7 @@ async function screen(page: Page): Promise<string> {
 async function open(browser: Browser, url: string, options: BrowserContextOptions = {}) {
   const context = await browser.newContext({ viewport: PHONE, ...LAN_CONTEXT, ...options });
   contexts.push(context);
-  await context.addInitScript(() => {
-    const Base = window.WebSocket;
-    const all: WebSocket[] = [];
-    (window as unknown as SocketWindow).__sockets = all;
-    window.WebSocket = class extends Base {
-      constructor(url: string | URL, protocols?: string | string[]) {
-        super(url, protocols);
-        all.push(this);
-      }
-    };
-  });
+  await keepSockets(context);
   const phone = await context.newPage();
   await phone.goto(url);
   return phone;
@@ -97,10 +86,7 @@ test("the status bar takes its group's colour, the text always shown and legible
   await expectBar(phone, "Connected", "ok");
 
   // A Wi-Fi drop: Reconnecting…, attention.
-  await phone.context().setOffline(true);
-  await phone.evaluate(() =>
-    (window as unknown as SocketWindow).__sockets.forEach((ws) => ws.close()),
-  );
+  await dropNetwork(phone);
   await expectBar(phone, "Reconnecting…", "attention");
   await phone.context().setOffline(false);
   await expectBar(phone, "Connected", "ok");

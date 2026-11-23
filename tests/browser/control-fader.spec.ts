@@ -12,6 +12,7 @@ import {
 import { contrast } from "../contrast.ts";
 import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-server.ts";
 import { dragFader, faderValue, setFader } from "./fader.ts";
+import { dropNetwork, keepSockets } from "./sockets.ts";
 
 const PHONE = { width: 320, height: 568 };
 
@@ -27,13 +28,11 @@ test.afterEach(async () => {
   await server.dispose();
 });
 
-type SocketWindow = { __sockets: WebSocket[] };
-
 interface Phone {
   page: Page;
   /** The `dials` frames this controller has sent so far. */
   dials(): unknown[];
-  /** Ends the link as a Wi-Fi drop would: offline, every socket closed. */
+  /** Ends the link as a Wi-Fi drop would: offline, every socket closed abnormally (D-17). */
   drop(): Promise<void>;
 }
 
@@ -52,17 +51,7 @@ async function paired(
 ): Promise<Phone> {
   const context = await browser.newContext({ viewport: PHONE, ...LAN_CONTEXT, ...options });
   contexts.push(context);
-  await context.addInitScript(() => {
-    const Base = window.WebSocket;
-    const all: WebSocket[] = [];
-    (window as unknown as SocketWindow).__sockets = all;
-    window.WebSocket = class extends Base {
-      constructor(url: string | URL, protocols?: string | string[]) {
-        super(url, protocols);
-        all.push(this);
-      }
-    };
-  });
+  await keepSockets(context);
   const phone = await context.newPage();
   const sent: unknown[] = [];
   phone.on("websocket", (ws) =>
@@ -79,12 +68,7 @@ async function paired(
   return {
     page: phone,
     dials: () => [...sent],
-    async drop() {
-      await context.setOffline(true);
-      await phone.evaluate(() =>
-        (window as unknown as SocketWindow).__sockets.forEach((ws) => ws.close()),
-      );
-    },
+    drop: () => dropNetwork(phone),
   };
 }
 

@@ -19,6 +19,7 @@ import {
 import { setFader } from "./fader.ts";
 import { createProfile, flat, twelveEffects } from "./fixtures/profiles.ts";
 import { meanRgb, pixels, record, recorded, start } from "./helpers.ts";
+import { dropNetwork, keepSockets } from "./sockets.ts";
 
 const PHONE = { width: 390, height: 844 };
 const TABLET = { width: 1024, height: 768 };
@@ -50,11 +51,9 @@ async function screen(page: Page): Promise<string> {
 interface ContextOptions {
   viewport?: { width: number; height: number };
   userAgent?: string;
-  /** Keep the page's WebSockets reachable, so a test can drop them (`dropSockets`). */
+  /** Keep the page's WebSockets reachable, so a test can drop them (`dropNetwork`). */
   dropSockets?: boolean;
 }
-
-type SocketWindow = { __sockets: WebSocket[] };
 
 async function context(
   browser: Browser,
@@ -62,25 +61,9 @@ async function context(
 ): Promise<BrowserContext> {
   const made = await browser.newContext({ viewport: PHONE, ...LAN_CONTEXT, ...options });
   contexts.push(made);
-  if (keep) {
-    await made.addInitScript(() => {
-      const Base = window.WebSocket;
-      const all: WebSocket[] = [];
-      (window as unknown as SocketWindow).__sockets = all;
-      window.WebSocket = class extends Base {
-        constructor(url: string | URL, protocols?: string | string[]) {
-          super(url, protocols);
-          all.push(this);
-        }
-      };
-    });
-  }
+  if (keep) await keepSockets(made);
   return made;
 }
-
-/** Closes every socket the page holds, as a dropped network would end them. */
-const dropSockets = (phone: Page) =>
-  phone.evaluate(() => (window as unknown as SocketWindow).__sockets.forEach((ws) => ws.close()));
 
 async function controller(
   browser: Browser,
@@ -274,8 +257,7 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     await page.getByTestId("slider-reactivity").fill("0.3");
     await expect(phone.getByTestId("dial-reactivity")).toHaveAttribute("aria-valuenow", "0.3");
     // A Wi-Fi drop: the network goes, and the open socket with it.
-    await phone.context().setOffline(true);
-    await dropSockets(phone);
+    await dropNetwork(phone);
     await expect(phone.getByTestId("link-line")).toHaveText("Reconnecting…");
     await expect(phone.getByTestId("dial-reactivity")).toBeDisabled();
     await expect(phone.getByTestId("profile-tile").first()).toBeDisabled();
@@ -556,8 +538,7 @@ test.describe("part 2: the spec's scenario (T16, Verification 1)", () => {
     });
 
     await test.step("offline, then online: Reconnecting…, then the state, no new approval", async () => {
-      await vj.context().setOffline(true);
-      await dropSockets(vj);
+      await dropNetwork(vj);
       await expect(vj.getByTestId("link-line")).toHaveText("Reconnecting…");
       await expect(vj.getByTestId("dial-reactivity")).toBeDisabled();
       await page.getByTestId("slider-reactivity").fill("0.6");

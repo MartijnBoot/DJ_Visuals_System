@@ -15,6 +15,7 @@ import {
 import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-server.ts";
 import { dragFader, setFader } from "./fader.ts";
 import { createProfile, flat, twelveEffects } from "./fixtures/profiles.ts";
+import { dropNetwork, keepSockets } from "./sockets.ts";
 
 const PORTRAIT = { width: 320, height: 568 };
 const LANDSCAPE = { width: 568, height: 320 };
@@ -35,8 +36,6 @@ test.afterEach(async () => {
   await server.dispose();
 });
 
-type SocketWindow = { __sockets: WebSocket[] };
-
 interface Phone {
   page: Page;
   dials(): unknown[];
@@ -55,17 +54,7 @@ async function paired(page: Page, browser: Browser, viewport = PORTRAIT): Promis
   const url = await screen(page);
   const context = await browser.newContext({ viewport, ...LAN_CONTEXT });
   contexts.push(context);
-  await context.addInitScript(() => {
-    const Base = window.WebSocket;
-    const all: WebSocket[] = [];
-    (window as unknown as SocketWindow).__sockets = all;
-    window.WebSocket = class extends Base {
-      constructor(url: string | URL, protocols?: string | string[]) {
-        super(url, protocols);
-        all.push(this);
-      }
-    };
-  });
+  await keepSockets(context);
   const phone = await context.newPage();
   const sent: unknown[] = [];
   phone.on("websocket", (ws) =>
@@ -82,12 +71,7 @@ async function paired(page: Page, browser: Browser, viewport = PORTRAIT): Promis
   return {
     page: phone,
     dials: () => [...sent],
-    async drop() {
-      await context.setOffline(true);
-      await phone.evaluate(() =>
-        (window as unknown as SocketWindow).__sockets.forEach((ws) => ws.close()),
-      );
-    },
+    drop: () => dropNetwork(phone),
     back: () => context.setOffline(false),
   };
 }
