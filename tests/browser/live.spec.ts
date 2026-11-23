@@ -540,7 +540,7 @@ test("with the cap at 75% the scale never reads 100% (AC15)", async ({ page }) =
   expect(seen.filter((s) => s === "scale 100%")).toEqual([]);
 });
 
-test("nothing but the page, its assets, health, the screen socket and the two profile reads is ever requested, the profile reads only after a user action (AC17, B-02 AC18, B-04 AC36)", async ({
+test("nothing but the page, its assets, health, the screen socket and the two profile reads is ever requested, the profile reads only after a user action (AC17, B-02 AC18, B-04 AC36, B-09 AC27)", async ({
   page,
   request,
 }) => {
@@ -560,6 +560,14 @@ test("nothing but the page, its assets, health, the screen socket and the two pr
   await start(page);
   await page.keyboard.press("o");
   await expect(page.getByTestId("profile-picker")).toBeEnabled();
+  // B-09 AC27: the set transitions — a crossfade in, a dip back to the built-in, and in again.
+  await page.getByTestId("transition-kind").selectOption("crossfade");
+  await page.getByTestId("profile-picker").selectOption(stored.id);
+  await expect(page.getByTestId("overlay-profile")).toHaveText("profile: Twelve effects");
+  await page.getByTestId("transition-kind").selectOption("dip");
+  await page.getByTestId("profile-picker").selectOption({ label: "Built-in" });
+  await expect(page.getByTestId("overlay-profile")).toHaveText("profile: Built-in");
+  await page.getByTestId("transition-kind").selectOption("crossfade");
   await page.getByTestId("profile-picker").selectOption(stored.id);
   await expect(page.getByTestId("overlay-profile")).toHaveText("profile: Twelve effects");
   await page.waitForTimeout(6000); // past one health poll after the first

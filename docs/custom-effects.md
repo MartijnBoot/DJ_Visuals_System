@@ -54,7 +54,7 @@ These names, and no others, are the contract.
 | Name            | Type    | What it is                                                                                                                   |
 | --------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `source(p)`     | `vec3`  | The picture before this effect, at place `p` (a `vec2`). Each call runs everything before it in the stack again.            |
-| `lastFrame(p)`  | `vec3`  | The previous output frame at `p`, after the flash limiter.                                                                   |
+| `lastFrame(p)`  | `vec3`  | This look's previous output frame at `p`, after the flash limiter; during a transition never the mixed frame (below).       |
 | `resolution`    | `vec2`  | The output's size in pixels as it is drawn now (the render scale may lower it).                                             |
 | `time`          | `float` | Seconds, wrapping after an hour.                                                                                             |
 | `audio.level`   | `float` | Loudness, 0 to 1, after the reactivity dial: at reactivity 0 every `audio` value is 0.                                       |
@@ -97,7 +97,11 @@ the real check, and `pnpm profile:check` runs it.
 - **The guard.** If the GPU cannot keep up even at a 50% render scale for 3 s, the screen turns
   the profile's custom effects off and says so; picking the profile again retries, and in the
   builder an edit to the code does. If the graphics context is lost, the screen comes back
-  without the custom effects.
+  without the custom effects. The guard does not act while a transition runs.
+- **Transitions.** While the screen mixes two looks, each keeps its own history: `lastFrame` and
+  the flash limiter read this effect's own look's previous output, never the mixed frame on
+  screen. On the first frame of an incoming look, `lastFrame` is the frame that was on screen when
+  the transition started; the outgoing look runs on at the dials and colours it had then.
 
 Cost: everything before a custom effect runs once per `source` call, so a body that samples
 `source` nine times makes the stack before it nine times as heavy. The builder shows the frame

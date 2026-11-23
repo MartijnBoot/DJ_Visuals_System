@@ -99,7 +99,8 @@ One dark theme; `prefers-color-scheme` is ignored (SD11).
 - **Scrolling area** (`--bg`, 8px padding). Each block is a section: `--panel`, 1px `--line-soft`
   frame, `--radius-panel`, 10px padding. A section's heading today becomes its legend, in
   `--fs-legend` `--text-muted`, like a label printed on the panel: PROFILE, CAMERA, MAIN AUDIO,
-  PALETTE, WAITING FOR APPROVAL. No heading is added or removed. The mode toggle (DJ, VJ) is a row
+  PALETTE, WAITING FOR APPROVAL, and TRANSITION in VJ mode (B-09, approved by the owner at its
+  plan's audit, 2026-11-23). No other heading is added or removed. The mode toggle (DJ, VJ) is a row
   of two keys above the sections; the Primary colour key and VJ's status strip sit in sections
   without a legend, as today.
 - **Keys and tiles.** At rest: `--key`, 1px `--line` edge, `--text`, weight 600, at least

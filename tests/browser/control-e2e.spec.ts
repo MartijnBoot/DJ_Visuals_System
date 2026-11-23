@@ -338,7 +338,7 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     await expect(ninth.getByTestId("link-line")).toHaveText("Too many devices");
   });
 
-  test("the screen requests only the allow-list during a controlled run, and writes nothing (AC22, AC36)", async ({
+  test("the screen requests only the allow-list during a controlled run, and writes nothing (AC22, AC36, B-09 AC27)", async ({
     page,
     browser,
   }) => {
@@ -352,8 +352,19 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     const url = await screen(page);
     const phone = await paired(page, browser, url, { viewport: TABLET });
     const tile = phone.locator(`[data-testid=profile-tile][data-profile-id="${twelve.id}"]`);
+    const builtIn = phone.locator('[data-testid=profile-tile][data-profile-id="builtin"]');
+    // B-09 AC27: transition controls, and picks with a crossfade and a dip (VJ mode at TABLET).
+    await phone.getByTestId("transition-crossfade").click();
+    await expect(phone.getByTestId("transition-crossfade")).toHaveAttribute("aria-pressed", "true");
     await tile.click();
     await expect(tile).toHaveAttribute("aria-pressed", "true"); // the pick has landed
+    await phone.getByTestId("transition-dip").click();
+    await phone.getByTestId("transition-keep-colour").click();
+    await expect(phone.getByTestId("transition-dip")).toHaveAttribute("aria-pressed", "true");
+    await builtIn.click();
+    await expect(builtIn).toHaveAttribute("aria-pressed", "true");
+    await tile.click();
+    await expect(tile).toHaveAttribute("aria-pressed", "true");
     await setFader(phone.getByTestId("dial-reactivity"), 0.8);
     await phone.locator('[data-testid=swatch][data-slot="1"]').click();
     await phone.getByTestId("wheel-disc").focus();
