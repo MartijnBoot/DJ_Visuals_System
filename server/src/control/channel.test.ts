@@ -63,6 +63,24 @@ describe("receive", () => {
     ]);
   });
 
+  it("drops each refused transition with one warn naming transition, and stays open (B-09 AC25)", () => {
+    listen();
+    const refused = [
+      { type: "transition", seq: 1, kind: "zoom" },
+      { type: "transition", seq: 2, duration: 0.49 },
+      { type: "transition", seq: 3, duration: 8.01 },
+      { type: "transition", seq: 4 },
+      { type: "transition", seq: 5, kind: "cut", extra: 1 },
+    ];
+    for (const m of refused) deliver(text(m));
+    expect(got).toEqual([]);
+    expect(log.warn.mock.calls).toEqual(
+      refused.map(() => [{ socket: "device", type: "transition" }, "control message dropped"]),
+    );
+    deliver(text({ type: "transition", seq: 6, kind: "wipe" }));
+    expect(got).toEqual([{ type: "transition", seq: 6, kind: "wipe" }]);
+  });
+
   it("drops text that is not JSON, and any binary frame, as unparseable", () => {
     listen();
     deliver(Buffer.from("garbage"));

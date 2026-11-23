@@ -52,6 +52,7 @@ const screenState = (started: boolean): ScreenState => ({
   started,
   reason: null,
   mainAudio: null,
+  transition: { kind: "cut", duration: 2, keepColour: false },
 });
 
 async function startA(withCloud = true): Promise<void> {

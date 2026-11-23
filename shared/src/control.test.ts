@@ -35,6 +35,7 @@ const state: ScreenState = {
   started: true,
   reason: null,
   mainAudio: { choice: "remote", playing: "local", label: "Device 3" },
+  transition: { kind: "cut", duration: 2, keepColour: false },
 };
 const entry = { deviceId: "d1", hint: "Safari on iPhone", label: "Device 1", sends: [] };
 const senderEntry = {
@@ -78,6 +79,10 @@ const examples = {
     { type: "camera", seq: 6, deviceId: "cam-2" },
     { type: "camera", seq: 6, deviceId: "remote:d123" },
     { type: "refresh", seq: 7 },
+    { type: "transition", seq: 9, kind: "crossfade" },
+    { type: "transition", seq: 10, duration: 0.5 },
+    { type: "transition", seq: 11, keepColour: true },
+    { type: "transition", seq: 12, kind: "dip", duration: 8, keepColour: false },
     { type: "accept", deviceId: "d2" },
     { type: "reject", deviceId: "d2" },
   ],
@@ -170,6 +175,19 @@ describe("the device union (AC17, SD20)", () => {
     expect(fails({ type: "dials", seq: 1 })).toBe(true);
   });
 
+  it("takes a transition naming each kind, and refuses a bad one (B-09 SD19, AC25)", () => {
+    for (const kind of ["cut", "crossfade", "dissolve", "wipe", "beatCut", "dip"]) {
+      expect(fails({ type: "transition", seq: 1, kind })).toBe(false);
+    }
+    expect(fails({ type: "transition", seq: 1, kind: "zoom" })).toBe(true);
+    expect(fails({ type: "transition", seq: 1, duration: 0.49 })).toBe(true);
+    expect(fails({ type: "transition", seq: 1, duration: 8.01 })).toBe(true);
+    expect(fails({ type: "transition", seq: 1 })).toBe(true);
+    expect(fails({ type: "transition", seq: 1, keepColour: "yes" })).toBe(true);
+    expect(fails({ type: "transition", seq: 1, kind: "cut", extra: 1 })).toBe(true);
+    expect(fails({ type: "transition", kind: "cut" })).toBe(true);
+  });
+
   it("takes a hello with exactly one of a code or a key, the code from the alphabet", () => {
     expect(fails({ type: "hello" })).toBe(true);
     expect(fails({ type: "hello", code: "ABC234", key: KEY })).toBe(true);
@@ -216,6 +234,19 @@ describe("roles and setup messages (B-06 SD6, SD16, PD4)", () => {
     );
   });
 
+  it("requires the transition choice in a screen state (B-09 SD19, PD14)", () => {
+    const toDevice = (s: unknown) => toDeviceSchema.safeParse({ type: "state", state: s }).success;
+    const { transition: _omitted, ...without } = state;
+    expect(toDevice(without)).toBe(false);
+    expect(
+      toDevice({ ...state, transition: { kind: "wipe", duration: 8, keepColour: true } }),
+    ).toBe(true);
+    expect(toDevice({ ...state, transition: { kind: "cut", duration: 2 } })).toBe(false);
+    expect(
+      toDevice({ ...state, transition: { kind: "cut", duration: 9, keepColour: false } }),
+    ).toBe(false);
+  });
+
   it("refuses a fingerprint that is not 16 hex characters", () => {
     const parses = (fingerprint: unknown) =>
       toScreenSchema.safeParse({ type: "status", status: { ...status, fingerprint } }).success;
@@ -228,8 +259,8 @@ describe("roles and setup messages (B-06 SD6, SD16, PD4)", () => {
     expect(REFUSAL_REASONS).toContain("audio_taken");
   });
 
-  it("typeOf names the setup messages", () => {
-    for (const type of ["offer", "answer", "candidate", "stream", "mainAudio"]) {
+  it("typeOf names the setup messages and the transition control", () => {
+    for (const type of ["offer", "answer", "candidate", "stream", "mainAudio", "transition"]) {
       expect(typeOf(JSON.stringify({ type }))).toBe(type);
     }
   });

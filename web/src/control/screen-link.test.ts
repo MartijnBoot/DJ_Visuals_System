@@ -58,6 +58,7 @@ const state: ScreenState = {
   started: false,
   reason: null,
   mainAudio: null,
+  transition: { kind: "cut", duration: 2, keepColour: false },
 };
 
 const status = (devices: string[] = []): ControlStatus => ({
@@ -279,6 +280,7 @@ describe("toScreenState (SD5, SD8, AC26)", () => {
       capture: { camera: "ok" as const, audio: "lost" as const, cameraId: "cam-1" },
       cameras: [{ deviceId: "cam-1", label: "Front" }],
       started: true,
+      transition: { kind: "wipe" as const, duration: 4, keepColour: true },
     };
   };
 
@@ -298,6 +300,7 @@ describe("toScreenState (SD5, SD8, AC26)", () => {
       started: true,
       reason: null,
       mainAudio: null,
+      transition: { kind: "wipe", duration: 4, keepColour: true },
     });
   });
 
@@ -379,6 +382,7 @@ describe("toScreenState with remote facts (B-06 T13, AC14, AC27)", () => {
       capture: { camera: "ok", audio: "ok", cameraId: "cam-1" },
       cameras: [{ deviceId: "cam-1", label: "Front" }],
       started: true,
+      transition: { kind: "cut", duration: 2, keepColour: false },
       remote: {
         cameras: [{ deviceId: "remote:d2", label: "Safari on iPhone — Device 2", remote: true }],
         cameraId: "remote:d2",
