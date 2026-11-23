@@ -14,7 +14,9 @@
 // The panel lists the senders' cameras and the main audio from the sources' facts, and each
 // sender's connection from the page's own peer (PD5); nothing about a peer goes to the server.
 // Transitions (B-09): the current choice is loaded from `djv.transition` at mount and is part of
-// the state every controller mirrors; a `transition` control merges into it and saves it.
+// the state every controller mirrors; a `transition` control merges into it and saves it. Each
+// pick reads it then (`profiles/active.ts`), and each frame tells the engine whether the audio
+// that feeds the looks is ok, for Beat cut (`remote/sources.ts`).
 import { createFeatureSource, ZERO_FEATURES } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
 import {
@@ -158,6 +160,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
         engineRef.current?.setProfile(sharedToEngine(profile), options) ?? Promise.resolve(),
       setDials: (next) => applyDials(next),
       log: (id) => console.info("profile", { id }),
+      transition: () => facts.current.transition, // the choice at the moment of each pick (B-09)
     }),
   );
   const [profiles, setProfiles] = useState(() => active.state());
@@ -317,6 +320,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       () => {
         control.link.flush(control.applier.drain());
         sources.frame(performance.now());
+        engine.setAudioOk(sources.audioOk(performance.now())); // Beat cut's rule (B-09 SD10)
         const next = sources.video();
         if (next !== video) engine.setSource((video = next));
       },

@@ -9,10 +9,14 @@
 // controller edits in memory and never saves; a pick, the same profile included, starts again
 // from the stored palette. While a pick is pending a colour change is dropped: handing the engine
 // a profile then would cancel the pick, and the swap would discard the colour anyway.
-import { ProfileCompileError, type GuardEvent } from "@djv/engine";
-import { derivePrimary, type Profile } from "@djv/shared";
+// B-09 (SD4, SD5, SD12, PD10): each pick passes the transition choice current when it was made,
+// with the outgoing primary as it is on screen for Dip, and with Keep colour on that primary goes
+// into the incoming profile's primary slot, live only: Reset restores the stored colour.
+import { ProfileCompileError, type GuardEvent, type SetProfileOptions } from "@djv/engine";
+import { derivePrimary, type Profile, type TransitionChoice } from "@djv/shared";
 import type { ListResult, ProfileResult } from "./api.ts";
 import { BUILTIN_ID, builtinEntry } from "./builtin.ts";
+import { DEFAULT_TRANSITION, engineTransition } from "./transition.ts";
 
 export interface Entry {
   id: string;
@@ -48,10 +52,13 @@ export interface ActiveDeps {
   /**
    * Hands the profile to the engine; resolves at the swap, rejects when it cannot be prepared.
    * `pick`: the person picked it, so custom effects the guard turned off run again (B-03 PD8).
+   * B-09: with a transition, it resolves at the transition's first frame (SD16).
    */
-  setProfile(profile: Profile, options?: { pick?: boolean }): Promise<void>;
+  setProfile(profile: Profile, options?: SetProfileOptions): Promise<void>;
   setDials(dials: Profile["dials"]): void;
   log(id: string): void;
+  /** B-09 SD5: the page's current transition choice, read at each pick; absent, Cut. */
+  transition?(): TransitionChoice;
 }
 
 export interface ActiveProfile {
@@ -154,10 +161,27 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     primary: derivePrimary(activeProfile),
   });
 
-  /** Switches to `profile` in the engine, then its dials; `false` when the engine refuses. */
-  const apply = async (id: string, profile: Profile, mine: number): Promise<boolean> => {
+  /**
+   * Switches to `profile` in the engine by `choice`, then its dials; `false` when the engine
+   * refuses. No colour changes while a pick is pending, so the primary read here is the one on
+   * screen when the transition starts (SD4, SD12).
+   */
+  const apply = async (
+    id: string,
+    profile: Profile,
+    mine: number,
+    choice: TransitionChoice,
+  ): Promise<boolean> => {
+    const onScreen = live[derivePrimary(activeProfile)] ?? "#000000";
+    const slot = derivePrimary(profile);
+    const palette = profile.palette.map((c, i) => (choice.keepColour && i === slot ? onScreen : c));
+    // A Cut is the engine's call as before B-09: no transition is Cut (PD4).
+    const options: SetProfileOptions =
+      choice.kind === "cut"
+        ? { pick: true }
+        : { pick: true, transition: engineTransition(choice, onScreen, Math.random()) };
     try {
-      await deps.setProfile(profile, { pick: true });
+      await deps.setProfile({ ...profile, palette }, options);
     } catch (error) {
       if (mine === token) {
         reason = engineReason(error);
@@ -171,7 +195,7 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     deps.log(id);
     active = { id, name: profile.name };
     activeProfile = profile;
-    live = [...profile.palette];
+    live = palette; // the stored palette, or with the carried primary (SD4)
     reason = null;
     guardReason = null;
     emit();
@@ -181,16 +205,17 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   const pick = async (id: string): Promise<void> => {
     const mine = ++token;
     picking = mine;
+    const choice = deps.transition?.() ?? DEFAULT_TRANSITION; // the choice at the pick (SD5)
     try {
-      await pickAs(id, mine);
+      await pickAs(id, mine, choice);
     } finally {
       if (picking === mine) picking = 0;
     }
   };
 
-  const pickAs = async (id: string, mine: number): Promise<void> => {
+  const pickAs = async (id: string, mine: number, choice: TransitionChoice): Promise<void> => {
     if (id === BUILTIN_ID) {
-      await apply(BUILTIN_ID, builtin, mine);
+      await apply(BUILTIN_ID, builtin, mine, choice);
       return;
     }
     const result = await deps.api.get(id);
@@ -206,7 +231,7 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
       emit();
       return;
     }
-    await apply(id, result.profile, mine);
+    await apply(id, result.profile, mine, choice);
   };
 
   const open = async (): Promise<void> => {

@@ -2,6 +2,7 @@
 // colour, remembered on the screen machine under `djv.transition` beside `djv.profile`, never in a
 // profile. Read back through the same schema the screen state uses; anything missing or invalid
 // reads as Cut, 2.0 s, off, and neither function ever throws: storage may be full or disabled.
+import type { TransitionOptions } from "@djv/engine";
 import { transitionChoiceSchema, type TransitionChoice } from "@djv/shared";
 
 export const TRANSITION_KEY = "djv.transition";
@@ -45,3 +46,15 @@ export const positionOf = (seconds: number): number =>
 
 /** "2.0 s" (SD6). */
 export const formatDuration = (seconds: number): string => `${seconds.toFixed(1)} s`;
+
+/**
+ * B-09 PD4: the choice as the engine draws it, for one pick. The kinds are `shared/`'s, assigned to
+ * the engine's own type here, so the type check fails when the two lists drift apart.
+ */
+export function engineTransition(
+  choice: TransitionChoice,
+  dipColour: string,
+  seed: number,
+): TransitionOptions {
+  return { kind: choice.kind, durationMs: choice.duration * 1000, dipColour, seed };
+}
