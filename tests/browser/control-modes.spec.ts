@@ -11,6 +11,7 @@ import {
 } from "@playwright/test";
 import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-server.ts";
 import { createProfile, flat, type Definition, type Stored } from "./fixtures/profiles.ts";
+import { setFader } from "./fader.ts";
 import { meanRgb, pixels } from "./helpers.ts";
 
 const PHONE = { width: 390, height: 844 };
@@ -182,7 +183,7 @@ test("the status strip shows the round trip, last and p95, after a change (AC43,
   await expect(phone.getByTestId("round-trip")).toHaveText("round trip –");
   await expect(phone.getByTestId("status-started")).toHaveText("not started");
   await expect(phone.getByTestId("status-camera")).toHaveText("camera: idle");
-  await phone.getByTestId("dial-reactivity").fill("0.33");
+  await setFader(phone.getByTestId("dial-reactivity"), 0.33);
   await expect(phone.getByTestId("round-trip")).toHaveText(/^round trip \d+ ms \/ p95 \d+ ms$/);
 });
 
@@ -197,7 +198,7 @@ test("the round trip updates while states arrive faster than it refreshes, as du
   // A change every 100 ms, each answered by a state: the 500 ms refresh must still come round.
   let shown = false;
   for (let i = 0; i < 30 && !shown; i++) {
-    await phone.getByTestId("dial-reactivity").fill(String(0.1 + i * 0.02));
+    await setFader(phone.getByTestId("dial-reactivity"), 0.1 + i * 0.02);
     await phone.waitForTimeout(100);
     shown = (await readout.textContent()) !== "round trip –";
   }

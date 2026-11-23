@@ -1,11 +1,11 @@
 // Pending approval requests on a controller (B-04 spec SD18, AC8, AC10): each with its device hint
 // and sequence label, Accept and Reject. VJ mode lists them inline; DJ mode shows a "1 waiting"
-// badge that opens the same list as a prompt. A device never sees its own request here: it is
-// not approved while it waits. A sender's request names its role (B-06 AC8): "<hint> — Device n
-// wants to send video" (or "audio", "video and audio").
+// badge that opens the same list as a prompt; B-19 (SD10): the badge sits in the pinned status bar,
+// never disabled, so a waiting device is seen and reachable without scrolling. A device never sees
+// its own request here: it is not approved while it waits. A sender's request names its role (B-06
+// AC8): "<hint> — Device n wants to send video" (or "audio", "video and audio").
 import type { DeviceEntry } from "@djv/shared";
 import { useEffect, useRef } from "react";
-import { styles } from "./styles.ts";
 
 export interface ApprovalsProps {
   pending: readonly DeviceEntry[];
@@ -23,18 +23,18 @@ export function requestText(entry: Pick<DeviceEntry, "hint" | "label" | "sends">
 
 export function ApprovalList({ pending, disabled, onAccept, onReject }: ApprovalsProps) {
   return (
-    <ul data-testid="approvals" style={{ ...styles.list, display: "grid", gap: 8 }}>
+    <ul data-testid="approvals" className="djv-list">
       {pending.map((entry) => (
-        <li key={entry.deviceId} data-device-id={entry.deviceId} style={styles.request}>
-          <span data-testid="approval-text" style={{ flex: "1 1 160px" }}>
+        <li key={entry.deviceId} data-device-id={entry.deviceId} className="djv-request">
+          <span data-testid="approval-text" className="djv-request-text">
             {requestText(entry)}
           </span>
-          <span style={{ display: "flex", gap: 8 }}>
+          <span className="djv-row">
             <button
               type="button"
               data-testid="approve"
               disabled={disabled}
-              style={styles.button}
+              className="djv-key"
               onClick={() => onAccept(entry.deviceId)}
             >
               Accept
@@ -43,7 +43,7 @@ export function ApprovalList({ pending, disabled, onAccept, onReject }: Approval
               type="button"
               data-testid="refuse"
               disabled={disabled}
-              style={styles.button}
+              className="djv-key"
               onClick={() => onReject(entry.deviceId)}
             >
               Reject
@@ -73,7 +73,7 @@ export function WaitingBadge(
         <button
           type="button"
           data-testid="waiting-badge"
-          style={styles.badge}
+          className="djv-badge"
           onClick={() => props.onOpen(true)}
         >
           {count} waiting
@@ -82,15 +82,11 @@ export function WaitingBadge(
       <dialog
         ref={dialog}
         aria-label="Devices waiting for approval"
-        style={styles.dialog}
+        className="djv-dialog"
         onClose={() => props.onOpen(false)}
       >
         <ApprovalList {...props} />
-        <button
-          type="button"
-          style={{ ...styles.button, marginTop: 12, width: "100%" }}
-          onClick={() => props.onOpen(false)}
-        >
+        <button type="button" className="djv-key djv-close" onClick={() => props.onOpen(false)}>
           Close
         </button>
       </dialog>

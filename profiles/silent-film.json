@@ -1,0 +1,62 @@
+{
+  "formatVersion": 2,
+  "profiles": [
+    {
+      "name": "Silent Film",
+      "palette": ["#0a0a0b", "#37383a", "#a4a5a3", "#efefea"],
+      "primary": 2,
+      "dials": {
+        "recognisability": 0.9,
+        "reactivity": 0.6
+      },
+      "effects": [
+        {
+          "type": "custom",
+          "label": "Old film",
+          "amount": 1,
+          "abstraction": true,
+          "params": [
+            {
+              "name": "contrast",
+              "value": 0.75
+            },
+            {
+              "name": "wear",
+              "value": 0.5
+            },
+            {
+              "name": "ghost",
+              "value": 0.55
+            }
+          ],
+          "code": "// Old film: the room as a worn black-and-white print, after Tscherkassky's Outer Space. Hard\n// silver contrast, a second exposure lying over the first, the print weaving in the gate, grain,\n// scratches, dust and the projector's flicker at 24 frames a second. The kick flares the lamp\n// and burns the second exposure in. Every change from one frame to the next stays under the\n// flash limiter's step. param[0] contrast, param[1] wear, param[2] ghost.\nvec3 Y = vec3(0.299, 0.587, 0.114);\nfloat aspect = resolution.x / resolution.y;\nfloat f = floor(time * 24.0);\n\n// Gate weave: the print wanders a little in the gate, smoothly, so edges never jump.\nvec2 weave = vec2(valueNoise(vec2(time * 3.0, 1.3)), valueNoise(vec2(time * 3.0, 7.9))) - 0.5;\nvec2 p = uv + weave * vec2(0.0025, 0.0035) * strength;\n\n// Two exposures on one print: the second drifts slowly sideways and down.\nfloat drift = 0.5 + 0.5 * sin(time * 0.6);\nvec2 go = vec2((0.02 + 0.06 * drift) * (0.4 + param[2]), 0.015 * sin(time * 0.37));\nvec3 first = source(p);\nvec3 second = source(clamp(p + go, 0.0, 1.0));\n\n// Silver contrast on each exposure: crushed blacks, burnt highs.\nfloat k = mix(1.1, 2.6, param[0]);\nfloat l = clamp((dot(first, Y) - 0.45) * k + 0.5, 0.0, 1.0);\nl = l * l * (3.0 - 2.0 * l);\nfloat l2 = clamp((dot(second, Y) - 0.45) * k + 0.5, 0.0, 1.0);\nl2 = l2 * l2 * (3.0 - 2.0 * l2) * 0.85;\n// The kick burns the second exposure in.\nl = mix(l, max(l, l2), clamp(param[2] * 0.8 + 0.15 * audio.beat, 0.0, 1.0));\n\n// Uneven exposure: slow blotches of light and dark, as a hand-printed copy has.\nfloat blotch = valueNoise(uv * vec2(aspect, 1.0) * 2.2 + vec2(time * 0.21, -time * 0.13));\nl *= 1.0 + (blotch - 0.5) * (0.2 + 0.35 * param[1]);\n\n// The projector: a flicker per frame, a flare on the kick, a hot centre and dark corners.\nl *= 1.0 + (hash(vec2(f, 9.1)) - 0.5) * (0.03 + 0.04 * param[1]) + 0.06 * audio.beat;\nl *= 1.0 - 0.5 * smoothstep(0.3, 1.0, length((uv - 0.5) * vec2(aspect, 1.0)));\n\n// Scratches: thin vertical lines that live a few frames, white (emulsion) or dark (base).\nfloat sc = 0.0;\nfor (int i = 0; i < 3; i++) {\n  float fi = float(i);\n  float life = floor(time * (2.0 + fi * 1.3));\n  float on = step(1.0 - 0.7 * param[1], hash(vec2(life, fi * 3.1 + 0.5)));\n  float x = hash(vec2(life, fi * 7.7 + 1.0)) + (hash(vec2(f, fi + 4.0)) - 0.5) * 0.002;\n  float d = abs(uv.x - x) * resolution.x;\n  float sgn = hash(vec2(life, fi + 20.0)) > 0.4 ? 1.0 : -1.0;\n  sc += on * sgn * (1.0 - smoothstep(0.5, 2.0, d));\n}\nl += clamp(sc, -1.0, 1.0) * 0.13;\n\n// Dust: dark specks, new every frame.\nvec2 g = uv * vec2(aspect, 1.0) * 70.0;\nvec2 cell = floor(g);\nfloat pick = hash(cell + vec2(f * 0.731, f * 1.37));\nvec2 spot = vec2(hash(cell + f + 3.1), hash(cell + f + 8.4)) * 0.6 + 0.2;\nfloat dust = step(1.0 - 0.006 * param[1], pick) * (1.0 - smoothstep(0.1, 0.3, length(fract(g) - spot)));\nl -= dust * 0.14;\n\n// Grain: clumps a little bigger than a pixel, strongest in the mids; the hi-hats roughen it.\nfloat grain = hash(floor(uv * resolution / 1.5) + vec2(f * 1.31, f * 0.77)) - 0.5;\nl += grain * (0.05 + 0.05 * param[1] + 0.04 * audio.high) * (0.4 + 2.4 * l * (1.0 - l));\nl = clamp(l, 0.0, 1.0);\n\n// Print the silver: black, dark silver, silver, paper white, in straight steps.\nvec3 tone = mix(palette[0], palette[1], clamp(l / 0.3, 0.0, 1.0));\ntone = mix(tone, palette[2], clamp((l - 0.3) / 0.4, 0.0, 1.0));\ntone = mix(tone, palette[3], clamp((l - 0.7) / 0.3, 0.0, 1.0));\nreturn mix(first, tone, strength);"
+        },
+        {
+          "type": "custom",
+          "label": "Film run",
+          "amount": 1,
+          "abstraction": true,
+          "params": [
+            {
+              "name": "film",
+              "value": 0.7
+            },
+            {
+              "name": "speed",
+              "value": 0.6
+            },
+            {
+              "name": "damage",
+              "value": 0.5
+            },
+            {
+              "name": "smear",
+              "value": 0.5
+            }
+          ],
+          "code": "// Film run: three layers of upright 35 mm film slide sideways through the gate, right to left,\n// over the picture, as in Outer Space: the light of the room goes through them. Each layer is a\n// band of the music, at its own speed. Bass: wide, slow, heavy film carrying the room in its\n// frames; the kick makes it shudder. Mids: faster film carrying the last frame, a print of a\n// print. Highs: narrow, fastest film fluttering with the hats. Each layer shows more, and its\n// soundtrack wave swings wider, with its band. All of it burnt, scratched and smeared by speed.\n// param[0] film, param[1] speed, param[2] damage, param[3] smear.\nvec3 Y = vec3(0.299, 0.587, 0.114);\nfloat aspect = resolution.x / resolution.y;\nvec3 under = source(uv);\nfloat l = dot(under, Y);\nfloat paper = 0.97;\nfloat pace = mix(0.45, 1.7, param[1]);\nfloat bands[3] = float[3](audio.low, audio.mid, audio.high);\nfloat widths[3] = float[3](1.5, 1.05, 0.65);\nfloat gaps[3] = float[3](0.25, 0.35, 0.5);\nfloat speeds[3] = float[3](0.9, 1.7, 3.2);\nfloat covAll = 0.0;\nfloat travel0 = 0.0;\nfor (int i = 0; i < 3; i++) {\n  float fi = float(i);\n  float band = bands[i];\n  float W = widths[i];\n  float P = W + gaps[i] * W;\n  float v = speeds[i] * pace;\n\n  // Where the film is: steady speed, a stutter as it catches in the gate, and on the kick a\n  // shudder: the heavy film is thrown on and caught back as the beat falls (zero at the onset\n  // and at rest, so the kick never makes the film jump).\n  float stut = 0.12 * valueNoise(vec2(time * 3.0, fi * 5.0));\n  float lurch = i == 0 ? 0.3 * 4.0 * audio.beat * (1.0 - audio.beat) : 0.0;\n  float pos = v * time + stut + lurch + fi * 3.7;\n  // The blur along the run: three frames' travel and the stutter's, never less than a hole's\n  // width, and the lurch: no edge moves further in a frame than the flash limiter allows.\n  float blur = max((v + 0.6) / 20.0, 0.06) + lurch;\n  if (i == 0) travel0 = v / 60.0;\n\n  // The film leans a little and crawls along its own length.\n  float tilt = (valueNoise(vec2(time * 0.07, fi * 9.0 + 1.0)) - 0.5) * 0.3;\n  vec2 q = (uv - 0.5) * vec2(aspect, 1.0);\n  vec2 r = vec2(cos(tilt) * q.x - sin(tilt) * q.y, sin(tilt) * q.x + cos(tilt) * q.y);\n  float pitch = 0.1 + 0.05 * W;\n  float yy = r.y + time * (fi - 1.0) * 0.07;\n\n  // Blurred along the run: six taps over the blur, each one the whole strip.\n  float cov = 0.0;\n  float white = 0.0;\n  float pic = 0.0;\n  for (int j = 0; j < 6; j++) {\n    float s = (r.x + pos + (float(j) / 5.0 - 0.5) * blur) / P;\n    float n = floor(s);\n    float u = fract(s) * P / W;\n    // Torn edges.\n    float e = 0.02 * valueNoise(vec2(yy * 14.0, n * 3.3 + fi));\n    float inFilm = step(e, u) * step(u, 1.0 - e) * step(0.35, hash(vec2(n, fi * 3.0 + 0.5)));\n    // Perforations: a column at each edge, soft rounded holes where the light comes through.\n    float cx = u < 0.5 ? 0.06 / W : 1.0 - 0.06 / W;\n    vec2 hp = vec2((u - cx) * W, (fract(yy / pitch + n * 0.37) - 0.5) * pitch);\n    vec2 hs = vec2(0.035, 0.3 * pitch);\n    float rr = 0.35 * hs.y;\n    float hd = length(max(abs(hp) - hs + rr, 0.0)) - rr;\n    float perf = 1.0 - smoothstep(-0.006, 0.006, hd);\n    // The optical soundtrack: a jagged wave cutting burnt-clear film from the picture,\n    // swinging with this layer's band of the music.\n    float tri = abs(fract(yy * 3.5 + n * 0.61) - 0.5) * 2.0;\n    tri = 0.5 + (tri - 0.5) * (0.25 + 0.75 * valueNoise(vec2(yy * 3.5, n * 2.9 + fi)));\n    float amp = 0.3 + 0.45 * band;\n    float edge = (0.32 + 0.16 * amp * (tri - 0.5) * 2.0) / W;\n    float track = step(0.12 / W, u) * step(u, edge);\n    float inPic = step(edge, u) * step(u, 1.0 - 0.12 / W);\n    cov += inFilm;\n    white += inFilm * max(perf, track);\n    pic += inFilm * inPic;\n  }\n  cov /= 6.0;\n  white /= 6.0;\n  pic /= 6.0;\n  covAll = max(covAll, cov);\n\n  // How much of this layer shows: the film slider and the layer's band; the hats flutter the top layer.\n  float a = param[0] * (0.55 + 0.25 * band);\n  if (i == 2) a *= 0.75 + 0.25 * sin(time * 50.0) * band;\n\n  // The film's own frames: the room, sliding with the film, frames out of register, some lost.\n  float sc = (r.x + pos) / P;\n  float sn = floor(sc);\n  float fy = yy / (pitch * 4.0) + hash(vec2(sn, fi)) * 4.0;\n  float fr = floor(fy);\n  float filmL = 0.0;\n  if (pic > 0.01 && i < 2) {\n    // Three taps over the blur. The heavy film carries the room itself; the middle one the last\n    // frame, so it carries the other films too, a print of a print.\n    vec2 cp = uv + vec2((pos - lurch) / aspect, (hash(vec2(fr, sn + fi)) - 0.5) * 0.08);\n    for (int k = 0; k < 3; k++) {\n      vec2 tp = fract(cp + vec2((float(k) - 1.0) * 0.4 * blur / aspect, 0.0));\n      // Its own contrast per tap, before they are averaged: the blur stays a blur.\n      filmL += smoothstep(0.15, 0.85, dot(i == 0 ? source(tp) : lastFrame(tp), Y)) / 3.0;\n    }\n    if (hash(vec2(sn, fi + 7.0)) > 0.6) filmL = 1.0 - filmL;\n    float lost = hash(vec2(fr, sn * 1.7 + fi));\n    filmL = lost > 1.0 - 0.15 * param[2] ? 0.95 : (lost < 0.06 * param[2] ? 0.05 : filmL);\n    // Frame lines: dark on both sides, so the next frame's picture never meets this one's.\n    filmL *= smoothstep(0.0, 0.05, fract(fy)) * smoothstep(0.0, 0.05, 1.0 - fract(fy));\n  }\n\n  // Damage on the film, moving with it: burnt blotches and long scratches along the run.\n  vec2 dp = vec2((r.x + pos) * 0.7, yy * 2.2 + fi * 11.0);\n  float blot = valueNoise(dp) * 0.6 + valueNoise(dp * 2.3 + 4.0) * 0.4;\n  float burn = smoothstep(0.58, 0.75, blot) * param[2];\n  float soot = (1.0 - smoothstep(0.18, 0.32, blot)) * param[2];\n  float row = floor(yy * resolution.y * 0.5);\n  float scr = step(0.997 - 0.004 * param[2], hash(vec2(row, sn + fi * 13.0)));\n\n  // Through the film: its base darkens, its frames lay the room over again, its holes, track,\n  // burns and scratches let the light through.\n  float base = max(cov - white - pic, 0.0);\n  l *= 1.0 - a * (0.75 * base + 0.45 * soot * cov);\n  l = mix(l, filmL, a * (i < 2 ? 0.8 : 0.0) * pic);\n  l = mix(l, paper, clamp(a * (1.2 * white + 0.8 * burn * cov + 0.5 * scr * cov), 0.0, 1.0));\n}\n\n// The speed smears what went before: the last frame, dragged on with the heavy film.\nvec3 smear = lastFrame(uv + vec2(travel0 / aspect, 0.0));\nl = mix(l, dot(smear, Y), param[3] * (0.2 + 0.55 * covAll));\n\nl = clamp(l, 0.0, 1.0);\nvec3 tone = mix(palette[0], palette[1], clamp(l / 0.3, 0.0, 1.0));\ntone = mix(tone, palette[2], clamp((l - 0.3) / 0.4, 0.0, 1.0));\ntone = mix(tone, palette[3], clamp((l - 0.7) / 0.3, 0.0, 1.0));\nreturn mix(under, tone, strength);"
+        }
+      ]
+    }
+  ]
+}

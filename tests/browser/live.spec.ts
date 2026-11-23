@@ -152,7 +152,31 @@ test("reactivity 0 ignores the beat; at 0.7 a click changes the picture (AC7)", 
         return f.rgb.reduce((s, v, c) => s + Math.abs(v - before.rgb[c]!), 0) / 3;
       });
 
+  /**
+   * Resolves once a beat that starts after the call has risen (meter ≥ 0.5) and fallen back
+   * (< 0.1). A click already under way at 0.7 when the dial reaches 0 fades through the smear for
+   * a few frames; those frames are the old dial's, not reactivity 0 (D-09).
+   */
+  const aBeatPasses = () =>
+    page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const beat = document.querySelector("[data-testid=meter-beat]")!;
+          let low = false;
+          let risen = false;
+          requestAnimationFrame(function each() {
+            const v = Number(beat.getAttribute("data-value"));
+            if (!risen && v < 0.5) low = true;
+            else if (low && v >= 0.5) risen = true;
+            if (risen && v < 0.1) return resolve();
+            requestAnimationFrame(each);
+          });
+        }),
+    );
+
   await slide(page, "reactivity", "Home");
+  await expect(page.getByTestId("slider-reactivity")).toHaveValue("0");
+  await aBeatPasses();
   const still = atClicks(await frames());
   await slide(page, "reactivity", "End"); // 1.0, then back down to 0.7 with the arrow keys
   for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowLeft");

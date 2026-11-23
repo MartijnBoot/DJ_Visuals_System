@@ -16,8 +16,10 @@ import {
   startControlServer,
   type ControlServer,
 } from "./control-server.ts";
+import { setFader } from "./fader.ts";
 import { createProfile, flat, twelveEffects } from "./fixtures/profiles.ts";
 import { meanRgb, pixels, record, recorded, start } from "./helpers.ts";
+import { dropNetwork, keepSockets } from "./sockets.ts";
 
 const PHONE = { width: 390, height: 844 };
 const TABLET = { width: 1024, height: 768 };
@@ -49,11 +51,9 @@ async function screen(page: Page): Promise<string> {
 interface ContextOptions {
   viewport?: { width: number; height: number };
   userAgent?: string;
-  /** Keep the page's WebSockets reachable, so a test can drop them (`dropSockets`). */
+  /** Keep the page's WebSockets reachable, so a test can drop them (`dropNetwork`). */
   dropSockets?: boolean;
 }
-
-type SocketWindow = { __sockets: WebSocket[] };
 
 async function context(
   browser: Browser,
@@ -61,25 +61,9 @@ async function context(
 ): Promise<BrowserContext> {
   const made = await browser.newContext({ viewport: PHONE, ...LAN_CONTEXT, ...options });
   contexts.push(made);
-  if (keep) {
-    await made.addInitScript(() => {
-      const Base = window.WebSocket;
-      const all: WebSocket[] = [];
-      (window as unknown as SocketWindow).__sockets = all;
-      window.WebSocket = class extends Base {
-        constructor(url: string | URL, protocols?: string | string[]) {
-          super(url, protocols);
-          all.push(this);
-        }
-      };
-    });
-  }
+  if (keep) await keepSockets(made);
   return made;
 }
-
-/** Closes every socket the page holds, as a dropped network would end them. */
-const dropSockets = (phone: Page) =>
-  phone.evaluate(() => (window as unknown as SocketWindow).__sockets.forEach((ws) => ws.close()));
 
 async function controller(
   browser: Browser,
@@ -110,8 +94,8 @@ async function watchLink(phone: Page): Promise<() => Promise<Shown[]>> {
     (window as unknown as ShownWindow).__shown = shown;
     const look = () => {
       const text = document.querySelector("[data-testid=link-line]")?.textContent ?? "";
-      const dial = document.querySelector<HTMLInputElement>("[data-testid=dial-recognisability]");
-      const now = { text, disabled: dial ? dial.disabled : null };
+      const dial = document.querySelector("[data-testid=dial-recognisability]");
+      const now = { text, disabled: dial ? dial.getAttribute("aria-disabled") === "true" : null };
       const last = shown.at(-1);
       if (last?.text !== now.text || last.disabled !== now.disabled) shown.push(now);
     };
@@ -121,7 +105,7 @@ async function watchLink(phone: Page): Promise<() => Promise<Shown[]>> {
       childList: true,
       characterData: true,
       attributes: true,
-      attributeFilter: ["disabled"],
+      attributeFilter: ["disabled", "aria-disabled"],
     });
   });
   return () => phone.evaluate(() => (window as unknown as ShownWindow).__shown);
@@ -195,15 +179,18 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     const a = await paired(page, browser, url);
     const b = await paired(page, browser, url);
     for (let i = 0; i < 5; i++) {
-      await a.getByTestId("dial-recognisability").fill(String(0.1 + i * 0.02));
-      await b.getByTestId("dial-recognisability").fill(String(0.9 - i * 0.02));
+      await setFader(a.getByTestId("dial-recognisability"), 0.1 + i * 0.02);
+      await setFader(b.getByTestId("dial-recognisability"), 0.9 - i * 0.02);
     }
-    await a.getByTestId("dial-recognisability").fill("0.42");
-    await b.getByTestId("dial-recognisability").fill("0.77");
+    await setFader(a.getByTestId("dial-recognisability"), 0.42);
+    await setFader(b.getByTestId("dial-recognisability"), 0.77);
     // The screen applied b's last; every surface ends there.
     await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.77");
     for (const phone of [a, b]) {
-      await expect(phone.getByTestId("dial-recognisability")).toHaveValue("0.77");
+      await expect(phone.getByTestId("dial-recognisability")).toHaveAttribute(
+        "aria-valuenow",
+        "0.77",
+      );
     }
   });
 
@@ -223,7 +210,7 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     // The pick lands at its swap and applies the profile's starting dials (B-02 SD15, B-04
     // SD6); a dial moved before then is overwritten by them, on every surface alike (AC25).
     await expect(tile).toHaveAttribute("aria-pressed", "true");
-    await phone.getByTestId("dial-recognisability").fill("0.66");
+    await setFader(phone.getByTestId("dial-recognisability"), 0.66);
     await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.66");
 
     const shown = await watchLink(phone);
@@ -233,7 +220,7 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     await expect(page.getByTestId("control-devices")).toContainText("Device 1");
     await expect(phone.getByTestId("link-line")).toHaveText("Connected");
     // The page starts again from the remembered profile's starting values (SD5, SD13).
-    await expect(phone.getByTestId("dial-recognisability")).toHaveValue("0.2");
+    await expect(phone.getByTestId("dial-recognisability")).toHaveAttribute("aria-valuenow", "0.2");
     await expect(
       phone.locator(`[data-testid=profile-tile][data-profile-id="${warm.id}"]`),
     ).toHaveAttribute("aria-pressed", "true");
@@ -249,14 +236,14 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     await newScreenFirst(page);
     const url = await screen(page);
     const phone = await paired(page, browser, url);
-    await phone.getByTestId("dial-recognisability").fill("0.66");
+    await setFader(phone.getByTestId("dial-recognisability"), 0.66);
     await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.66");
 
     const shown = await watchLink(phone);
     await page.reload();
     await expect(page.getByTestId("control-switch")).toBeChecked();
     // The old page's state does not survive the takeover: the new page's is the built-in's.
-    await expect(phone.getByTestId("dial-recognisability")).toHaveValue("0.3");
+    await expect(phone.getByTestId("dial-recognisability")).toHaveAttribute("aria-valuenow", "0.3");
     await expect(phone.getByTestId("link-line")).toHaveText("Connected");
     expect(await shown()).toEqual(LOCKED_THROUGH_RELOAD);
   });
@@ -268,10 +255,9 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     const url = await screen(page);
     const phone = await paired(page, browser, url, { dropSockets: true });
     await page.getByTestId("slider-reactivity").fill("0.3");
-    await expect(phone.getByTestId("dial-reactivity")).toHaveValue("0.3");
+    await expect(phone.getByTestId("dial-reactivity")).toHaveAttribute("aria-valuenow", "0.3");
     // A Wi-Fi drop: the network goes, and the open socket with it.
-    await phone.context().setOffline(true);
-    await dropSockets(phone);
+    await dropNetwork(phone);
     await expect(phone.getByTestId("link-line")).toHaveText("Reconnecting…");
     await expect(phone.getByTestId("dial-reactivity")).toBeDisabled();
     await expect(phone.getByTestId("profile-tile").first()).toBeDisabled();
@@ -282,7 +268,7 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     await phone.context().setOffline(false);
     // Back online: at once (the `online` event), the state first, then the controls.
     await expect(phone.getByTestId("link-line")).toHaveText("Connected");
-    await expect(phone.getByTestId("dial-reactivity")).toHaveValue("0.55");
+    await expect(phone.getByTestId("dial-reactivity")).toHaveAttribute("aria-valuenow", "0.55");
     await expect(phone.getByTestId("dial-reactivity")).toBeEnabled();
     await expect(page.getByTestId("slider-reactivity")).toHaveValue("0.55");
     // Reconnected with its key: no new approval.
@@ -368,7 +354,7 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     const tile = phone.locator(`[data-testid=profile-tile][data-profile-id="${twelve.id}"]`);
     await tile.click();
     await expect(tile).toHaveAttribute("aria-pressed", "true"); // the pick has landed
-    await phone.getByTestId("dial-reactivity").fill("0.8");
+    await setFader(phone.getByTestId("dial-reactivity"), 0.8);
     await phone.locator('[data-testid=swatch][data-slot="1"]').click();
     await phone.getByTestId("wheel-disc").focus();
     await phone.keyboard.press("ArrowRight");
@@ -497,16 +483,16 @@ test.describe("part 2: the spec's scenario (T16, Verification 1)", () => {
     });
 
     await test.step("move both dials", async () => {
-      await vj.getByTestId("dial-recognisability").fill("0.8");
-      await vj.getByTestId("dial-reactivity").fill("0.25");
+      await setFader(vj.getByTestId("dial-recognisability"), 0.8);
+      await setFader(vj.getByTestId("dial-reactivity"), 0.25);
       await expect(page.getByTestId("slider-recognisability")).toHaveValue("0.8");
       await expect(page.getByTestId("slider-reactivity")).toHaveValue("0.25");
-      await expect(vj.getByTestId("dial-reactivity")).toHaveValue("0.25");
+      await expect(vj.getByTestId("dial-reactivity")).toHaveAttribute("aria-valuenow", "0.25");
       await expectCanvasChanging(page);
     });
 
     await test.step("drag the wheel on slot 1 toward green: the screen turns greener", async () => {
-      await vj.getByTestId("dial-recognisability").fill("0"); // the palette shows most
+      await setFader(vj.getByTestId("dial-recognisability"), 0); // the palette shows most
       await expect(page.getByTestId("slider-recognisability")).toHaveValue("0");
       const before = await greenness(page);
       await vj.locator('[data-testid=swatch][data-slot="1"]').click();
@@ -552,14 +538,13 @@ test.describe("part 2: the spec's scenario (T16, Verification 1)", () => {
     });
 
     await test.step("offline, then online: Reconnecting…, then the state, no new approval", async () => {
-      await vj.context().setOffline(true);
-      await dropSockets(vj);
+      await dropNetwork(vj);
       await expect(vj.getByTestId("link-line")).toHaveText("Reconnecting…");
       await expect(vj.getByTestId("dial-reactivity")).toBeDisabled();
       await page.getByTestId("slider-reactivity").fill("0.6");
       await vj.context().setOffline(false);
       await expect(vj.getByTestId("link-line")).toHaveText("Connected");
-      await expect(vj.getByTestId("dial-reactivity")).toHaveValue("0.6");
+      await expect(vj.getByTestId("dial-reactivity")).toHaveAttribute("aria-valuenow", "0.6");
       await expect(page.getByTestId("control-pending")).toHaveCount(0);
     });
 
@@ -573,7 +558,7 @@ test.describe("part 2: the spec's scenario (T16, Verification 1)", () => {
         .click();
       await expect(dj.getByTestId("link-line")).toHaveText("Pairing ended — scan the code again");
       await expect(vj.getByTestId("link-line")).toHaveText("Connected");
-      await vj.getByTestId("dial-reactivity").fill("0.35");
+      await setFader(vj.getByTestId("dial-reactivity"), 0.35);
       await expect(page.getByTestId("slider-reactivity")).toHaveValue("0.35");
     });
 

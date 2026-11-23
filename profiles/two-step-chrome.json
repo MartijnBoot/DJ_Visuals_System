@@ -1,0 +1,58 @@
+{
+  "formatVersion": 2,
+  "profiles": [
+    {
+      "name": "Two-Step Chrome",
+      "palette": ["#160c33", "#6fc8ff", "#c9d1de", "#f0b955", "#fffaf0"],
+      "primary": 3,
+      "dials": {
+        "recognisability": 0.85,
+        "reactivity": 0.75
+      },
+      "effects": [
+        {
+          "type": "zoom",
+          "amount": 0,
+          "binding": {
+            "feature": "low",
+            "amount": 0.6
+          }
+        },
+        {
+          "type": "custom",
+          "label": "Liquid chrome",
+          "amount": 1,
+          "abstraction": true,
+          "params": [
+            {
+              "name": "shine",
+              "value": 0.45
+            },
+            {
+              "name": "glints",
+              "value": 0.5
+            }
+          ],
+          "code": "// Liquid chrome: the room's brightness becomes a fake surface that reflects a Y2K chrome\n// sky (white to ice blue, a hard dark horizon, a champagne-gold ground). Hi-hats catch\n// four-point star glints on the brightest spots. param[0] shine, param[1] glints.\nfloat aspect = resolution.x / resolution.y;\nvec3 Y = vec3(0.299, 0.587, 0.114);\nvec3 cam = source(uv);\nfloat l = dot(cam, Y);\n\n// The surface: a normal from the brightness gradient, a fixed fraction of the frame height.\n// Wide taps, so skin, hair and grass read as smooth metal, not speckle.\nvec2 e = vec2(1.0 / aspect, 1.0) * 0.01;\nfloat le = dot(source(uv + vec2(e.x, 0.0)), Y);\nfloat lw = dot(source(uv - vec2(e.x, 0.0)), Y);\nfloat ln = dot(source(uv + vec2(0.0, e.y)), Y);\nfloat ls = dot(source(uv - vec2(0.0, e.y)), Y);\nvec3 n = normalize(vec3((lw - le) * 3.5, (ls - ln) * 3.5, 1.0));\nfloat soft = (l * 2.0 + le + lw + ln + ls) / 6.0;\n\n// Where the reflection looks: up the normal, plus the brightness, plus a slow liquid wobble\n// that the bass shakes harder.\nfloat wobble = sin(uv.y * 11.0 + time * 1.3) * (0.05 + 0.15 * audio.low)\n             + sin(uv.x * 7.0 - time * 0.9) * 0.04;\nfloat r = n.y * 0.9 + (soft - 0.5) * mix(1.2, 3.2, param[0]) + wobble;\n\n// Folded into repeating bands: more shine, more horizons in each shape.\nfloat h = abs(fract(r * mix(0.6, 1.6, param[0]) + 0.5) * 2.0 - 1.0);\n\n// The chrome sky and ground, meeting at a hard dark horizon.\nvec3 sky = mix(palette[1], palette[2], smoothstep(0.52, 0.75, h));\nsky = mix(sky, palette[4], smoothstep(0.78, 1.0, h));\nvec3 ground = mix(palette[0], palette[3], smoothstep(0.46, 0.08, h));\nvec3 env = mix(ground, sky, smoothstep(0.49, 0.515, h));\n\n// Dark stays dark, so the people keep their shape.\nvec3 metal = env * (0.3 + 0.85 * smoothstep(0.03, 0.55, l));\n\n// Glints: a grid of cells, each with one spot; a bright spot lights up a star whose arms grow\n// on the hi-hat. The 3x3 neighbours let an arm cross into the next cell.\nfloat cs = 1.0 / 12.0;\nvec2 g = vec2(uv.x * aspect, uv.y) / cs;\nvec2 cell = floor(g);\nfloat glint = 0.0;\nfloat reach = clamp(0.45 + 0.9 * audio.high + 0.3 * audio.beat, 0.0, 1.4);\nfor (int j = -1; j <= 1; j++) {\n  for (int i = -1; i <= 1; i++) {\n    vec2 id = cell + vec2(float(i), float(j));\n    vec2 c = id + 0.2 + 0.6 * vec2(hash(id), hash(id + vec2(7.1, 3.3)));\n    // Each spot lives in cycles of about two thirds of a second, fading in and out, so a\n    // star never pops; the hi-hat makes more of them live.\n    float phase = time * 1.5 + hash(id + vec2(2.0, 8.0));\n    float life = sin(fract(phase) * 3.14159);\n    float lit = step(hash(id + floor(phase)), param[1] * (0.12 + 0.45 * audio.high));\n    if (lit > 0.5) {\n      float b = smoothstep(0.5, 0.85, dot(source(vec2(c.x * cs / aspect, c.y * cs)), Y));\n      vec2 d = g - c;\n      float arms = exp(-abs(d.y) * 45.0) * max(0.0, 1.0 - abs(d.x) / reach)\n                 + exp(-abs(d.x) * 45.0) * max(0.0, 1.0 - abs(d.y) / reach);\n      float core = exp(-dot(d, d) * 90.0);\n      glint += b * life * (arms * 0.8 + core);\n    }\n  }\n}\nvec3 spark = mix(palette[4], palette[3], 0.25) * min(glint, 1.5);\n\nreturn mix(cam, metal + spark, strength);"
+        },
+        {
+          "type": "custom",
+          "label": "Two-step chop",
+          "amount": 1,
+          "abstraction": true,
+          "params": [
+            {
+              "name": "slices",
+              "value": 0.4
+            },
+            {
+              "name": "swing",
+              "value": 0.7
+            }
+          ],
+          "code": "// The two-step chop: the picture cut into horizontal bands. On the kick some bands slip\n// sideways and wrap round, some hold the last frame (a stutter), like a chopped vocal.\n// Odd bands land late when swing is up: the shuffle. param[0] slices, param[1] swing.\nfloat count = floor(mix(3.0, 18.0, param[0]));\nfloat band = floor(uv.y * count);\nfloat odd = mod(band, 2.0);\n\n// The pattern re-deals twice a second, so each kick cuts a different set of bands.\nfloat deal = floor(time * 2.0);\nfloat pick = hash(vec2(band, deal));\n\n// Even bands hit on the onset; odd bands hit on a bump that peaks halfway down the beat's\n// fall, later than the kick, by as much as swing asks.\nfloat onset = audio.beat * audio.beat;\nfloat late = 4.0 * audio.beat * (1.0 - audio.beat);\nfloat hit = mix(onset, mix(onset, late, param[1]), odd) * strength;\n\nfloat dir = hash(vec2(band, deal + 13.0)) < 0.5 ? -1.0 : 1.0;\nfloat slip = pick > 0.45 ? dir * (0.03 + 0.12 * hash(vec2(band, deal + 5.0))) * hit : 0.0;\nvec3 c = source(vec2(fract(uv.x + slip), uv.y));\n\n// The stutter: a few bands hold the last frame while the hit is high.\nfloat hold = pick < 0.2 ? smoothstep(0.15, 0.6, hit) * 0.92 : 0.0;\nc = mix(c, lastFrame(uv), hold);\n\n// A thin gold cut line along the top of a band that moved.\nfloat edge = 1.0 - smoothstep(0.0, 0.05, fract(uv.y * count));\nc += palette[3] * edge * clamp(abs(slip) * 10.0 + hold, 0.0, 1.0) * 0.6;\nreturn c;"
+        }
+      ]
+    }
+  ]
+}

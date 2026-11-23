@@ -126,6 +126,46 @@ describe("the send throttle (PD14, SD11)", () => {
     expect(sent).toHaveLength(2);
   });
 
+  it("drop() cancels the frame and forgets the pending value: nothing is sent", () => {
+    const { throttle, frame, sent } = rig();
+    throttle.push("a");
+    frame(16);
+    throttle.push("b");
+    throttle.drop();
+    frame(16);
+    throttle.release();
+    frame(16);
+    expect(sent.map((s) => s.value)).toEqual(["a"]);
+    // The throttle still works after a drop.
+    throttle.push("c");
+    frame(16);
+    expect(sent.map((s) => s.value)).toEqual(["a", "c"]);
+  });
+
+  it("minGapMs sets the gap between sends; the default stays 16 ms", () => {
+    let clock = 0;
+    let frames: (() => void)[] = [];
+    const sent: number[] = [];
+    const throttle = createSendThrottle<string>({
+      now: () => clock,
+      requestFrame: (fn) => frames.push(fn),
+      cancelFrame: () => void (frames = []),
+      send: () => sent.push(clock),
+      minGapMs: 20,
+    });
+    for (let i = 0; i < 120; i++) {
+      throttle.push(String(i));
+      clock += 1000 / 120;
+      const due = frames;
+      frames = [];
+      due.forEach((f) => f());
+    }
+    const gaps = sent.slice(1).map((at, i) => at - sent[i]!);
+    expect(gaps.every((g) => g >= 20)).toBe(true);
+    expect(sent.length).toBeLessThanOrEqual(50);
+    expect(MIN_GAP_MS).toBe(16);
+  });
+
   it("sends nothing on a release with nothing pending", () => {
     const { throttle, sent } = rig();
     throttle.release();
