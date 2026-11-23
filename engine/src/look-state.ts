@@ -41,3 +41,12 @@ export function sizeTargets<L extends { custom: unknown }>(
   }
   return next;
 }
+
+/** Frees the look's targets: a transition's outgoing look when it ends (B-09 Non-functional). */
+export function dropTargets<L extends { custom: unknown }>(
+  gl: WebGL2RenderingContext,
+  look: Look<L>,
+): void {
+  for (const t of look.targets ?? []) deleteTarget(gl, t);
+  look.targets = null;
+}

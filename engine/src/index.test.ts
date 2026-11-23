@@ -3,7 +3,14 @@
 // stats, the scaled targets and the prepared profile swap are checked without a GPU. Every GL
 // call is recorded; programs link when the test says so.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BUILT_IN_PROFILE, createEngine, ZERO_FEATURES, type Profile } from "./index.ts";
+import {
+  BUILT_IN_PROFILE,
+  createEngine,
+  ZERO_FEATURES,
+  type Profile,
+  type SetProfileOptions,
+  type TransitionKind,
+} from "./index.ts";
 import { fragmentLayout } from "./shader.ts";
 
 interface Call {
@@ -18,6 +25,8 @@ interface FakeProgram {
   fails: boolean;
   /** The program that puts a finished frame on the canvas (D-14): not a look, not numbered. */
   present?: boolean;
+  /** B-09 PD6: the program that mixes two looks onto the canvas; also `present`, not a look. */
+  mix?: boolean;
 }
 
 interface FakeOptions {
@@ -51,11 +60,15 @@ function fakeCanvas(width: number, height: number, { parallel = true }: FakeOpti
       sources.set(shader as object, source as string);
     },
     // The present program is told apart by its fragment shader and takes no number, so the
-    // looks keep theirs: the built-in is 0 and each linked profile the next.
+    // looks keep theirs: the built-in is 0 and each linked profile the next. The mix program
+    // (B-09 PD6), by its own marker, is put on the canvas the same way and is numbered neither.
     attachShader: (program, shader) => {
       const p = program as FakeProgram;
-      if (!sources.get(shader as object)?.includes("uFrame") || p.present) return;
+      const source = sources.get(shader as object) ?? "";
+      const mix = source.includes("uIncoming");
+      if (!(source.includes("uFrame") || mix) || p.present) return;
       p.present = true;
+      p.mix = mix;
       p.fails = false;
       programs.splice(programs.indexOf(p), 1);
       p.id = -1;
@@ -820,5 +833,384 @@ describe("context loss (B-03)", () => {
     frameAt(100);
     expect(uniform(frames().at(-1)!, "uZoom")).toBeGreaterThan(1);
     expect(events).toEqual([{ kind: "contextLost", customBypassed: true }]);
+  });
+});
+
+// B-09 T3 (spec SD2, SD3, SD11, SD13, SD15 to SD18, AC1, AC7 to AC16, AC18, AC20; plan PD4 to
+// PD7, PD11 to PD13, PD18): during a transition the engine draws two looks, each into its own
+// pair of targets, then mixes them onto the canvas; outside one it draws one look as before.
+describe("transitions: two looks and the Crossfade (B-09)", () => {
+  /** One draw in a frame: its program, the uniforms set since that program was used, its target. */
+  interface Draw {
+    program: FakeProgram;
+    uniforms: Map<string, unknown>;
+    /** The framebuffer drawn into; null for the canvas. */
+    target: unknown;
+    /** The texture bound to each unit at the draw. */
+    units: Map<unknown, unknown>;
+  }
+  const drawsOf = (frame: Call[]): Draw[] => {
+    const out: Draw[] = [];
+    let program: FakeProgram | null = null;
+    let uniforms = new Map<string, unknown>();
+    let target: unknown = null;
+    let unit: unknown = "TEXTURE0";
+    const units = new Map<unknown, unknown>();
+    for (const c of frame) {
+      if (c.name === "useProgram") {
+        program = c.args[0] as FakeProgram;
+        uniforms = new Map();
+      }
+      if (c.name === "bindFramebuffer" && c.args[0] === "FRAMEBUFFER") target = c.args[1];
+      if (c.name === "activeTexture") unit = c.args[0];
+      if (c.name === "bindTexture") units.set(unit, c.args[1]);
+      if (c.name.startsWith("uniform")) {
+        uniforms.set((c.args[0] as { name: string }).name, c.args[1]);
+      }
+      if (c.name === "drawArrays")
+        out.push({ program: program!, uniforms, target, units: new Map(units) });
+    }
+    return out;
+  };
+  const looksOf = (frame: Call[]) => drawsOf(frame).filter((d) => !d.program.present);
+  const mixesOf = (frame: Call[]) => drawsOf(frame).filter((d) => d.program.mix === true);
+  const presentsOf = (frame: Call[]) =>
+    drawsOf(frame).filter((d) => d.program.present && !d.program.mix);
+  const lookIds = (frame: Call[]) => looksOf(frame).map((d) => d.program.id);
+  const progressOf = (frame: Call[]) => mixesOf(frame)[0]?.uniforms.get("uProgress");
+  const deleted = (frame: Call[]) =>
+    frame.filter((c) => c.name === "deleteFramebuffer").map((c) => c.args[0]);
+
+  const zoomOnly: Profile = {
+    ...BUILT_IN_PROFILE,
+    name: "Zoom",
+    effects: [{ type: "zoom", amount: 1 }],
+  };
+  const smearOnly: Profile = {
+    ...BUILT_IN_PROFILE,
+    name: "Smear",
+    effects: [{ type: "smear", amount: 1 }],
+  };
+  const coded = (n = 0): Profile => ({
+    ...BUILT_IN_PROFILE,
+    name: `Coded ${n}`,
+    effects: [
+      { type: "smear", amount: 1 },
+      {
+        type: "custom",
+        label: "Pass",
+        amount: 1,
+        abstraction: false,
+        params: [],
+        code: `return source(uv); // ${n}`,
+      },
+    ],
+  });
+  const fade = (durationMs = 2000, kind: TransitionKind = "crossfade"): SetProfileOptions => ({
+    pick: true,
+    transition: { kind, durationMs, dipColour: "#000000", seed: 0.25 },
+  });
+
+  /** The built-in on screen at 0, then a pick of `to` with `options`, starting at `t`. */
+  async function fading(to: Profile, options = fade(), t = 16, size: FakeOptions = {}) {
+    const rig = started(640, 360, size);
+    frameAt(0);
+    const switched = rig.engine.setProfile(to, options);
+    rig.fake.completeLinks();
+    frameAt(t);
+    await switched;
+    return rig;
+  }
+
+  it("draws the outgoing look, the incoming look, then one mix, in every transition frame (AC13, PD18)", async () => {
+    await fading(zoomOnly, fade(100));
+    frameAt(50);
+    frameAt(116);
+    frameAt(132);
+    frameAt(148);
+    const all = frames();
+    expect(all.map(lookIds)).toEqual([[0], [0, 1], [0, 1], [0, 1], [1], [1]]);
+    expect(all.map((f) => mixesOf(f).length)).toEqual([0, 1, 1, 1, 0, 0]);
+    expect(all.map((f) => presentsOf(f).length)).toEqual([1, 0, 0, 0, 1, 1]);
+    expect(all.map((f) => drawsOf(f).length)).toEqual([2, 3, 3, 3, 2, 2]);
+  });
+
+  it("mixes the two looks' targets just drawn by elapsed frame time, 0 first and 1 at the end (AC1, PD7)", async () => {
+    const { calls } = await fading(zoomOnly, fade(100));
+    frameAt(50);
+    frameAt(116);
+    const all = frames();
+    expect(all.slice(1).map(progressOf)).toEqual([0, 0.34, 1]);
+    const textures = textureOf(calls);
+    for (const frame of all.slice(1)) {
+      const [outgoing, incoming] = looksOf(frame);
+      const [mix] = mixesOf(frame);
+      expect(mix!.target).toBeNull(); // onto the canvas
+      expect(mix!.units.get("TEXTURE0")).toBe(textures.get(outgoing!.target));
+      expect(mix!.units.get("TEXTURE1")).toBe(textures.get(incoming!.target));
+      expect(mix!.uniforms.get("uOutgoing")).toBe(0);
+      expect(mix!.uniforms.get("uIncoming")).toBe(1);
+      expect(mix!.uniforms.get("uCanvas")).toBe(640);
+    }
+  });
+
+  it("deletes the outgoing look's targets on the frame after progress reaches 1, and nothing else (AC1)", async () => {
+    await fading(zoomOnly, fade(100));
+    frameAt(116);
+    frameAt(132);
+    frameAt(148);
+    const all = frames();
+    const outgoingTargets = new Set(all.slice(1, 3).map((f) => looksOf(f)[0]!.target));
+    expect(outgoingTargets.size).toBe(2);
+    expect(all.map((f) => deleted(f).length)).toEqual([0, 0, 0, 2, 0]);
+    expect(new Set(deleted(all[3]!))).toEqual(outgoingTargets);
+  });
+
+  it("ends within one frame interval of its duration at 10 frames a second (AC15)", async () => {
+    await fading(zoomOnly, fade(500), 100);
+    for (const t of [190, 310, 420, 530, 640, 750]) frameAt(t);
+    const all = frames();
+    const stamps = [0, 100, 190, 310, 420, 530, 640, 750];
+    const last = all.findLastIndex((f) => mixesOf(f).length > 0);
+    expect(progressOf(all[last]!)).toBe(1);
+    expect(stamps[last]! - 100).toBeGreaterThanOrEqual(500);
+    expect(stamps[last]! - 100).toBeLessThan(500 + 120); // one frame interval at 10 fps
+    expect(progressOf(all[last - 1]!)).toBeLessThan(1);
+    expect(lookIds(all[last + 1]!)).toEqual([1]);
+  });
+
+  it("freezes the outgoing look's dials and palette; a dial or colour change reaches the incoming only (AC7)", async () => {
+    const red: Profile = { ...smearOnly, palette: ["#ff0000", "#ffffff"] };
+    const rig = started();
+    rig.engine.setDials({ recognisability: 1, reactivity: 0 });
+    frameAt(0);
+    const switched = rig.engine.setProfile(red, fade());
+    rig.fake.completeLinks();
+    frameAt(16);
+    await switched;
+    frameAt(32);
+    rig.engine.setDials({ recognisability: 0.5, reactivity: 0 });
+    await rig.engine.setProfile({ ...red, palette: ["#00ff00", "#ffffff"] }); // a live colour
+    frameAt(48);
+    const [outBefore, inBefore] = looksOf(frames()[2]!);
+    const [outAfter, inAfter] = looksOf(frames()[3]!);
+    expect(outBefore!.uniforms.get("uFeedback")).toBeCloseTo(0.85, 9);
+    expect(outAfter!.uniforms.get("uFeedback")).toBe(outBefore!.uniforms.get("uFeedback"));
+    expect(outAfter!.uniforms.get("uPalette")).toEqual(outBefore!.uniforms.get("uPalette"));
+    expect(inBefore!.uniforms.get("uFeedback")).toBeCloseTo(0.85 * 0.3, 9); // its own dials (PD5)
+    expect(inAfter!.uniforms.get("uFeedback")).toBeCloseTo(0.85 * 0.5, 9);
+    expect((inBefore!.uniforms.get("uPalette") as number[]).slice(0, 3)).toEqual([1, 0, 0]);
+    expect((inAfter!.uniforms.get("uPalette") as number[]).slice(0, 3)).toEqual([0, 1, 0]);
+  });
+
+  it("starts a picked look at its profile's dials, not the engine's, from its first frame (PD5)", async () => {
+    const rig = started();
+    rig.engine.setDials({ recognisability: 1, reactivity: 0 });
+    frameAt(0);
+    const half: Profile = { ...smearOnly, dials: { recognisability: 0.5, reactivity: 0 } };
+    const switched = rig.engine.setProfile(half, { pick: true }); // a Cut
+    rig.fake.completeLinks();
+    frameAt(16);
+    await switched;
+    frameAt(32);
+    expect(uniform(frames()[1]!, "uFeedback")).toBe(0); // the swap frame mixes no smear
+    expect(uniform(frames()[2]!, "uFeedback")).toBeCloseTo(0.85 * 0.5, 9);
+  });
+
+  it("gives each look its own history; the incoming's first frame reads the frame on screen, no smear (AC8)", async () => {
+    const rig = started();
+    frameAt(0);
+    frameAt(16);
+    const switched = rig.engine.setProfile(coded(), fade());
+    rig.fake.completeLinks();
+    frameAt(32);
+    await switched;
+    frameAt(48);
+    frameAt(64);
+    const all = frames();
+    const textures = textureOf(rig.calls);
+    const onScreen = looksOf(all[1]!)[0]!.target; // the built-in's latest output
+    const start = all[2]!;
+    const [, incoming] = looksOf(start);
+    // The incoming pair's previous target is seeded from the frame on screen, then copied into
+    // the target it draws (B-03 PD4); it mixes no smear on that frame.
+    const blits: { read: unknown; draw: unknown }[] = [];
+    let read: unknown = null;
+    let draw: unknown = null;
+    for (const c of start) {
+      if (c.name === "bindFramebuffer" && c.args[0] === "READ_FRAMEBUFFER") read = c.args[1];
+      if (c.name === "bindFramebuffer" && c.args[0] === "DRAW_FRAMEBUFFER") draw = c.args[1];
+      if (c.name === "blitFramebuffer") blits.push({ read, draw });
+    }
+    expect(blits[0]!.read).toBe(onScreen);
+    expect(textures.get(blits[0]!.draw)).toBe(incoming!.units.get("TEXTURE1"));
+    expect(incoming!.uniforms.get("uFeedback")).toBe(0);
+    for (const i of [3, 4]) {
+      const [outgoing, next] = looksOf(all[i]!);
+      const [outgoingBefore, nextBefore] = looksOf(all[i - 1]!);
+      expect(outgoing!.units.get("TEXTURE1")).toBe(textures.get(outgoingBefore!.target));
+      expect(next!.units.get("TEXTURE1")).toBe(textures.get(nextBefore!.target));
+      expect(next!.uniforms.get("uFeedback")).toBeGreaterThan(0);
+    }
+    const pairs = [3, 4].flatMap((i) => looksOf(all[i]!).map((d) => d.target));
+    expect(new Set(pairs).size).toBe(4); // two looks, two targets each, none shared
+  });
+
+  it("jumps when a newer pick is ready mid-transition and never draws three looks (AC9, SD2)", async () => {
+    const { engine, fake } = await fading(zoomOnly);
+    frameAt(32);
+    const third = engine.setProfile(smearOnly, fade());
+    fake.completeLinks();
+    frameAt(48);
+    await third;
+    frameAt(64);
+    const all = frames();
+    expect(all.map(lookIds)).toEqual([[0], [0, 1], [0, 1], [1, 2], [1, 2]]);
+    expect(all.map((f) => mixesOf(f).length)).toEqual([0, 1, 1, 1, 1]);
+    expect(progressOf(all[3]!)).toBe(0); // the new transition starts in that frame
+    const firstOutgoing = new Set([looksOf(all[1]!)[0]!.target, looksOf(all[2]!)[0]!.target]);
+    expect(new Set(deleted(all[3]!))).toEqual(firstOutgoing); // the built-in's pair
+    for (const frame of all) expect(looksOf(frame).length).toBeLessThanOrEqual(2);
+  });
+
+  it("ends a running transition and cuts when a Cut is picked mid-transition (SD2)", async () => {
+    for (const cut of [{ pick: true }, fade(2000, "cut")]) {
+      const { engine, fake } = await fading(zoomOnly);
+      frameAt(32);
+      const switched = engine.setProfile(smearOnly, cut);
+      fake.completeLinks();
+      frameAt(48);
+      await switched;
+      frameAt(64);
+      const all = frames();
+      expect(all.map(lookIds)).toEqual([[0], [0, 1], [0, 1], [2], [2]]);
+      expect(all.map((f) => mixesOf(f).length)).toEqual([0, 1, 1, 0, 0]);
+      expect(deleted(all[3]!)).toHaveLength(2);
+    }
+  });
+
+  it("keeps a running transition going when a newer pick does not link (AC10)", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { engine, fake } = await fading(zoomOnly);
+    frameAt(32);
+    fake.control.failLinks = true;
+    const failing = engine.setProfile(smearOnly, fade());
+    fake.completeLinks();
+    frameAt(48);
+    await expect(failing).rejects.toThrow(/link/);
+    frameAt(516);
+    const all = frames();
+    expect(all.slice(1).map(lookIds)).toEqual([
+      [0, 1],
+      [0, 1],
+      [0, 1],
+      [0, 1],
+    ]);
+    expect(progressOf(all.at(-1)!)).toBe(0.25);
+  });
+
+  it("draws the incoming profile alone after a context loss mid-transition (AC11)", async () => {
+    const { fake } = await fading(zoomOnly);
+    frameAt(32);
+    fake.fire("webglcontextlost");
+    frameAt(48);
+    fake.fire("webglcontextrestored");
+    frameAt(64);
+    frameAt(80);
+    for (const frame of frames().slice(-2)) {
+      expect(looksOf(frame)).toHaveLength(1);
+      expect(mixesOf(frame)).toHaveLength(0);
+      expect(presentsOf(frame)).toHaveLength(1);
+      expect(looksOf(frame)[0]!.uniforms.get("uZoom")).toBeCloseTo(1.12, 9); // zoomOnly's
+    }
+  });
+
+  it("never lets the guard bypass a custom look during a transition, and counts every frame (AC12)", async () => {
+    const rig = started(640, 360, { parallel: false });
+    const events: unknown[] = [];
+    rig.engine.onGuard((event) => events.push(event));
+    let t = 0;
+    for (let i = 0; i < 60; i++) frameAt((t += 1000 / 60));
+    for (let i = 0; i < 90; i++) frameAt((t += 100)); // the built-in under load: scale at 50%
+    expect(rig.engine.stats().renderScale).toBe(0.5);
+    const switched = rig.engine.setProfile(coded(), fade(8000));
+    frameAt((t += 100));
+    await switched;
+    for (let i = 0; i < 80; i++) frameAt((t += 100)); // through the 8 s, and the end frame
+    expect(events).toEqual([]);
+    expect(rig.engine.stats().fps).toBe(10);
+    expect(looksOf(frames().at(-2)!)[1]!.uniforms.get("uCustomStrength")).toBeDefined();
+    // Once the transition is over, the guard acts as before: the load was real.
+    for (let i = 0; i < 10; i++) frameAt((t += 100));
+    expect(events).toEqual([{ kind: "slow", customBypassed: true }]);
+  });
+
+  it("keeps a running transition's kind and duration when other options come later (AC16)", async () => {
+    const { engine } = await fading(zoomOnly, fade(2000));
+    // A live colour on the incoming look, carrying other transition options: not a pick.
+    const later = { transition: fade(100).transition! };
+    await engine.setProfile({ ...zoomOnly, palette: ["#111111", "#ffffff"] }, later);
+    frameAt(516);
+    expect(progressOf(frames().at(-1)!)).toBe(0.25);
+  });
+
+  it("resolves the pick in the frame that first draws the incoming look (AC18)", async () => {
+    const { engine, fake } = started();
+    frameAt(0);
+    let done = false;
+    const switched = engine.setProfile(zoomOnly, fade()).then(() => (done = true));
+    frameAt(16);
+    await flush();
+    expect(done).toBe(false);
+    fake.completeLinks();
+    frameAt(32);
+    await switched;
+    expect(lookIds(frames().at(-1)!)).toEqual([0, 1]);
+  });
+
+  it("transitions on a re-pick of the active profile with Crossfade, not with Cut (AC20, PD12)", async () => {
+    const stored: Profile = { ...BUILT_IN_PROFILE, palette: ["#0000ff", "#ffffff"] };
+    const live: Profile = { ...BUILT_IN_PROFILE, palette: ["#ff0000", "#ffffff"] };
+    const rig = started();
+    frameAt(0);
+    await rig.engine.setProfile(live); // a live colour on the built-in
+    frameAt(16);
+    const again = rig.engine.setProfile(stored, fade());
+    frameAt(32);
+    await again;
+    frameAt(48);
+    const [outgoing, incoming] = looksOf(frames()[3]!);
+    expect(lookIds(frames()[3]!)).toEqual([0, 0]);
+    expect(mixesOf(frames()[3]!)).toHaveLength(1);
+    expect(outgoing!.target).not.toBe(incoming!.target);
+    expect((outgoing!.uniforms.get("uPalette") as number[]).slice(0, 3)).toEqual([1, 0, 0]);
+    expect((incoming!.uniforms.get("uPalette") as number[]).slice(0, 3)).toEqual([0, 0, 1]);
+
+    const cut = started();
+    frameAt(0);
+    await cut.engine.setProfile(stored, { pick: true });
+    frameAt(16);
+    expect(lookIds(frames().at(-1)!)).toEqual([0]);
+    expect(mixesOf(frames().at(-1)!)).toHaveLength(0);
+  });
+
+  it("keeps the outgoing look's program when a ninth program is linked (PD13)", async () => {
+    const rig = started(640, 360, { parallel: false });
+    frameAt(0);
+    let t = 0;
+    for (let n = 1; n <= 7; n++) {
+      const cut = rig.engine.setProfile(coded(n), { pick: true });
+      frameAt((t += 16));
+      await cut;
+    }
+    const outgoingProgram = rig.fake.programs.at(-1);
+    const switched = rig.engine.setProfile(coded(8), fade());
+    frameAt((t += 16));
+    await switched;
+    frameAt(t + 16);
+    const removed = rig.calls.filter((c) => c.name === "deleteProgram").map((c) => c.args[0]);
+    expect(removed).toHaveLength(1); // the oldest, the first coded program
+    expect(removed).not.toContain(outgoingProgram);
+    expect(lookIds(frames().at(-1)!)).toEqual([7, 8]);
   });
 });

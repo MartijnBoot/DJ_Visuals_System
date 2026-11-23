@@ -24,6 +24,25 @@ void main() {
   colour = texture(uFrame, gl_FragCoord.xy / uCanvas);
 }`;
 
+/**
+ * B-09 PD6: during a transition, drawn instead of the present: the outgoing and the incoming
+ * looks' latest targets, sampled as the present samples one, mixed onto the canvas by progress
+ * `uProgress` (SD13: Crossfade is linear in `p`).
+ */
+export const MIX_FRAGMENT = `#version 300 es
+precision highp float;
+uniform sampler2D uOutgoing;
+uniform sampler2D uIncoming;
+uniform vec2 uCanvas;
+uniform float uProgress;
+out vec4 colour;
+void main() {
+  vec2 uv = gl_FragCoord.xy / uCanvas;
+  vec3 outgoing = texture(uOutgoing, uv).rgb;
+  vec3 incoming = texture(uIncoming, uv).rgb;
+  colour = vec4(mix(outgoing, incoming, uProgress), 1.0);
+}`;
+
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) throw new Error("WebGL2: createShader failed");
