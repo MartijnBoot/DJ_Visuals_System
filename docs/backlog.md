@@ -28,6 +28,8 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 | 8 | B-11 | "No camera" as a feed option | S | idea |
 | 9 | B-13 | Selling it | L | idea |
 | 10 | B-15 | iPad as an audio source | L | idea |
+| 11 | B-20 | Profile authoring kit for outside designers | M | idea |
+| 12 | B-21 | Profile preview without the app | L | idea |
 
 ## Items
 
@@ -732,3 +734,68 @@ horizontal scrolling at 320 CSS px wide, the wheel usable by keyboard.
 `Approvals.tsx`) and the `/control` browser tests that read layout or style. A guess: no change
 to the server, `engine/`, `shared/` or the control messages. Depends on B-04; sits next to B-16
 and B-18.
+
+### B-20 — Profile authoring kit for outside designers
+
+- **Status:** idea
+- **Added:** 2026-11-23
+- **Size:** M (a guess)
+
+**Problem.** Other designers, some with the app and some without, want to make profiles for the
+owner or a DJ who has the app. None of them have the source code; they work in their own coding
+app or in a chat with an AI. Today the only written reference is the custom effect contract
+(`docs/custom-effects.md`); the rest of the file (`formatVersion`, palette, dials, the twelve
+built-in effects, audio bindings) is defined only in `shared/src/profile.ts` and the B-02 and
+B-03 specs.
+
+**Idea.** A self-contained kit a designer can use without the repo: a reference for the whole
+profile file, the custom effect contract, worked example profiles, and a ready-made instruction
+to paste into an AI chat so it writes a valid profile. The designer sends the finished file to the
+owner or a DJ, who imports it in `/builder`.
+
+**Why it matters.** More designers means more profiles that look nothing alike, without the owner
+authoring each one; it is also groundwork for selling (B-13). (Proposed wording, not the owner's.)
+
+**Not this.** Handing out the source code. A designer writing to anyone's database or server. A
+reference that drifts from what the app actually accepts.
+
+**Open questions.**
+
+- Where the kit is published, and in what form: a page shipped with the app, a download, a single
+  file to give an AI.
+- How it stays in step with the schema (a check like `tests/meta/custom-contract.test.ts`).
+- Whether the examples are the committed profiles in `profiles/`.
+- Whether the AI instruction is derived from `.claude/commands/profile.md`.
+
+**Touches.** A guess: `docs/custom-effects.md`, `shared/src/profile.ts` (as the source of truth,
+not changed), `profiles/`, a new meta test, `.claude/commands/profile.md`. Builds on B-02's file
+format and import and B-03's custom effect contract.
+
+### B-21 — Profile preview without the app
+
+- **Status:** idea
+- **Added:** 2026-11-23
+- **Size:** L (a guess)
+
+**Problem.** A designer without the app writes a profile blind. A shader that does not compile, or
+a look that is off, is only caught in the receiver's builder (the server never compiles code, B-03
+SD17), and the file goes back and forth.
+
+**Idea.** A preview page a designer can open without having the app: load the profile file, see it
+run on a test image or their own webcam with simulated beats, and see compile errors (which
+effect, which line) and whether the flash limiter clipped the look, before sending it.
+
+**Why it matters.** The file arrives working; the DJ does not debug someone else's shader.
+
+**Not this.** A second builder that saves profiles. A copy of the app. Anything that stores or
+sends the designer's profile anywhere.
+
+**Open questions.**
+
+- Where it is hosted and who can open it: a public page, the B-12 hosted URL, or a download.
+- Live audio, or simulated only.
+- Whether it also produces the nine stills `pnpm profile:check` makes.
+- Whether it shows the frame time (meaningful only for the designer's own GPU).
+
+**Touches.** A guess: `engine/` reused as is, a new standalone page, hosting (ADR 0001, B-12).
+Depends on B-20.
