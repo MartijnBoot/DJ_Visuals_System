@@ -5,8 +5,11 @@
 // controls in tab order, each labelled. B-04 (SD24): an External control section at the end; the
 // panel scrolls when it is taller than the window, never sideways (T18, D-05). B-06 (UI "Panel",
 // SD8, SD22): senders' cameras in the camera picker, and a "main audio" row with the playing
-// source's line while an audio sender is approved.
+// source's line while an audio sender is approved. B-09 (SD8, PD19): under the profile picker, a
+// transition select, a duration slider with its seconds readout (off for Cut and Beat cut) and a
+// Keep colour checkbox, each changing the page's one choice.
 import type { AudioFeatures } from "@djv/audio";
+import type { TransitionChoice, TransitionKind } from "@djv/shared";
 import type { Dials, RenderScale } from "@djv/engine";
 import { useEffect, useState } from "react";
 import type { DeviceOption } from "./capture/devices.ts";
@@ -15,11 +18,22 @@ import type { SessionState } from "./capture/session.ts";
 import { ExternalControl, type SenderEntry, type SenderState } from "./control/ExternalControl.tsx";
 import type { PanelAction, ScreenLinkView } from "./control/screen-link.ts";
 import type { ActiveState } from "./profiles/active.ts";
+import { durationAt, formatDuration, positionOf } from "./profiles/transition.ts";
 import type { AudioSource } from "./remote/main-audio.ts";
 import { CloudRow } from "./cloud/CloudRow.tsx";
 import { FIT, Row, SourcePickers } from "./SourcePickers.tsx";
 
 const METERS = ["level", "low", "mid", "high", "beat"] as const;
+
+/** B-09 SD1, SD8: the six types, as the controller names them. */
+const TRANSITIONS: readonly (readonly [TransitionKind, string])[] = [
+  ["cut", "Cut"],
+  ["crossfade", "Crossfade"],
+  ["dissolve", "Dissolve"],
+  ["wipe", "Wipe"],
+  ["beatCut", "Beat cut"],
+  ["dip", "Dip to colour"],
+];
 
 export interface PanelProps {
   started: boolean;
@@ -45,6 +59,9 @@ export interface PanelProps {
   read(now: number): AudioFeatures;
   profiles: ActiveState;
   onProfile(id: string): void;
+  /** B-09 SD8: the current transition, and a change to it (saved and mirrored by the page). */
+  transition: TransitionChoice;
+  onTransition(change: Partial<TransitionChoice>): void;
   control: ScreenLinkView;
   onControl(action: PanelAction): void;
   /**
@@ -149,6 +166,56 @@ export function Panel(props: PanelProps) {
         )}
       </Row>
       {props.profiles.reason && <div data-testid="profile-reason">{props.profiles.reason}</div>}
+      <Row label="transition">
+        {(id) => (
+          <select
+            id={id}
+            data-testid="transition-kind"
+            style={FIT}
+            value={props.transition.kind}
+            onChange={(e) => props.onTransition({ kind: e.target.value as TransitionKind })}
+          >
+            {TRANSITIONS.map(([kind, label]) => (
+              <option key={kind} value={kind}>
+                {label}
+              </option>
+            ))}
+          </select>
+        )}
+      </Row>
+      <Row label="duration">
+        {(id) => (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
+            <input
+              id={id}
+              data-testid="transition-duration"
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              style={{ minWidth: 0, flex: 1 }}
+              disabled={props.transition.kind === "cut" || props.transition.kind === "beatCut"}
+              value={positionOf(props.transition.duration)}
+              onChange={(e) => props.onTransition({ duration: durationAt(Number(e.target.value)) })}
+            />
+            <span data-testid="transition-duration-readout">
+              {formatDuration(props.transition.duration)}
+            </span>
+          </div>
+        )}
+      </Row>
+      <Row label="keep colour">
+        {(id) => (
+          <input
+            id={id}
+            data-testid="transition-keep-colour"
+            type="checkbox"
+            style={{ justifySelf: "start" }}
+            checked={props.transition.keepColour}
+            onChange={(e) => props.onTransition({ keepColour: e.target.checked })}
+          />
+        )}
+      </Row>
       <a href="/builder" data-testid="open-builder" style={{ color: "#fff" }}>
         Open builder
       </a>

@@ -469,6 +469,8 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
           read={read}
           profiles={profiles}
           onProfile={(id) => void active.pick(id)}
+          transition={transition}
+          onTransition={control.changeTransition}
           control={controlView}
           onControl={(action) => void control.link.send(action)}
           {...(hosted ? { hosted: { signedOut, onSignInAgain: () => void hosted.signIn() } } : {})}
