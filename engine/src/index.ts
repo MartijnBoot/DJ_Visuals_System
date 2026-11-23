@@ -3,14 +3,13 @@
 // profile's look (`shader.ts`, `profile.ts`) into one of two ping-pong targets, reading the
 // other as the previous frame, and blits the result to the canvas. A profile with another
 // effect list is linked while the old one keeps drawing and swapped in at the start of a frame
-// (B-02 SD15, PD4).
+// (B-02 SD15, PD4). What one look holds — its profile, program, dials and targets — is a `Look`
+// (`look-state.ts`, B-09 T2).
 import { DEFAULT_DIALS, ZERO_FEATURES, type AudioFeatures, type Dials } from "./features.ts";
 import {
   beginProgram,
   createProgram,
-  createTarget,
   createTexture,
-  deleteTarget,
   FULLSCREEN_VERTEX,
   PRESENT_FRAGMENT,
   programReady,
@@ -19,6 +18,7 @@ import {
   type Target,
 } from "./gl.ts";
 import { createLatencyWindow, type LatencyReading } from "./latency.ts";
+import { sizeTargets, type Look } from "./look-state.ts";
 import {
   BUILT_IN_PROFILE,
   customUniforms,
@@ -231,18 +231,20 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 
   const builtInKey = keyOf(BUILT_IN_PROFILE);
   const cache = new Map<string, Linked>();
-  let active: { profile: Profile; linked: Linked } = {
+  const active: Look<Linked> = {
     profile: BUILT_IN_PROFILE,
     linked: linked(
       builtInKey,
       createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(BUILT_IN_PROFILE)),
       false,
     ),
+    dials: DEFAULT_DIALS,
+    targets: null,
+    current: 0,
+    fresh: false,
   };
   cache.set(builtInKey, active.linked);
   let pending: PendingSwitch | null = null;
-  /** The first frame after a swap mixes nothing of the old look into the new one (PD4). */
-  let swapped = false;
   /** Keys that did not link, with why: logged once; custom code is not compiled again (PD9). */
   const failures = new Map<string, Error>();
   const noteFailure = (key: string, error: Error) => {
@@ -309,9 +311,10 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     }
     pending = null;
     remember(entry);
-    active = { profile: next.profile, linked: entry };
+    active.profile = next.profile;
+    active.linked = entry;
     customSince = null; // a new custom program gets its own 3 s before the guard looks
-    swapped = true;
+    active.fresh = true; // the first frame after a swap mixes nothing of the old look (PD4)
     next.resolve();
   };
 
@@ -333,25 +336,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   const latency = createLatencyWindow();
   let handle: number | null = null;
   let features: AudioFeatures = ZERO_FEATURES;
-  let dials: Dials = DEFAULT_DIALS;
   let video: HTMLVideoElement | null = null;
-  let targets: [Target, Target] | null = null;
-  let current = 0;
-
-  const targetsFor = (width: number, height: number): [Target, Target] => {
-    if (targets && targets[0].width === width && targets[0].height === height) return targets;
-    const old = targets;
-    targets = [createTarget(gl, width, height), createTarget(gl, width, height)];
-    if (old) {
-      // In a profile with code the limiter needs the real previous frame (B-03 PD4): the last
-      // output, scaled into the new previous target. Built-in profiles start from black.
-      if (active.linked.custom) copy(old[1 - current]!, targets[1 - current]!);
-      for (const t of old) deleteTarget(gl, t);
-      // Recreated targets are cleared black: no smear on the next frame, or it mixes that in.
-      swapped = true;
-    }
-    return targets;
-  };
 
   /** Scales one target's picture into another. */
   const copy = (from: Target, to: Target) => {
@@ -432,8 +417,8 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     parallel = gl.getExtension("KHR_parallel_shader_compile") as unknown as ParallelCompile | null;
     cache.clear();
     failures.clear();
-    targets = null;
-    current = 0;
+    active.targets = null;
+    active.current = 0;
     sourceTexture = createTexture(gl);
     present = createPresent();
     const wanted = active.profile;
@@ -447,10 +432,11 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       drawn = BUILT_IN_PROFILE; // built-ins only always link; this is a last resort
       program = createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(drawn));
     }
-    active = { profile: drawn, linked: linked(keyOf(drawn), program, false) };
+    active.profile = drawn;
+    active.linked = linked(keyOf(drawn), program, false);
     cache.set(active.linked.key, active.linked);
     customSince = null;
-    swapped = true;
+    active.fresh = true;
     emitGuard({ kind: "contextLost", customBypassed: hadCustom });
   });
 
@@ -484,34 +470,32 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     emitGuard({ kind: "slow", customBypassed: true });
   };
 
-  const draw = (timestamp: number, canvasWidth: number, canvasHeight: number) => {
-    // The internal resolution (SD8): the pass runs at canvas size × scale; the present draw
-    // scales it up to the canvas (D-14).
-    const scale = scaler.scale();
-    const width = Math.max(1, Math.round(canvasWidth * scale));
-    const height = Math.max(1, Math.round(canvasHeight * scale));
-    const pair = targetsFor(width, height);
-    const target = pair[current]!;
-    const previous = pair[1 - current]!;
-    const size = uploadSource();
-    const u = profileUniforms(active.profile, features, dials, timestamp, size !== null, width);
+  /**
+   * Draws one look into its current target, reading its other target as the previous frame, and
+   * returns the target drawn. The camera's frame is uploaded once per frame, before.
+   */
+  const drawLook = (
+    look: Look<Linked>,
+    pair: [Target, Target],
+    hasSource: boolean,
+    cover: [number, number],
+    timestamp: number,
+    width: number,
+    height: number,
+  ): Target => {
+    const target = pair[look.current]!;
+    const previous = pair[1 - look.current]!;
+    const u = profileUniforms(look.profile, features, look.dials, timestamp, hasSource, width);
     // A profile with code starts with both targets holding the last output, so a body that
     // discards a pixel leaves a picture at most one limited step old (B-03 PD3, PD4).
-    if (swapped && active.linked.custom) copy(previous, target);
-    if (swapped) u.feedback = 0;
-    swapped = false;
-    const loc = active.linked.loc;
-
-    // Cover fit: the camera fills the frame, cropped on the long side, never stretched.
-    let cover: [number, number] = [1, 1];
-    if (size) {
-      const ratio = size.width / size.height / (width / height);
-      cover = ratio > 1 ? [1 / ratio, 1] : [1, ratio];
-    }
+    if (look.fresh && look.linked.custom) copy(previous, target);
+    if (look.fresh) u.feedback = 0;
+    look.fresh = false;
+    const loc = look.linked.loc;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
     gl.viewport(0, 0, width, height);
-    gl.useProgram(active.linked.program);
+    gl.useProgram(look.linked.program);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
     gl.uniform1i(loc.uSource, 0);
@@ -520,7 +504,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     gl.uniform1i(loc.uPrevious, 1);
     gl.uniform2f(loc.uResolution, width, height);
     gl.uniform2f(loc.uCover, cover[0], cover[1]);
-    gl.uniform1f(loc.uHasSource, size ? 1 : 0);
+    gl.uniform1f(loc.uHasSource, hasSource ? 1 : 0);
     gl.uniform1f(loc.uTime, u.time);
     gl.uniform3f(loc.uTint, ...u.tint);
     gl.uniform1f(loc.uTintWeight, u.tintWeight);
@@ -542,9 +526,9 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     gl.uniform1f(loc.uMirror, u.mirror);
     gl.uniform1f(loc.uSegments, u.segments);
     gl.uniform1f(loc.uRgbSplit, u.rgbSplit);
-    const custom = active.linked.custom;
+    const custom = look.linked.custom;
     if (custom) {
-      const c = customUniforms(active.profile, features, dials);
+      const c = customUniforms(look.profile, features, look.dials);
       gl.uniform1fv(custom.uCustomStrength, c.strength);
       gl.uniform4fv(custom.uCustomParam, c.params);
       gl.uniform1f(custom["uAudio.level"], c.audio.level);
@@ -554,8 +538,12 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       gl.uniform1f(custom["uAudio.beat"], c.audio.beat);
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    look.current = 1 - look.current;
+    return target;
+  };
 
-    // Onto the canvas by a draw, never a blit (D-14): the target's texture, scaled up LINEAR.
+  /** Onto the canvas by a draw, never a blit (D-14): the target's texture, scaled up LINEAR. */
+  const presentTarget = (target: Target, canvasWidth: number, canvasHeight: number) => {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvasWidth, canvasHeight);
     gl.useProgram(present.program);
@@ -564,7 +552,24 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     gl.uniform1i(present.uFrame, 0);
     gl.uniform2f(present.uCanvas, canvasWidth, canvasHeight);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    current = 1 - current;
+  };
+
+  const draw = (timestamp: number, canvasWidth: number, canvasHeight: number) => {
+    // The internal resolution (SD8): the pass runs at canvas size × scale; the present draw
+    // scales it up to the canvas (D-14).
+    const scale = scaler.scale();
+    const width = Math.max(1, Math.round(canvasWidth * scale));
+    const height = Math.max(1, Math.round(canvasHeight * scale));
+    const pair = sizeTargets(gl, active, width, height, copy);
+    const size = uploadSource();
+    // Cover fit: the camera fills the frame, cropped on the long side, never stretched.
+    let cover: [number, number] = [1, 1];
+    if (size) {
+      const ratio = size.width / size.height / (width / height);
+      cover = ratio > 1 ? [1 / ratio, 1] : [1, ratio];
+    }
+    const target = drawLook(active, pair, size !== null, cover, timestamp, width, height);
+    presentTarget(target, canvasWidth, canvasHeight);
   };
 
   /** Switches the drawn profile (B-02 SD15, PD4); `setProfile` adds the guard's rules. */
@@ -581,7 +586,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     }
     supersede();
     if (key === active.linked.key) {
-      active = { ...active, profile };
+      active.profile = profile;
       return Promise.resolve();
     }
     // Code that did not compile is not compiled again on the next slider move (PD9).
@@ -619,7 +624,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       features = next;
     },
     setDials(next) {
-      dials = next;
+      active.dials = next;
     },
     setSource(next) {
       video = next;
@@ -631,7 +636,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       if (lost) {
         // Nothing links now; the restore draws this one (without custom effects).
         if (options.pick || keyOf(profile) !== bypassed) bypassed = null;
-        active = { ...active, profile };
+        active.profile = profile;
         return Promise.resolve();
       }
       if (bypassed !== null && !options.pick && keyOf(profile) === bypassed) {
