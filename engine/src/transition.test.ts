@@ -56,34 +56,25 @@ describe("Dip to colour (SD12, SD13, PD10)", () => {
   });
 
   it("moves each share by at most 0.14 a frame, and the luma it causes by less than FLASH_MAX (AC14)", () => {
-    const luma = ([r, g, b]: number[]) => 0.299 * r! + 0.587 * g! + 0.114 * b!;
-    const colours = [
-      [0, 0, 0],
-      [1, 1, 1],
-      [1, 0, 0],
-      [0, 1, 0],
-      [0, 0, 1],
-    ];
+    // The luma the weight alone moves is the shares' change times the three lumas, each in
+    // [0, 1]: at most the sum of the shares' changes, whatever the colours. That bound is checked,
+    // so every colour is covered without trying colours (B-09 T4; a sweep over colour triples
+    // took 8 s under the gate's parallel load and timed out).
     let worstShare = 0;
     let worstLuma = 0;
     for (let tenths = 5; tenths <= 80; tenths++) {
       const durationMs = tenths * 100;
-      for (const intervalMs of [8.33, 16.67, 33.33]) {
+      for (const intervalMs of [1, 4, 8.33, 16.67, 20, 25, 33.33]) {
         let before = dipShares(0);
         for (let t = intervalMs; t <= durationMs + intervalMs; t += intervalMs) {
           const now = dipShares(progress(t, 0, durationMs));
+          let sum = 0;
           for (const k of ["outgoing", "colour", "incoming"] as const) {
-            worstShare = Math.max(worstShare, Math.abs(now[k] - before[k]));
+            const change = Math.abs(now[k] - before[k]);
+            worstShare = Math.max(worstShare, change);
+            sum += change;
           }
-          for (const a of colours) {
-            for (const d of colours) {
-              for (const b of colours) {
-                const at = (s: typeof now) =>
-                  luma(a.map((_, i) => s.outgoing * a[i]! + s.colour * d[i]! + s.incoming * b[i]!));
-                worstLuma = Math.max(worstLuma, Math.abs(at(now) - at(before)));
-              }
-            }
-          }
+          worstLuma = Math.max(worstLuma, sum);
           before = now;
         }
       }
