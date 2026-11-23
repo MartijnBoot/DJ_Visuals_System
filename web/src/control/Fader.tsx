@@ -16,6 +16,10 @@ export interface FaderProps {
   disabled: boolean;
   /** A new value: at most one per frame while dragging, the last at once on release. */
   onSend(value: number): void;
+  /** B-09 PD17: the readout and `aria-valuetext` for a value; absent, B-19's 0–100. */
+  format?: (value: number) => string;
+  /** B-09 PD16: the least time between two sends while dragging; absent, B-19's 20 ms. */
+  gapMs?: number;
   /** The axis; the stylesheet lays it out from the page's arrangement (PD3). */
   orientation?: "horizontal" | "vertical";
 }
@@ -32,6 +36,7 @@ export function Fader(props: FaderProps) {
         requestFrame: (fn) => requestAnimationFrame(fn),
         cancelFrame: (id) => cancelAnimationFrame(id),
         send: (value) => send.current(value),
+        ...(props.gapMs !== undefined ? { minGapMs: props.gapMs } : {}),
       }),
     [],
   );
@@ -59,7 +64,7 @@ export function Fader(props: FaderProps) {
 
   const shown = held ?? props.value;
   const level = Math.min(1, Math.max(0, shown));
-  const number = readout(shown);
+  const number = props.format ? props.format(shown) : String(readout(shown));
 
   return (
     <div className="djv-fader" style={{ "--level": level } as CSSProperties}>
@@ -72,7 +77,7 @@ export function Fader(props: FaderProps) {
         aria-valuemin={0}
         aria-valuemax={1}
         aria-valuenow={shown}
-        aria-valuetext={String(number)}
+        aria-valuetext={number}
         aria-orientation={vertical ? "vertical" : "horizontal"}
         aria-disabled={props.disabled}
         onPointerDown={(e) => {
