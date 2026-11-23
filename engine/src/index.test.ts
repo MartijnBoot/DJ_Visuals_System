@@ -1221,6 +1221,89 @@ describe("transitions: two looks and the Crossfade (B-09)", () => {
     }
   });
 
+  describe("Beat cut (SD10, AC5, AC26)", () => {
+    const beat = (value: number) => ({ ...ZERO_FEATURES, beat: value, capturedAt: 1 });
+
+    it("keeps the old look through the wait and cuts on the beat's rise, resolving then", async () => {
+      const rig = started();
+      rig.engine.setAudioOk(true);
+      rig.engine.setFeatures(beat(0));
+      frameAt(0);
+      let done = false;
+      const switched = rig.engine.setProfile(zoomOnly, fade(2000, "beatCut")).then(() => {
+        done = true;
+      });
+      rig.fake.completeLinks();
+      frameAt(16); // ready: the wait starts
+      frameAt(32);
+      await flush();
+      expect(done).toBe(false);
+      rig.engine.setFeatures(beat(0.8));
+      frameAt(48);
+      await switched;
+      frameAt(64);
+      const all = frames();
+      expect(all.map(lookIds)).toEqual([[0], [0], [0], [1], [1]]);
+      expect(all.map((f) => mixesOf(f).length)).toEqual([0, 0, 0, 0, 0]);
+      expect(uniform(all[3]!, "uFeedback")).toBe(0); // a cut: the swap frame
+    });
+
+    it("cuts 2 s after ready with no rise", async () => {
+      const rig = started();
+      rig.engine.setAudioOk(true);
+      frameAt(0);
+      const switched = rig.engine.setProfile(zoomOnly, fade(2000, "beatCut"));
+      rig.fake.completeLinks();
+      for (let t = 16; t < 2016; t += 100) frameAt(t);
+      frameAt(2000);
+      expect(lookIds(frames().at(-1)!)).toEqual([0]);
+      frameAt(2016);
+      await switched;
+      expect(lookIds(frames().at(-1)!)).toEqual([1]);
+    });
+
+    it("reads the beat before the reactivity dial", async () => {
+      const rig = started();
+      rig.engine.setAudioOk(true);
+      rig.engine.setDials({ recognisability: 0.3, reactivity: 0 });
+      rig.engine.setFeatures(beat(0));
+      frameAt(0);
+      const switched = rig.engine.setProfile(zoomOnly, fade(2000, "beatCut"));
+      rig.fake.completeLinks();
+      frameAt(16);
+      rig.engine.setFeatures(beat(1));
+      frameAt(32);
+      await switched;
+      expect(frames().map(lookIds)).toEqual([[0], [0], [1]]);
+    });
+
+    it("cuts on the ready frame while the audio is not ok, as before Start (AC26)", async () => {
+      const rig = started(); // setAudioOk is false until the page says otherwise
+      rig.engine.setFeatures(beat(0));
+      frameAt(0);
+      const switched = rig.engine.setProfile(zoomOnly, fade(2000, "beatCut"));
+      rig.fake.completeLinks();
+      frameAt(16);
+      await switched;
+      expect(frames().map(lookIds)).toEqual([[0], [1]]);
+    });
+
+    it("is superseded by a pick during the wait", async () => {
+      const rig = started();
+      rig.engine.setAudioOk(true);
+      frameAt(0);
+      const waiting = rig.engine.setProfile(zoomOnly, fade(2000, "beatCut"));
+      rig.fake.completeLinks();
+      frameAt(16);
+      const next = rig.engine.setProfile(smearOnly, { pick: true });
+      await expect(waiting).rejects.toThrow(/superseded/);
+      rig.fake.completeLinks();
+      frameAt(32);
+      await next;
+      expect(frames().map(lookIds)).toEqual([[0], [0], [2]]);
+    });
+  });
+
   it("keeps the outgoing look's program when a ninth program is linked (PD13)", async () => {
     const rig = started(640, 360, { parallel: false });
     frameAt(0);

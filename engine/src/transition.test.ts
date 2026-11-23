@@ -1,9 +1,16 @@
-// B-09 T3, T4 (spec SD13, SD14, AC1 to AC4, AC14, AC15; plan PD7, PD8, PD10): a transition's
+// B-09 T3 to T5 (spec SD10, SD13, SD14, AC1 to AC5, AC14, AC15; plan PD7, PD8, PD10): a transition's
 // progress by frame timestamps, and the Crossfade, Dip and Wipe weights, as pure functions with
 // injected timestamps (the `scale.ts` way).
 import { describe, expect, it } from "vitest";
 import { FLASH_MAX } from "./look.ts";
-import { crossfadeWeight, dipShares, progress, wipeWeight } from "./transition.ts";
+import {
+  BEAT_WAIT_MS,
+  createBeatWait,
+  crossfadeWeight,
+  dipShares,
+  progress,
+  wipeWeight,
+} from "./transition.ts";
 
 describe("progress (SD13, PD7)", () => {
   it("is 0 on the first frame, elapsed / duration after, and 1 from the duration on", () => {
@@ -110,5 +117,38 @@ describe("Wipe (SD14, PD8, AC3)", () => {
         before = w;
       }
     }
+  });
+});
+
+describe("Beat cut's wait (SD10, AC5)", () => {
+  /** Calls `cut` every 16 ms from `readyAt` with `beatAt(t)`; the time it first says cut. */
+  const cutAt = (beatAt: (t: number) => number, audioOk = true, readyAt = 1000) => {
+    const wait = createBeatWait(readyAt);
+    for (let t = readyAt; t < readyAt + 5000; t += 4) {
+      if (wait.cut(t, beatAt(t), audioOk)) return t - readyAt;
+    }
+    return null;
+  };
+
+  it("cuts on the frame whose beat rises to 0.5 from below", () => {
+    expect(cutAt((t) => (t >= 1300 ? 0.8 : 0.1))).toBe(300);
+  });
+
+  it("cuts at 2 s with no rise", () => {
+    expect(BEAT_WAIT_MS).toBe(2000);
+    expect(cutAt(() => 0.2)).toBe(2000);
+  });
+
+  it("cuts at once while the audio is not ok", () => {
+    expect(cutAt(() => 0, false)).toBe(0);
+    expect(cutAt(() => 1, false)).toBe(0);
+  });
+
+  it("waits for a fall and a rise when the beat is already high at ready", () => {
+    expect(cutAt((t) => (t < 1500 ? 1 : t < 1600 ? 0 : 1))).toBe(600);
+  });
+
+  it("counts 0.49 to 0.5 as a rise", () => {
+    expect(cutAt((t) => (t >= 1100 ? 0.5 : 0.49))).toBe(100);
   });
 });

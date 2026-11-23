@@ -44,3 +44,27 @@ export const MIX_KIND: Readonly<Record<TransitionKind, number>> = {
   wipe: 2,
   dip: 3,
 };
+
+/** SD10: the longest Beat cut waits for a beat once the new look is ready. */
+export const BEAT_WAIT_MS = 2000;
+
+/** SD10: the `beat` feature crosses this, from below, to count as a beat. */
+const BEAT_RISE = 0.5;
+
+/**
+ * SD10, AC5: when a Beat cut, ready at `readyAt`, cuts. Called once per frame with that frame's
+ * timestamp and `beat` (before the reactivity dial): true on the first frame whose beat reaches
+ * 0.5 from below 0.5 on the frame before (so a beat already high when ready must fall first), at
+ * 2 s with no such rise, or at once while the screen's audio is not `ok`.
+ */
+export function createBeatWait(readyAt: number) {
+  let before: number | null = null;
+  return {
+    cut(t: number, beat: number, audioOk: boolean): boolean {
+      if (!audioOk || t - readyAt >= BEAT_WAIT_MS) return true;
+      const rose = before !== null && before < BEAT_RISE && beat >= BEAT_RISE;
+      before = beat;
+      return rose;
+    },
+  };
+}

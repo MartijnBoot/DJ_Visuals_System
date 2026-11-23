@@ -36,7 +36,7 @@ import { buildFragment, fragmentLayout, type FragmentEntry } from "./shader.ts";
 import { locateErrors, ProfileCompileError, type BodyLines } from "./compile-error.ts";
 import type { Rgb } from "./colour.ts";
 import { createFrameStats, type EngineStats } from "./stats.ts";
-import { MIX_KIND, progress, type TransitionKind } from "./transition.ts";
+import { createBeatWait, MIX_KIND, progress, type TransitionKind } from "./transition.ts";
 
 export type { EngineStats, FrameStats } from "./stats.ts";
 export type { LatencyReading } from "./latency.ts";
@@ -69,6 +69,8 @@ export interface Engine {
   setFeatures(features: AudioFeatures): void;
   /** The two dials; applied on the next frame (AC9). */
   setDials(dials: Dials): void;
+  /** B-09 SD10, PD3: whether the audio that feeds the looks is `ok`; false until told. */
+  setAudioOk(ok: boolean): void;
   /** The camera, or `null` for the generative input (SD10). */
   setSource(video: HTMLVideoElement | null): void;
   /** The panel's quality cap: the automatic render scale never exceeds it (SD8). */
@@ -206,6 +208,8 @@ interface PendingSwitch {
   bodies: BodyLines[];
   /** B-09: what the call asked for. */
   request: Request;
+  /** B-09 SD10: a Beat cut's wait, from the frame its program is ready. */
+  wait: ReturnType<typeof createBeatWait> | null;
   resolve(): void;
   reject(error: Error): void;
 }
@@ -218,9 +222,14 @@ interface Request {
 
 const VALUES_ONLY: Request = { pick: false, transition: null };
 
-/** A transition other than Cut: two looks and a mix (B-09 SD1). */
+/** A transition with two looks and a mix (B-09 SD1): neither Cut nor Beat cut. */
 const mixes = (request: Request) =>
-  request.transition !== null && request.transition.kind !== "cut";
+  request.transition !== null &&
+  request.transition.kind !== "cut" &&
+  request.transition.kind !== "beatCut";
+
+/** B-09 SD10: a Beat cut waits for a beat once ready. */
+const waits = (request: Request) => request.transition?.kind === "beatCut";
 
 /** The chain a profile's program draws: its effect list, custom code included (B-03 SD3). */
 const entriesOf = (profile: Profile): FragmentEntry[] =>
@@ -344,8 +353,8 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     if (!entry) {
       const state = programReady(gl, next.linking!, parallel);
       if (state.state === "pending") return;
-      pending = null;
       if (state.state === "failed") {
+        pending = null;
         const issues = locateErrors(state.message, next.bodies);
         const error =
           issues.length > 0 ? new ProfileCompileError(issues) : new Error(state.message);
@@ -360,6 +369,13 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
         return;
       }
       entry = linked(next.key, state.program, hasCustom(next.profile));
+      next.linking = null; // linked: kept in the cache from now on, through a Beat cut's wait
+      remember(entry);
+    }
+    if (waits(next.request)) {
+      // SD10: the old look keeps drawing, and the promise waits, until the beat says cut.
+      next.wait ??= createBeatWait(timestamp);
+      if (!next.wait.cut(timestamp, features.beat, audioOk)) return;
     }
     pending = null;
     remember(entry);
@@ -429,6 +445,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   const latency = createLatencyWindow();
   let handle: number | null = null;
   let features: AudioFeatures = ZERO_FEATURES;
+  let audioOk = false;
   let video: HTMLVideoElement | null = null;
 
   /** Scales one target's picture into another. */
@@ -721,13 +738,22 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       pending.linking = null;
       supersede();
       return new Promise((resolve, reject) => {
-        pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile), request };
+        pending = {
+          profile,
+          key,
+          linking,
+          resolve,
+          reject,
+          bodies: bodiesOf(profile),
+          request,
+          wait: null,
+        };
       });
     }
     supersede();
     // B-09 PD12: a pick of the active list with a transition transitions; anything else on it
     // is a value change, on the incoming look during a transition (SD3).
-    if (key === active.linked.key && !(request.pick && mixes(request))) {
+    if (key === active.linked.key && !(request.pick && (mixes(request) || waits(request)))) {
       if (request.pick) endTransition(); // a Cut picked during a transition ends it (SD2)
       active.profile = profile;
       return Promise.resolve();
@@ -745,7 +771,16 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
           return;
         }
       }
-      pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile), request };
+      pending = {
+        profile,
+        key,
+        linking,
+        resolve,
+        reject,
+        bodies: bodiesOf(profile),
+        request,
+        wait: null,
+      };
     });
   };
 
@@ -768,6 +803,9 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     },
     setDials(next) {
       active.dials = next;
+    },
+    setAudioOk(ok) {
+      audioOk = ok;
     },
     setSource(next) {
       video = next;
