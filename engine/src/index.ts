@@ -26,6 +26,7 @@ import { dropTargets, sizeTargets, type Look } from "./look-state.ts";
 import {
   BUILT_IN_PROFILE,
   customUniforms,
+  hexToRgb,
   PALETTE_SLOTS,
   profileUniforms,
   type Profile,
@@ -33,8 +34,9 @@ import {
 import { createScaleController, type RenderScale } from "./scale.ts";
 import { buildFragment, fragmentLayout, type FragmentEntry } from "./shader.ts";
 import { locateErrors, ProfileCompileError, type BodyLines } from "./compile-error.ts";
+import type { Rgb } from "./colour.ts";
 import { createFrameStats, type EngineStats } from "./stats.ts";
-import { crossfadeWeight, progress, type TransitionKind } from "./transition.ts";
+import { MIX_KIND, progress, type TransitionKind } from "./transition.ts";
 
 export type { EngineStats, FrameStats } from "./stats.ts";
 export type { LatencyReading } from "./latency.ts";
@@ -283,7 +285,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   /** B-09: during a transition, the look going out, drawn as it was at the start (SD3). */
   let outgoing: Look<Linked> | null = null;
   /** B-09: the running transition, with its options as they were at the start (AC16). */
-  let transition: (TransitionOptions & { t0: number; ended: boolean }) | null = null;
+  let transition: (TransitionOptions & { t0: number; ended: boolean; dip: Rgb }) | null = null;
   /** The outgoing look is drawn alone from now on: its targets go (PD7, SD2). */
   const endTransition = () => {
     if (outgoing) dropTargets(gl, outgoing);
@@ -377,7 +379,10 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
         fresh: true,
       };
       const { kind, durationMs, dipColour, seed } = next.request.transition!;
-      transition = { kind, durationMs, dipColour, seed, t0: timestamp, ended: false };
+      // SD12, PD10: the dip colour is parsed once, at the start; a later colour change is the
+      // incoming look's, not the dip's.
+      const dip = hexToRgb(dipColour);
+      transition = { kind, durationMs, dipColour, seed, dip, t0: timestamp, ended: false };
     } else {
       endTransition(); // a Cut during a transition ends it (SD2)
       active.profile = next.profile;
@@ -412,6 +417,9 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       uIncoming: at("uIncoming"),
       uCanvas: at("uCanvas"),
       uProgress: at("uProgress"),
+      uKind: at("uKind"),
+      uDip: at("uDip"),
+      uSeed: at("uSeed"),
     };
   };
   let mix = createMix();
@@ -644,7 +652,14 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   };
 
   /** B-09 PD6: the two looks' targets just drawn, mixed onto the canvas by progress `p`. */
-  const mixTargets = (from: Target, to: Target, p: number, width: number, height: number) => {
+  const mixTargets = (
+    from: Target,
+    to: Target,
+    running: NonNullable<typeof transition>,
+    p: number,
+    width: number,
+    height: number,
+  ) => {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, width, height);
     gl.useProgram(mix.program);
@@ -655,7 +670,10 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     gl.bindTexture(gl.TEXTURE_2D, to.texture);
     gl.uniform1i(mix.uIncoming, 1);
     gl.uniform2f(mix.uCanvas, width, height);
-    gl.uniform1f(mix.uProgress, crossfadeWeight(p));
+    gl.uniform1f(mix.uProgress, p);
+    gl.uniform1i(mix.uKind, MIX_KIND[running.kind]);
+    gl.uniform3f(mix.uDip, ...running.dip);
+    gl.uniform1f(mix.uSeed, running.seed);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
 
@@ -686,7 +704,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       const a = drawLook(from, fromPair, size !== null, cover, timestamp, width, height);
       const b = drawLook(active, pair, size !== null, cover, timestamp, width, height);
       const p = progress(timestamp, transition.t0, transition.durationMs);
-      mixTargets(a, b, p, canvasWidth, canvasHeight);
+      mixTargets(a, b, transition, p, canvasWidth, canvasHeight);
       if (p >= 1) transition.ended = true; // the next frame draws the incoming look alone (PD7)
       return;
     }

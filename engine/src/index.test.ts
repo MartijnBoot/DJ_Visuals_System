@@ -1194,6 +1194,33 @@ describe("transitions: two looks and the Crossfade (B-09)", () => {
     expect(mixesOf(frames().at(-1)!)).toHaveLength(0);
   });
 
+  it("sets the kind, the seed and the dip colour per transition; a colour change keeps the dip's (AC4)", async () => {
+    const kinds: [TransitionKind, number][] = [
+      ["crossfade", 0],
+      ["dissolve", 1],
+      ["wipe", 2],
+      ["dip", 3],
+    ];
+    for (const [kind, code] of kinds) {
+      const options: SetProfileOptions = {
+        pick: true,
+        transition: { kind, durationMs: 2000, dipColour: "#33cc66", seed: 0.625 },
+      };
+      const { engine } = await fading(zoomOnly, options);
+      await engine.setProfile({ ...zoomOnly, palette: ["#ff0000", "#ffffff"] }); // a live colour
+      frameAt(32);
+      for (const frame of frames().slice(1)) {
+        const [mix] = mixesOf(frame);
+        expect(mix!.uniforms.get("uKind")).toBe(code);
+        expect(mix!.uniforms.get("uSeed")).toBe(0.625);
+        const dip = frame.find(
+          (c) => c.name === "uniform3f" && (c.args[0] as { name: string }).name === "uDip",
+        )!;
+        expect(dip.args.slice(1)).toEqual([0x33 / 255, 0xcc / 255, 0x66 / 255]);
+      }
+    }
+  });
+
   it("keeps the outgoing look's program when a ninth program is linked (PD13)", async () => {
     const rig = started(640, 360, { parallel: false });
     frameAt(0);
