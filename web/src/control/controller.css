@@ -63,7 +63,8 @@
   --bank-pad-inline: 8px;
 }
 
-/* ---- The shell (SD1, SD5): pinned bar, scrolling middle, pinned bank, keyed off the root ---- */
+/* ---- The shell (SD1, SD5; B-16 PD10): pinned bar, scrolling middle, pinned colour block, pinned
+   bank, keyed off the root ---- */
 .djv-control {
   position: fixed;
   inset: 0;
@@ -77,14 +78,15 @@
   grid-template:
     "bar" auto
     "scroll" minmax(0, 1fr)
+    "colour" auto
     "bank" auto
     / minmax(0, 1fr);
 }
 .djv-control[data-arrangement="vertical"] {
   grid-template:
-    "bar bar" auto
-    "scroll bank" minmax(0, 1fr)
-    / minmax(0, 1fr) auto;
+    "bar bar bar" auto
+    "scroll colour bank" minmax(0, 1fr)
+    / minmax(0, 1fr) auto auto;
 }
 
 /* ---- Status bar (SD4): pinned at the top, wrapping rather than truncating ---- */
@@ -291,34 +293,35 @@
   color: var(--text);
 }
 
-/* ---- Vertical faders: only in the bank, only in the vertical arrangement (PD3) ---- */
-.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader {
+/* ---- Vertical faders (PD3; B-16 PD9): the bank's in the vertical arrangement, the colour
+   block's brightness always ---- */
+.djv-control .djv-fader.is-vertical {
   height: auto;
   width: var(--fader-cross);
 }
-.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-slider::before,
-.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-fill {
+.djv-control .djv-fader.is-vertical .djv-fader-slider::before,
+.djv-control .djv-fader.is-vertical .djv-fader-fill {
   left: calc(var(--label-band) + (100% - var(--label-band) - var(--groove)) / 2);
   width: var(--groove);
   top: auto;
   bottom: calc(var(--cap-along) / 2);
 }
-.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-slider::before {
+.djv-control .djv-fader.is-vertical .djv-fader-slider::before {
   right: auto;
   top: calc(var(--readout-band) + var(--cap-along) / 2);
   height: auto;
 }
-.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-fill {
+.djv-control .djv-fader.is-vertical .djv-fader-fill {
   height: calc(var(--level) * (100% - var(--readout-band) - var(--cap-along)));
 }
-.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-cap {
+.djv-control .djv-fader.is-vertical .djv-fader-cap {
   left: calc(var(--label-band) + (100% - var(--label-band) - var(--cap-across)) / 2);
   top: auto;
   bottom: calc(var(--level) * (100% - var(--readout-band) - var(--cap-along)));
   width: var(--cap-across);
   height: var(--cap-along);
 }
-.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-cap::after {
+.djv-control .djv-fader.is-vertical .djv-fader-cap::after {
   left: 2px;
   right: 2px;
   top: 50%;
@@ -327,14 +330,14 @@
   height: 2px;
   margin: -1px 0 0;
 }
-.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-label {
+.djv-control .djv-fader.is-vertical .djv-fader-label {
   left: 3px;
   top: auto;
   bottom: 10px;
   writing-mode: vertical-rl;
   transform: rotate(180deg);
 }
-.djv-control[data-arrangement="vertical"] .djv-bank .djv-fader-readout {
+.djv-control .djv-fader.is-vertical .djv-fader-readout {
   left: 0;
   right: 0;
   top: 4px;
@@ -470,19 +473,6 @@
 .djv-control .djv-key.djv-close {
   width: 100%;
 }
-.djv-control .djv-colour-key {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-}
-.djv-control .djv-chip {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  box-sizing: border-box;
-  border-radius: 4px;
-  border: 1px solid var(--text);
-}
 .djv-control .djv-swatch {
   -webkit-appearance: none;
   appearance: none;
@@ -496,6 +486,22 @@
 }
 .djv-control .djv-swatch.is-primary {
   border: 4px solid var(--select);
+}
+/* The wheel's target (B-16 SD3, PD2, AC18): a bar of --text under the swatch, on the panel, so it
+   is 3:1 whatever the swatch's colour, and apart from the primary's edge and the focus ring. */
+.djv-control .djv-swatch {
+  position: relative;
+}
+.djv-control .djv-swatch.is-target::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -10px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--text);
+  pointer-events: none;
 }
 .djv-control .djv-swatch:disabled {
   border-style: dashed;
@@ -517,7 +523,7 @@
   border-radius: var(--radius-key);
 }
 
-/* ---- Dialogs (approvals, colour wheel): the page behind dimmed ---- */
+/* ---- Dialogs (approvals): the page behind dimmed ---- */
 .djv-control .djv-dialog {
   box-sizing: border-box;
   max-width: min(480px, calc(100vw - 32px));
@@ -535,15 +541,64 @@
 .djv-control .djv-dialog::backdrop {
   background: rgb(0 0 0 / 72%);
 }
-.djv-control .djv-wheel {
+/* ---- The colour block (B-16 SD1, SD2, SD5, PD8, PD10, PD13): pinned between the scrolling
+   middle and the bank. Horizontal: full width, the disc and the standing brightness fader on the
+   left, a narrow column with the label, the pair and Reset beside them. Vertical: a column under
+   the bar, the label, the pair and Reset under the disc and fader. ---- */
+.djv-control .djv-colour {
+  --disc: clamp(150px, 31.25vmin, 240px);
+  grid-area: colour;
   display: grid;
-  gap: var(--space-3);
-  justify-items: center;
+  gap: var(--bank-gap);
+  align-content: start;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: var(--space-2);
+  background: var(--panel);
+}
+.djv-control[data-arrangement="horizontal"] .djv-colour {
+  grid-template:
+    "disc fader label" auto
+    "disc fader info" 1fr
+    / var(--disc) var(--fader-cross) minmax(0, 1fr);
+  border-top: var(--fader-edge) solid var(--line);
+}
+.djv-control[data-arrangement="vertical"] .djv-colour {
+  grid-template:
+    "disc fader" auto
+    "label label" auto
+    "info info" auto
+    / var(--disc) var(--fader-cross);
+  border-left: var(--fader-edge) solid var(--line);
+}
+.djv-control .djv-colour-label {
+  grid-area: label;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .djv-control .djv-disc {
+  grid-area: disc;
   position: relative;
-  width: min(240px, 70vw);
-  aspect-ratio: 1;
+  width: var(--disc);
+  height: var(--disc);
+}
+/* The disc's edge (AC18): 2 px of --line over the disc's rim, so the disc keeps its size. */
+.djv-control .djv-disc::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border: var(--fader-edge) solid var(--line);
+  border-radius: 50%;
+  pointer-events: none;
+}
+/* Locked (B-16 SD8, PD12): the bank's 135° stripes over the disc, every other stripe --hatch, with
+   the "Locked" tag in the label's place: never colour alone. Nothing moves. */
+.djv-control .djv-colour.is-locked .djv-disc::after {
+  background: repeating-linear-gradient(135deg, transparent 0 6px, var(--hatch) 6px 12px);
+}
+.djv-control .djv-colour.is-locked .djv-disc-canvas {
+  cursor: default;
 }
 .djv-control .djv-disc-canvas {
   display: block;
@@ -563,19 +618,55 @@
   box-shadow: 0 0 0 2px #000000;
   pointer-events: none;
 }
-.djv-control .djv-wheel-fader {
-  width: 100%;
+.djv-control .djv-colour-fader {
+  grid-area: fader;
+}
+.djv-control .djv-colour .djv-fader.is-vertical {
+  width: var(--fader-cross);
+  height: var(--disc);
+}
+.djv-control .djv-colour-info {
+  grid-area: info;
+  display: grid;
+  gap: var(--bank-gap);
+  align-content: start;
+  justify-items: start;
+  min-width: 0;
+}
+.djv-control[data-arrangement="vertical"] .djv-colour-info {
+  grid-template:
+    "current reset" auto
+    "stored reset" auto
+    / minmax(0, 1fr) auto;
+  align-items: center;
+}
+.djv-control .djv-pair-current {
+  grid-area: current;
+}
+.djv-control .djv-pair-stored {
+  grid-area: stored;
+}
+.djv-control .djv-colour-reset {
+  grid-area: reset;
+}
+.djv-control[data-arrangement="horizontal"] .djv-colour-info {
+  grid-template-areas: "current" "stored" "reset";
 }
 .djv-control .djv-pair {
-  display: grid;
-  gap: 4px;
-  justify-items: center;
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  min-width: 0;
   font-size: var(--fs-note);
+  line-height: 18px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 .djv-control .djv-pair-swatch {
-  width: 56px;
-  height: 56px;
+  flex: none;
+  width: 24px;
+  height: 24px;
   box-sizing: border-box;
-  border-radius: var(--radius-key);
+  border-radius: 4px;
   border: 2px solid var(--text-muted);
 }

@@ -37,3 +37,59 @@ export async function dropNetwork(page: Page): Promise<void> {
     }
   });
 }
+
+/** One frame a page put on a socket: when `send` returned (page clock) and the message. */
+export interface SentFrame {
+  t: number;
+  message: { type: string } & Record<string, unknown>;
+}
+
+type SendWindow = { __sends: SentFrame[] };
+
+/**
+ * B-16 PD16: stamps every frame the context's pages send inside `WebSocket.prototype.send`, on the
+ * page's own clock, so the send budget's gaps are measured where they are kept, with no tolerance.
+ */
+export async function recordSends(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    const w = window as unknown as SendWindow;
+    w.__sends = [];
+    const send = WebSocket.prototype.send;
+    WebSocket.prototype.send = function (data) {
+      send.call(this, data);
+      w.__sends.push({
+        t: performance.now(),
+        message: JSON.parse(String(data)) as SentFrame["message"],
+      });
+    };
+  });
+}
+
+/** Every frame recorded so far. */
+export const sentFrames = (page: Page): Promise<SentFrame[]> =>
+  page.evaluate(() => (window as unknown as SendWindow).__sends);
+
+/** The page's clock now, to compare with `SentFrame.t`. */
+export const pageNow = (page: Page): Promise<number> => page.evaluate(() => performance.now());
+
+/**
+ * Arms a mark, on the page's clock, for the first moment one of its sockets hears `close`: the
+ * link locks right there, so a frame stamped after it was sent after the lock. Needs
+ * `keepSockets`; returns a reader for the mark (Infinity until a close).
+ */
+export async function markClose(page: Page): Promise<() => Promise<number>> {
+  await page.evaluate(() => {
+    const w = window as unknown as SocketWindow & { __closedAt?: number };
+    w.__closedAt = Infinity;
+    for (const ws of w.__sockets) {
+      ws.addEventListener(
+        "close",
+        () => (w.__closedAt = Math.min(w.__closedAt!, performance.now())),
+        {
+          once: true,
+        },
+      );
+    }
+  });
+  return () => page.evaluate(() => (window as unknown as { __closedAt: number }).__closedAt);
+}

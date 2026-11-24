@@ -20,8 +20,12 @@ export interface FaderProps {
   format?: (value: number) => string;
   /** B-09 PD16: the least time between two sends while dragging; absent, B-19's 20 ms. */
   gapMs?: number;
-  /** The axis; the stylesheet lays it out from the page's arrangement (PD3). */
+  /** The axis; `is-vertical` on the root lays it out (PD3; B-16 PD9: outside the bank too). */
   orientation?: "horizontal" | "vertical";
+  /** B-16 PD6: told when its own pointer takes hold (true) and when the hold ends (false). */
+  onHold?(held: boolean): void;
+  /** B-16 PD11: a change lets go of a drag, as a change of axis does (the page re-laid out). */
+  layout?: string;
 }
 
 export function Fader(props: FaderProps) {
@@ -29,6 +33,8 @@ export function Fader(props: FaderProps) {
   const labelId = useId();
   const send = useRef(props.onSend);
   send.current = props.onSend;
+  const hold = useRef(props.onHold);
+  hold.current = props.onHold;
   const gesture = useMemo(
     () =>
       createFaderGesture({
@@ -45,9 +51,11 @@ export function Fader(props: FaderProps) {
   const holder = useRef<number | null>(null);
 
   const letGo = () => {
+    const wasHeld = holder.current !== null;
     holder.current = null;
     gesture.letGo();
     setHeld(null);
+    if (wasHeld) hold.current?.(false);
   };
 
   // A lock mid-drag lets go: nothing more is sent for that drag (SD9).
@@ -57,7 +65,10 @@ export function Fader(props: FaderProps) {
   // So does a change of axis: the drag's distances no longer mean what they did (SD9).
   useEffect(() => {
     if (holder.current !== null) letGo();
-  }, [vertical]);
+  }, [vertical, props.layout]);
+  // And so does leaving the page (B-16: the wheel's fader goes with its slot): a frame still
+  // waiting would send for a control that no longer exists.
+  useEffect(() => () => gesture.letGo(), [gesture]);
 
   /** The pointer's position along the axis, growing toward more. */
   const along = (e: { clientX: number; clientY: number }) => (vertical ? -e.clientY : e.clientX);
@@ -67,7 +78,10 @@ export function Fader(props: FaderProps) {
   const number = props.format ? props.format(shown) : String(readout(shown));
 
   return (
-    <div className="djv-fader" style={{ "--level": level } as CSSProperties}>
+    <div
+      className={vertical ? "djv-fader is-vertical" : "djv-fader"}
+      style={{ "--level": level } as CSSProperties}
+    >
       <div
         role="slider"
         tabIndex={0}
@@ -89,6 +103,7 @@ export function Fader(props: FaderProps) {
           e.currentTarget.setPointerCapture(e.pointerId);
           // Held but not yet moved: the cap stays where the screen put it, on the grid or not.
           setHeld(props.value);
+          hold.current?.(true);
         }}
         onPointerMove={(e) => {
           const next = gesture.move(e.pointerId, along(e));
@@ -99,6 +114,7 @@ export function Fader(props: FaderProps) {
           holder.current = null;
           gesture.up(e.pointerId);
           setHeld(null);
+          hold.current?.(false);
         }}
         onPointerCancel={(e) => {
           if (holder.current === e.pointerId) letGo();

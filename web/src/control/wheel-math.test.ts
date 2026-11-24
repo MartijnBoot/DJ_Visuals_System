@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createSendThrottle,
+  follow,
   hexToHsv,
   hsvToHex,
   hueSatToPoint,
@@ -179,5 +180,32 @@ describe("the send throttle (PD14, SD11)", () => {
     });
     quiet.release();
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("follow: the screen's colour unless ours already makes it (B-16 SD7, PD6)", () => {
+  it("keeps hue and saturation at black when the screen shows black", () => {
+    const ours = { h: 200, s: 0.7, v: 0 };
+    expect(follow(ours, "#000000")).toBe(ours);
+  });
+
+  it("keeps hue at grey (saturation 0) when the screen shows that grey", () => {
+    const ours = { h: 120, s: 0, v: 0.5 };
+    expect(follow(ours, hsvToHex(ours))).toBe(ours);
+  });
+
+  it("keeps ours on an exact match", () => {
+    const ours = { h: 30, s: 0.5, v: 0.8 };
+    expect(follow(ours, hsvToHex(ours))).toBe(ours);
+  });
+
+  it("adopts the screen's colour when it differs", () => {
+    const ours = { h: 200, s: 0.7, v: 0 };
+    expect(follow(ours, "#ff0000")).toEqual(hexToHsv("#ff0000"));
+  });
+
+  it("ignores case", () => {
+    const ours = { h: 30, s: 0.5, v: 0.8 };
+    expect(follow(ours, hsvToHex(ours).toUpperCase())).toBe(ours);
   });
 });

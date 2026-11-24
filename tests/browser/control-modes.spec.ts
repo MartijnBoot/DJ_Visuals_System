@@ -110,8 +110,8 @@ test("dragging the wheel recolours the screen without a new program; Reset and a
   await expect(swatch).toHaveAttribute("data-colour", red);
   await expect(vj.getByTestId("wheel-current")).toHaveAttribute("data-colour", red);
   await expect(vj.getByTestId("wheel-stored")).toHaveAttribute("data-colour", "#808080");
-  // Every surface: the other controller's primary colour (slot 0, derived) shows it too.
-  await expect(dj.getByTestId("primary-swatch")).toHaveAttribute("data-colour", red);
+  // Every surface: the other controller's pinned wheel (DJ: slot 0, derived) shows it too.
+  await expect(dj.getByTestId("wheel-current")).toHaveAttribute("data-colour", red);
   await expect.poll(() => redness(page)).toBeGreaterThan(before + 20);
   // No new program: the same profile, no pick.
   await expect(page.getByTestId("overlay-profile")).toHaveText("profile: Grey");
@@ -121,14 +121,12 @@ test("dragging the wheel recolours the screen without a new program; Reset and a
   await expect(swatch).toHaveAttribute("data-colour", "#808080");
   await dragToRed(vj);
   await expect(swatch).toHaveAttribute("data-colour", red);
-  await vj.getByTestId("wheel-done").click();
-  await expect(vj.getByTestId("wheel")).toHaveCount(0);
   await tileOf(vj, grey).click(); // the same profile again: the stored palette (SD7)
   await expect(swatch).toHaveAttribute("data-colour", "#808080");
-  await expect(dj.getByTestId("primary-swatch")).toHaveAttribute("data-colour", "#808080");
+  await expect(dj.getByTestId("wheel-current")).toHaveAttribute("data-colour", "#808080");
 });
 
-test("DJ's Primary colour opens the wheel on slot 1 for the built-in and on a stored primary (AC23, SD10)", async ({
+test("DJ's pinned wheel aims at slot 1 for the built-in and at a stored primary (B-16 AC9, B-04 SD10)", async ({
   page,
   browser,
 }) => {
@@ -141,15 +139,14 @@ test("DJ's Primary colour opens the wheel on slot 1 for the built-in and on a st
   const phone = await paired(page, browser, url, PHONE);
   await expect(phone.getByTestId("mode-dj")).toHaveAttribute("aria-pressed", "true");
   await expect(phone.getByTestId("swatch")).toHaveCount(0); // swatches are VJ mode's
-  await phone.getByTestId("primary-colour").click();
   await expect(phone.getByTestId("wheel")).toHaveAttribute("data-slot", "1");
+  await expect(phone.getByTestId("wheel-label")).toHaveText("Colour 2 · primary");
   await expect(phone.getByTestId("wheel-current")).toHaveAttribute("data-colour", "#ffffff");
-  await phone.getByTestId("wheel-done").click();
   await tileOf(phone, stored).click();
   await expect(tileOf(phone, stored)).toHaveAttribute("aria-pressed", "true");
-  await expect(phone.getByTestId("primary-swatch")).toHaveAttribute("data-colour", "#ffcc00");
-  await phone.getByTestId("primary-colour").click();
   await expect(phone.getByTestId("wheel")).toHaveAttribute("data-slot", "2");
+  await expect(phone.getByTestId("wheel-label")).toHaveText("Colour 3 · primary");
+  await expect(phone.getByTestId("wheel-current")).toHaveAttribute("data-colour", "#ffcc00");
 });
 
 test("the arrow keys and the brightness slider change the colour without a mouse (UI, Accessibility)", async ({

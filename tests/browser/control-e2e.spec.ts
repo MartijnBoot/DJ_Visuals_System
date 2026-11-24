@@ -370,7 +370,6 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     await phone.getByTestId("wheel-disc").focus();
     await phone.keyboard.press("ArrowRight");
     await phone.getByTestId("wheel-reset").click();
-    await phone.getByTestId("wheel-done").click();
     await phone.getByTestId("refresh").click();
     await page.waitForTimeout(1500);
     const allowed =
@@ -398,7 +397,6 @@ test.describe("part 1: limits, lifecycle and privacy (T15)", () => {
     await phone.locator('[data-testid=swatch][data-slot="0"]').click();
     await phone.getByTestId("wheel-disc").focus();
     await phone.keyboard.press("ArrowUp");
-    await phone.getByTestId("wheel-done").click();
     await page.getByTestId("control-devices").getByTestId("control-disconnect").click();
     await expect(phone.getByTestId("link-line")).toHaveText("Pairing ended — scan the code again");
     await page.getByTestId("control-new-code").click();
@@ -523,7 +521,6 @@ test.describe("part 2: the spec's scenario (T16, Verification 1)", () => {
         "data-colour",
         value,
       );
-      await vj.getByTestId("wheel-done").click();
       // The swatch above shows the screen applied the colour. How soon the canvas reads show it
       // depends on the frame rate, which a loaded machine slows to a few frames a second: the
       // wait gets a minute, not `expect.poll`'s five seconds (B-08: no wall-clock assertion).
