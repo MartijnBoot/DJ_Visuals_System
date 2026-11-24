@@ -115,6 +115,24 @@ function sample(page: Page, points: readonly (readonly [number, number])[], ms: 
 
 const CENTRE = [[SIZE.width / 2, SIZE.height / 2]] as const;
 const isNear = (rgb: readonly number[]) => (c: Rgb) => near(c, rgb, TOLERANCE);
+
+/**
+ * Waits for a frame in which every one of `points` shows `rgb`. The first pick runs the seeded
+ * transition too, and the centre turns long before the rest under Wipe (half way) or Dissolve
+ * (whenever its block flips): sampling the next transition from a centre alone would catch the
+ * tail of the first one.
+ */
+const settled = (
+  page: Page,
+  points: readonly (readonly [number, number])[],
+  rgb: readonly number[],
+) =>
+  expect
+    .poll(async () => (await sample(page, points, 0))[0]!.px.every(isNear(rgb)), {
+      timeout: 15_000,
+      intervals: [20],
+    })
+    .toBe(true);
 const luma = ([r, g, b]: Rgb) => 0.299 * r! + 0.587 * g! + 0.114 * b!;
 
 /** No frame of any type is black (the `profiles.spec.ts` rule, AD6). */
@@ -217,9 +235,9 @@ test("Dissolve flips whole blocks a 32nd of the width wide, never back, all by t
   await screen(page, { kind: "dissolve", duration: 2, keepColour: false });
   await start(page);
   await picker(page).selectOption({ label: "Aaa Red" });
-  await showing(page, RED_RGB);
   const centres: [number, number][] = [];
   for (let j = 0; j < 18; j++) for (let i = 0; i < 32; i++) centres.push([10 * i + 5, 10 * j + 5]);
+  await settled(page, centres, RED_RGB);
   const sampling = sample(page, centres, 3500);
   await page.waitForTimeout(300);
   await picker(page).selectOption(to.id);
@@ -260,11 +278,11 @@ test("Wipe sweeps left to right with a soft edge 4% wide, the frame all new at t
   await screen(page, { kind: "wipe", duration: 2, keepColour: false });
   await start(page);
   await picker(page).selectOption({ label: "Aaa Red" });
-  await showing(page, RED_RGB);
   const row = Array.from(
     { length: SIZE.width },
     (_, x) => [x, SIZE.height / 2] as [number, number],
   );
+  await settled(page, row, RED_RGB);
   const sampling = sample(page, row, 3500);
   await page.waitForTimeout(300);
   await picker(page).selectOption(to.id);
