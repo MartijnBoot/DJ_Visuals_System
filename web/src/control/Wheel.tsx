@@ -6,10 +6,20 @@
 // capture; arrow keys move hue (left, right) and saturation (up, down) for a laptop without a
 // mouse. While dragging, at most one change per animation frame and always the last position
 // (`wheel-math.ts`). It edits the active profile's palette in memory only; nothing is saved.
-import { useEffect, useMemo, useRef, useState } from "react";
+//
+// A long-lived control (B-16 SD7, SD8, PD6, PD7, PD11, PD12): while the disc or the brightness
+// fader is held, the marker, the brightness and the hex value follow the hand and the screen's
+// reports are not shown; otherwise each new report is shown through `follow`, which keeps the
+// wheel's own hue and saturation when they already make the reported colour (black, grey). One
+// pointer holds the disc. A pointer cancel, a blur, a change of arrangement or a lock lets go:
+// nothing more is sent for that drag and the screen's value shows. Locked, nothing takes input and
+// the block shows "Locked" and the hatching, as the bank does.
+import { useEffect, useMemo, useReducer, useRef } from "react";
+import type { Arrangement } from "./arrangement.ts";
 import { Fader } from "./Fader.tsx";
 import {
   createSendThrottle,
+  follow,
   hexToHsv,
   hsvToHex,
   hueSatToPoint,
@@ -26,6 +36,8 @@ export interface WheelProps {
   /** The profile's stored colour for the slot. */
   stored: string;
   disabled: boolean;
+  /** The page's arrangement: a change lets go of a drag (PD11). */
+  arrangement: Arrangement;
   onColour(value: string): void;
   onReset(): void;
 }
@@ -59,7 +71,19 @@ function drawDisc(canvas: HTMLCanvasElement, v: number) {
 
 export function Wheel(props: WheelProps) {
   const disc = useRef<HTMLCanvasElement>(null);
-  const [hsv, setHsv] = useState<Hsv>(() => hexToHsv(props.current));
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
+  /** The wheel's own colour: the last one it showed while not held. */
+  const own = useRef<Hsv>(hexToHsv(props.current));
+  /** The screen's report `own` last followed. */
+  const seen = useRef(props.current);
+  /** The pointer holding the disc (PD7), the brightness fader's hold (PD6), the held colour. */
+  const discHolder = useRef<number | null>(null);
+  const faderHeld = useRef(false);
+  const drag = useRef<Hsv | null>(null);
+  /** The last colour sent until a report shows it, then null: an echo is still to come. */
+  const awaiting = useRef<string | null>(null);
+  /** The last report looked at, held or not, to clear `awaiting`. */
+  const reported = useRef(props.current);
   const send = useRef(props.onColour);
   send.current = props.onColour;
   const throttle = useMemo(
@@ -68,19 +92,68 @@ export function Wheel(props: WheelProps) {
         now: () => performance.now(),
         requestFrame: (fn) => requestAnimationFrame(fn),
         cancelFrame: (id) => cancelAnimationFrame(id),
-        send: (value) => send.current(value),
+        send: (value) => {
+          awaiting.current = value;
+          send.current(value);
+        },
       }),
     [],
   );
 
+  if (props.current !== reported.current) {
+    reported.current = props.current;
+    if (props.current.toLowerCase() === awaiting.current) awaiting.current = null;
+  }
+  const held = () => discHolder.current !== null || faderHeld.current;
+  if (!held() && props.current !== seen.current) {
+    own.current = follow(own.current, props.current);
+    seen.current = props.current;
+  }
+  const hsv = held() ? (drag.current ?? own.current) : own.current;
+
+  /**
+   * A hold ended. Its last value is the wheel's own; while that value's echo is still to come the
+   * next report shows, otherwise the screen's value shows now (another controller may have changed
+   * the slot during the hold, AC12).
+   */
+  const settle = () => {
+    if (drag.current) own.current = drag.current;
+    drag.current = null;
+    if (awaiting.current === null) own.current = follow(own.current, props.current);
+    seen.current = props.current;
+  };
+  /** SD8, AC16: a let-go. Nothing more is sent, and the screen's value shows. */
+  const letGoDisc = () => {
+    if (discHolder.current === null) return;
+    discHolder.current = null;
+    throttle.drop();
+    drag.current = faderHeld.current ? drag.current : null;
+    own.current = follow(own.current, props.current);
+    seen.current = props.current;
+    redraw();
+  };
+
+  useEffect(() => {
+    if (props.disabled) {
+      letGoDisc();
+      own.current = follow(own.current, props.current);
+      seen.current = props.current;
+      redraw();
+    }
+  }, [props.disabled]);
+  useEffect(() => letGoDisc(), [props.arrangement]);
+  useEffect(() => () => throttle.drop(), [throttle]);
   useEffect(() => {
     if (disc.current) drawDisc(disc.current, hsv.v);
   }, [hsv.v]);
 
-  const change = (next: Hsv, settle: boolean) => {
-    setHsv(next);
+  /** A key press: not held, so the new colour is the wheel's own and goes at once. */
+  const keyed = (next: Hsv) => {
+    own.current = next;
+    seen.current = props.current;
     throttle.push(hsvToHex(next));
-    if (settle) throttle.release();
+    throttle.release();
+    redraw();
   };
 
   const fromPointer = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -91,7 +164,9 @@ export function Wheel(props: WheelProps) {
       (e.clientY - box.top) * scale - RADIUS,
       RADIUS,
     );
-    change({ ...hsv, h, s }, false);
+    drag.current = { ...(drag.current ?? own.current), h, s };
+    throttle.push(hsvToHex(drag.current));
+    redraw();
   };
 
   const marker = hueSatToPoint(hsv.h, hsv.s, RADIUS);
@@ -102,11 +177,19 @@ export function Wheel(props: WheelProps) {
       data-testid="wheel"
       data-slot={props.slot}
       aria-label={`Colour ${props.slot + 1}`}
-      className="djv-colour"
+      className={props.disabled ? "djv-colour is-locked" : "djv-colour"}
     >
-      <h2 data-testid="wheel-label" className="djv-legend djv-colour-label">
-        {`Colour ${props.slot + 1}${props.primary ? " · primary" : ""}`}
-      </h2>
+      <div className="djv-colour-label">
+        {props.disabled ? (
+          <span data-testid="wheel-locked" className="djv-locked-tag">
+            Locked
+          </span>
+        ) : (
+          <h2 data-testid="wheel-label" className="djv-legend">
+            {`Colour ${props.slot + 1}${props.primary ? " · primary" : ""}`}
+          </h2>
+        )}
+      </div>
       <div className="djv-disc">
         <canvas
           ref={disc}
@@ -116,19 +199,31 @@ export function Wheel(props: WheelProps) {
           tabIndex={0}
           role="application"
           aria-label="Hue and saturation: arrow keys move hue left and right, saturation up and down"
+          aria-disabled={props.disabled}
           className="djv-disc-canvas"
           onPointerDown={(e) => {
-            if (props.disabled) return;
+            if (props.disabled || discHolder.current !== null) return;
+            if (e.pointerType === "mouse" && e.button !== 0) return;
+            discHolder.current = e.pointerId;
             e.currentTarget.setPointerCapture(e.pointerId);
             fromPointer(e);
           }}
           onPointerMove={(e) => {
-            if (!props.disabled && e.currentTarget.hasPointerCapture(e.pointerId)) fromPointer(e);
+            if (discHolder.current === e.pointerId) fromPointer(e);
           }}
-          onPointerUp={() => throttle.release()}
-          onPointerCancel={() => throttle.release()}
+          onPointerUp={(e) => {
+            if (discHolder.current !== e.pointerId) return;
+            discHolder.current = null;
+            throttle.release();
+            if (!faderHeld.current) settle();
+            redraw();
+          }}
+          onPointerCancel={(e) => {
+            if (discHolder.current === e.pointerId) letGoDisc();
+          }}
+          onBlur={letGoDisc}
           onKeyDown={(e) => {
-            if (props.disabled) return;
+            if (props.disabled || held()) return;
             const moves: Record<string, Partial<Hsv>> = {
               ArrowLeft: { h: (hsv.h - HUE_STEP + 360) % 360 },
               ArrowRight: { h: (hsv.h + HUE_STEP) % 360 },
@@ -138,7 +233,7 @@ export function Wheel(props: WheelProps) {
             const move = moves[e.key];
             if (!move) return;
             e.preventDefault();
-            change({ ...hsv, ...move }, true);
+            keyed({ ...hsv, ...move });
           }}
         />
         <span
@@ -157,7 +252,29 @@ export function Wheel(props: WheelProps) {
           value={hsv.v}
           disabled={props.disabled}
           orientation="vertical"
-          onSend={(v) => change({ ...hsv, v }, true)}
+          layout={props.arrangement}
+          onHold={(on) => {
+            if (on) {
+              faderHeld.current = true;
+            } else if (faderHeld.current) {
+              faderHeld.current = false;
+              if (discHolder.current === null) settle();
+            }
+            redraw();
+          }}
+          onSend={(v) => {
+            const next = { ...hsv, v };
+            if (faderHeld.current) drag.current = next;
+            else {
+              own.current = next;
+              seen.current = props.current;
+            }
+            // Through the disc's throttle, so a disc value still waiting is replaced, never sent
+            // after this one with the old brightness.
+            throttle.push(hsvToHex(next));
+            throttle.release();
+            redraw();
+          }}
         />
       </div>
       <div className="djv-colour-info">
@@ -187,10 +304,7 @@ export function Wheel(props: WheelProps) {
           data-testid="wheel-reset"
           disabled={props.disabled}
           className="djv-key djv-colour-reset"
-          onClick={() => {
-            setHsv(hexToHsv(props.stored));
-            props.onReset();
-          }}
+          onClick={() => props.onReset()}
         >
           Reset
         </button>

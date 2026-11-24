@@ -48,6 +48,14 @@ export function hsvToHex({ h, s, v }: Hsv): string {
     .join("")}`;
 }
 
+/**
+ * B-16 SD7, PD6: what the wheel shows while not held. `ours` when it already produces the screen's
+ * colour (case aside), so hue and saturation survive black and grey; the screen's colour otherwise.
+ */
+export function follow(ours: Hsv, screen: string): Hsv {
+  return hsvToHex(ours) === screen.toLowerCase() ? ours : hexToHsv(screen);
+}
+
 /** `x`, `y` relative to the disc's centre, in the same units as `radius`. */
 export function pointToHueSat(x: number, y: number, radius: number): { h: number; s: number } {
   const distance = Math.hypot(x, y);

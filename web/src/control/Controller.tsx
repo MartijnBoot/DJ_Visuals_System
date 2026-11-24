@@ -384,6 +384,7 @@ export function Controller() {
           current={state.palette[slot]!}
           stored={state.storedPalette[slot] ?? state.palette[slot]!}
           disabled={locked}
+          arrangement={arrangement}
           onColour={(hex) =>
             value(`colour:${slot}`, () => link.send({ type: "colour", slot, value: hex }))
           }

@@ -576,6 +576,14 @@
   border-radius: 50%;
   pointer-events: none;
 }
+/* Locked (B-16 SD8, PD12): the bank's 135° stripes over the disc, every other stripe --hatch, with
+   the "Locked" tag in the label's place: never colour alone. Nothing moves. */
+.djv-control .djv-colour.is-locked .djv-disc::after {
+  background: repeating-linear-gradient(135deg, transparent 0 6px, var(--hatch) 6px 12px);
+}
+.djv-control .djv-colour.is-locked .djv-disc-canvas {
+  cursor: default;
+}
 .djv-control .djv-disc-canvas {
   display: block;
   width: 100%;
