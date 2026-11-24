@@ -122,6 +122,14 @@ export function toScreenState({
       duration: transition.duration,
       keepColour: transition.keepColour,
     },
+    effects: profiles.effects.map(({ index, name, stored, value, dj, vj }) => ({
+      index,
+      name,
+      stored,
+      value,
+      dj,
+      vj,
+    })),
   };
   return state;
 }

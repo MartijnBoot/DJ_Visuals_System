@@ -66,6 +66,7 @@ const state = (profiles: number): ScreenState => ({
   reason: null,
   mainAudio: null,
   transition: { kind: "cut", duration: 2, keepColour: false },
+  effects: [],
 });
 
 const warns = () => server!.lines().filter((l) => l.level === 40);

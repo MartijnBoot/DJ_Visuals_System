@@ -12,8 +12,11 @@
 // B-09 (SD4, SD5, SD12, PD10): each pick passes the transition choice current when it was made,
 // with the outgoing primary as it is on screen for Dip, and with Keep colour on that primary goes
 // into the incoming profile's primary slot, live only: Reset restores the stored colour.
+// B-18 (SD6, SD7, PD4, PD5): an effect's strength is live in the same way, beside the palette:
+// both live copies go in every swap, a successful pick drops them, and a pending pick, another
+// profile or a place with no effect drops a strength change.
 import { ProfileCompileError, type GuardEvent, type SetProfileOptions } from "@djv/engine";
-import { derivePrimary, type Profile, type TransitionChoice } from "@djv/shared";
+import { derivePrimary, type EffectEntry, type Profile, type TransitionChoice } from "@djv/shared";
 import type { ListResult, ProfileResult } from "./api.ts";
 import { BUILTIN_ID, builtinEntry } from "./builtin.ts";
 import { DEFAULT_TRANSITION, engineTransition } from "./transition.ts";
@@ -41,6 +44,8 @@ export interface ActiveState {
   storedPalette: string[];
   /** The primary slot: stored, or derived when absent (B-04 SD10). */
   primary: number;
+  /** B-18 PD5: the active profile's effects ticked DJ or VJ, in stack order. */
+  effects: EffectEntry[];
 }
 
 export interface ActiveDeps {
@@ -68,6 +73,11 @@ export interface ActiveProfile {
   setColour(slot: number, value: string): void;
   /** Puts one slot back to its stored colour. */
   resetColour(slot: number): void;
+  /**
+   * Sets one effect's strength live (B-18 SD7); dropped while a pick is pending, when `profile`
+   * is not the active one or `index` is no effect of it.
+   */
+  setStrength(profile: string, index: number, value: number): void;
   /** The engine's guard acted (B-03 SD8): its reason shows until the next successful pick. */
   guard(event: GuardEvent): void;
   state(): ActiveState;
@@ -128,6 +138,8 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   let active: Entry = { id: BUILTIN_ID, name: builtin.name };
   let activeProfile: Profile = builtin;
   let live: string[] = [...builtin.palette];
+  /** B-18 PD4: live strengths by place in the stack; a successful pick empties it. */
+  let liveAmounts = new Map<number, number>();
   /** The token of the pick in flight, or 0. */
   let picking = 0;
   let reason: string | null = null;
@@ -159,7 +171,19 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     palette: [...live],
     storedPalette: [...activeProfile.palette],
     primary: derivePrimary(activeProfile),
+    effects: faderEffects(),
   });
+
+  /** B-18 PD5: one entry per effect ticked DJ or VJ, named as the builder names it. */
+  const faderEffects = (): EffectEntry[] =>
+    activeProfile.effects.flatMap((effect, index) => {
+      const dj = effect.dj === true;
+      const vj = effect.vj === true;
+      if (!dj && !vj) return [];
+      const name = (effect.type === "custom" ? effect.label.trim() : effect.type).slice(0, 40);
+      const value = liveAmounts.get(index) ?? effect.amount;
+      return [{ index, name, stored: effect.amount, value, dj, vj }];
+    });
 
   /**
    * Switches to `profile` in the engine by `choice`, then its dials; `false` when the engine
@@ -196,6 +220,7 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     active = { id, name: profile.name };
     activeProfile = profile;
     live = palette; // the stored palette, or with the carried primary (SD4)
+    liveAmounts = new Map(); // every effect back at its stored strength (B-18 SD6)
     reason = null;
     guardReason = null;
     emit();
@@ -261,14 +286,24 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     }
   };
 
-  /** Hands the engine the active profile with the live palette: same effects, no new program. */
+  /**
+   * Hands the engine the active profile with the live palette and strengths: the same effect
+   * list, so no new program. It swaps on the next frame without linking, so it cannot fail; were
+   * it to, the look simply stays as it was.
+   */
+  const push = () => {
+    const effects = activeProfile.effects.map((effect, i) => {
+      const amount = liveAmounts.get(i);
+      return amount === undefined ? effect : { ...effect, amount };
+    });
+    deps.setProfile({ ...activeProfile, palette: [...live], effects }).catch(() => {});
+    emit();
+  };
+
   const recolour = (slot: number, value: string) => {
     if (picking !== 0 || slot >= live.length) return;
     live = live.map((c, i) => (i === slot ? value : c));
-    // The same effect list swaps on the next frame without linking, so it cannot fail; were it
-    // to, the colour simply stays as it was.
-    deps.setProfile({ ...activeProfile, palette: [...live] }).catch(() => {});
-    emit();
+    push();
   };
 
   return {
@@ -278,6 +313,12 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     resetColour(slot) {
       const stored = activeProfile.palette[slot];
       if (stored !== undefined) recolour(slot, stored);
+    },
+    setStrength(profile, index, value) {
+      if (picking !== 0 || profile !== active.id) return;
+      if (index < 0 || index >= activeProfile.effects.length) return;
+      liveAmounts.set(index, value);
+      push();
     },
     guard(event) {
       guardReason = guardReasonOf(event);

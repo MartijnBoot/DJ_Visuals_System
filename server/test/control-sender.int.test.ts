@@ -200,6 +200,7 @@ const STATE = {
   reason: null,
   mainAudio: null,
   transition: { kind: "cut", duration: 2, keepColour: false },
+  effects: [],
 };
 const SDP = (size: number) => `v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\n${"a=x\r\n".repeat(size / 5)}`;
 const CANDIDATE = {
@@ -241,6 +242,7 @@ describe("what a sender may send (T8, SD6, AC9)", () => {
     { type: "pick", seq: 1, id: "builtin" },
     { type: "camera", seq: 1, deviceId: "cam-1" },
     { type: "mainAudio", seq: 1, source: "local" },
+    { type: "effect", seq: 1, profile: "builtin", index: 0, value: 1 },
     { type: "accept", deviceId: "dnone" },
     { type: "reject", deviceId: "dnone" },
   ])(

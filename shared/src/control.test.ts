@@ -36,7 +36,10 @@ const state: ScreenState = {
   reason: null,
   mainAudio: { choice: "remote", playing: "local", label: "Device 3" },
   transition: { kind: "cut", duration: 2, keepColour: false },
+  effects: [],
 };
+/** B-18 SD7, PD5: one flagged effect as the state lists it. */
+const flaggedEntry = { index: 2, name: "Swirl", stored: 0.4, value: 0.9, dj: true, vj: false };
 const entry = { deviceId: "d1", hint: "Safari on iPhone", label: "Device 1", sends: [] };
 const senderEntry = {
   deviceId: "d3",
@@ -83,6 +86,8 @@ const examples = {
     { type: "transition", seq: 10, duration: 0.5 },
     { type: "transition", seq: 11, keepColour: true },
     { type: "transition", seq: 12, kind: "dip", duration: 8, keepColour: false },
+    { type: "effect", seq: 13, profile: "w1", index: 0, value: 0 },
+    { type: "effect", seq: 14, profile: "builtin", index: 11, value: 1 },
     { type: "accept", deviceId: "d2" },
     { type: "reject", deviceId: "d2" },
   ],
@@ -100,6 +105,7 @@ const examples = {
     { type: "screen", connected: false },
     { type: "pending", requests: [entry, senderEntry] },
     { type: "state", state },
+    { type: "state", state: { ...state, effects: [flaggedEntry] } },
     { type: "applied", seq: 9 },
   ],
   screen: [
@@ -188,6 +194,23 @@ describe("the device union (AC17, SD20)", () => {
     expect(fails({ type: "transition", kind: "cut" })).toBe(true);
   });
 
+  it("takes an effect naming a profile, an index below 12 and a 0 to 1 value (B-18 SD7)", () => {
+    const ok = { type: "effect", seq: 1, profile: "w1", index: 3, value: 0.5 };
+    expect(fails(ok)).toBe(false);
+    expect(fails({ ...ok, index: 12 })).toBe(true);
+    expect(fails({ ...ok, index: -1 })).toBe(true);
+    expect(fails({ ...ok, index: 1.5 })).toBe(true);
+    expect(fails({ ...ok, value: 1.1 })).toBe(true);
+    expect(fails({ ...ok, value: -0.1 })).toBe(true);
+    const { profile: _p, ...noProfile } = ok;
+    expect(fails(noProfile)).toBe(true);
+    expect(fails({ ...ok, profile: "" })).toBe(true);
+    const { seq: _s, ...noSeq } = ok;
+    expect(fails(noSeq)).toBe(true);
+    expect(fails({ ...ok, extra: 1 })).toBe(true);
+    expect(typeOf(JSON.stringify(ok))).toBe("effect");
+  });
+
   it("takes a hello with exactly one of a code or a key, the code from the alphabet", () => {
     expect(fails({ type: "hello" })).toBe(true);
     expect(fails({ type: "hello", code: "ABC234", key: KEY })).toBe(true);
@@ -245,6 +268,23 @@ describe("roles and setup messages (B-06 SD6, SD16, PD4)", () => {
     expect(
       toDevice({ ...state, transition: { kind: "cut", duration: 9, keepColour: false } }),
     ).toBe(false);
+  });
+
+  it("requires the effects list in a screen state, at most 12, each entry whole (B-18 PD1, PD5)", () => {
+    const toDevice = (s: unknown) => toDeviceSchema.safeParse({ type: "state", state: s }).success;
+    const { effects: _omitted, ...without } = state;
+    expect(toDevice(without)).toBe(false);
+    const twelve = Array.from({ length: 12 }, (_, i) => ({ ...flaggedEntry, index: i }));
+    expect(toDevice({ ...state, effects: twelve })).toBe(true);
+    expect(toDevice({ ...state, effects: [...twelve, flaggedEntry] })).toBe(false);
+    expect(toDevice({ ...state, effects: [{ ...flaggedEntry, name: "x".repeat(41) }] })).toBe(
+      false,
+    );
+    expect(toDevice({ ...state, effects: [{ ...flaggedEntry, index: 12 }] })).toBe(false);
+    expect(toDevice({ ...state, effects: [{ ...flaggedEntry, value: 1.5 }] })).toBe(false);
+    const { vj: _vj, ...noVj } = flaggedEntry;
+    expect(toDevice({ ...state, effects: [noVj] })).toBe(false);
+    expect(toDevice({ ...state, effects: [{ ...flaggedEntry, extra: 1 }] })).toBe(false);
   });
 
   it("refuses a fingerprint that is not 16 hex characters", () => {

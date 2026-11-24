@@ -59,6 +59,7 @@ const state: ScreenState = {
   reason: null,
   mainAudio: null,
   transition: { kind: "cut", duration: 2, keepColour: false },
+  effects: [],
 };
 
 const status = (devices: string[] = []): ControlStatus => ({
@@ -301,7 +302,16 @@ describe("toScreenState (SD5, SD8, AC26)", () => {
       reason: null,
       mainAudio: null,
       transition: { kind: "wipe", duration: 4, keepColour: true },
+      effects: [],
     });
+  });
+
+  // B-18 SD7, PD5: the active profile's flagged effects, live and stored.
+  it("carries the flagged effects the active profile lists", async () => {
+    const input = await facts("ok");
+    const effects = [{ index: 1, name: "zoom", stored: 0.2, value: 0.7, dj: true, vj: false }];
+    const built = toScreenState({ ...input, profiles: { ...input.profiles, effects } });
+    expect(screenStateSchema.parse(built).effects).toEqual(effects);
   });
 
   it("puts the panel's exact reason in the state when the list fails (AC26)", async () => {

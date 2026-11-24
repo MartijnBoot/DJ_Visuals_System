@@ -56,6 +56,7 @@ const state: ScreenState = {
   reason: null,
   mainAudio: null,
   transition: { kind: "cut", duration: 2, keepColour: false },
+  effects: [],
 };
 
 beforeEach(async () => {
@@ -357,6 +358,24 @@ describe("relaying (SD5, AC19, AC20)", () => {
       type: "control",
       deviceId,
       control: { type: "colour", seq: 7, slot: 1, value: COLOUR },
+    });
+  });
+
+  // B-18 SD7, AC10: the effect control is one more relayed control, with no server change.
+  it("relays an approved device's effect to the screen, and a state's effects to the devices", async () => {
+    const { client, deviceId } = await approved();
+    const effect = { type: "effect", seq: 8, profile: "w1", index: 2, value: 0.75 } as const;
+    client.send(effect);
+    expect(await screen.find((m) => m.type === "control")).toEqual({
+      type: "control",
+      deviceId,
+      control: effect,
+    });
+    const effects = [{ index: 2, name: "Swirl", stored: 0.5, value: 0.75, dj: true, vj: false }];
+    screen.send({ type: "state", state: { ...state, effects } });
+    expect(await client.find(is("state"))).toEqual({
+      type: "state",
+      state: { ...state, effects },
     });
   });
 
