@@ -24,6 +24,54 @@ void main() {
   colour = texture(uFrame, gl_FragCoord.xy / uCanvas);
 }`;
 
+/**
+ * B-09 PD6: during a transition, drawn instead of the present: the outgoing and the incoming
+ * looks' latest targets, sampled as the present samples one, mixed onto the canvas by progress
+ * `uProgress` as `uKind` says (`transition.ts` holds the same formulas). 0 Crossfade, linear in
+ * `p` (SD13); 1 Dissolve, square blocks a 32nd of the canvas width, each switching once `p`
+ * passes its threshold, a hash of the block and `uSeed` in [0, 1) (SD14, PD9); 2 Wipe, left to
+ * right with a 4% soft edge that narrows in the last 4% (PD8); 3 Dip, through `uDip` at half way
+ * (SD12, PD10). In canvas pixels, so the blocks and the edge do not move with the render scale.
+ */
+export const MIX_FRAGMENT = `#version 300 es
+precision highp float;
+uniform sampler2D uOutgoing;
+uniform sampler2D uIncoming;
+uniform vec2 uCanvas;
+uniform float uProgress;
+uniform int uKind;
+uniform vec3 uDip;
+uniform float uSeed;
+out vec4 colour;
+
+float threshold(vec2 block) {
+  vec3 p3 = fract(vec3(block, uSeed * 1013.0) * 0.1031);
+  p3 += dot(p3, p3.zyx + 31.32);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / uCanvas;
+  vec3 outgoing = texture(uOutgoing, uv).rgb;
+  vec3 incoming = texture(uIncoming, uv).rgb;
+  float p = uProgress;
+  vec3 result;
+  if (uKind == 1) {
+    vec2 block = floor(gl_FragCoord.xy / (uCanvas.x / 32.0));
+    result = p > threshold(block) ? incoming : outgoing;
+  } else if (uKind == 2) {
+    float x = gl_FragCoord.x / uCanvas.x;
+    float s = min(0.04, 1.0 - p);
+    float w = s > 0.0 ? clamp((p - x) / s, 0.0, 1.0) : 1.0;
+    result = mix(outgoing, incoming, w);
+  } else if (uKind == 3) {
+    result = p < 0.5 ? mix(outgoing, uDip, 2.0 * p) : mix(uDip, incoming, 2.0 * p - 1.0);
+  } else {
+    result = mix(outgoing, incoming, p);
+  }
+  colour = vec4(result, 1.0);
+}`;
+
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) throw new Error("WebGL2: createShader failed");

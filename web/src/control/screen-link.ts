@@ -16,6 +16,7 @@ import {
   type ScreenMessage,
   type ScreenState,
   type ToScreen,
+  type TransitionChoice,
 } from "@djv/shared";
 import type { DeviceOption } from "../capture/devices.ts";
 import type { SessionState } from "../capture/session.ts";
@@ -76,6 +77,8 @@ export interface ScreenFacts {
   capture: Pick<SessionState, "camera" | "audio" | "cameraId">;
   cameras: readonly DeviceOption[];
   started: boolean;
+  /** B-09 SD5: the current transition choice. */
+  transition: TransitionChoice;
   /** B-06: the remote cameras, a picked remote camera's id, the main audio. */
   remote?: {
     cameras: ScreenState["cameras"];
@@ -87,10 +90,18 @@ export interface ScreenFacts {
 /**
  * The state every controller mirrors (SD5, SD8): the picker's list, the active profile with its
  * live palette and primary slot, the dials, the cameras with their labels, the source states,
- * Start, and the panel's profile reason word for word (AC26). Lists are cut to the schema's
- * bounds so a long list never makes the whole state invalid.
+ * Start, the panel's profile reason word for word (AC26) and the transition choice (B-09). Lists
+ * are cut to the schema's bounds so a long list never makes the whole state invalid.
  */
-export function toScreenState({ profiles, dials, capture, cameras, started, remote }: ScreenFacts) {
+export function toScreenState({
+  profiles,
+  dials,
+  capture,
+  cameras,
+  started,
+  transition,
+  remote,
+}: ScreenFacts) {
   const local = cameras.map(({ deviceId, label }) => ({ deviceId, label, remote: false }));
   const state: ScreenState = {
     profiles: profiles.entries.slice(0, 1000).map(({ id, name }) => ({ id, name })),
@@ -106,6 +117,11 @@ export function toScreenState({ profiles, dials, capture, cameras, started, remo
     started,
     reason: profiles.reason,
     mainAudio: remote?.mainAudio ?? null,
+    transition: {
+      kind: transition.kind,
+      duration: transition.duration,
+      keepColour: transition.keepColour,
+    },
   };
   return state;
 }

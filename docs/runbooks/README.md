@@ -159,3 +159,21 @@ in [the plan](../plans/phase-b-06-remote-input-devices.md#human-steps) when done
 6. **H6 — Fallback:** pull the laptop's cable mid-track and plug it back; lock and unlock a phone.
 7. **H7 — Four phones:** four video senders switched from a controller, no black frame.
 8. **H8 — Isolation:** on a guest network, record what a sender shows.
+
+## Human checks for transitions (B-09 H1, H2)
+
+The gate proves the mix structurally and by pixels under software WebGL; these run on the owner's
+screen machine and a phone, and are recorded under `docs/runbooks/rehearsals/` and in
+[the plan](../plans/phase-b-09-transitions.md#human-steps) when done.
+
+1. **H1 — The budget (AC28):** `pnpm start`, Start, open the overlay (`o`). Pair a phone and switch
+   it to VJ mode; choose Crossfade and slide the duration to 8.0 s. Pick the heaviest profile,
+   then the second heaviest. During the fade the overlay's latency p95 stays at or below 50 ms
+   and the frame rate does not drop below the display's refresh rate.
+2. **H2 — How each looks (AC29):** from the phone in VJ mode, pick through all six types at 0.5 s
+   and at 4 s. For Dip to colour, set a vivid live primary first: the fade passes through it.
+   Turn Keep colour on and pick with Cut and with Crossfade: the primary carries; press Reset on
+   the colour wheel: the stored colour returns. No blank or black frame at any point. With music
+   playing, Beat cut cuts on a beat.
+3. **Remembered:** reload the screen page: the `s` panel and the phone show the same type,
+   duration and Keep colour as before.

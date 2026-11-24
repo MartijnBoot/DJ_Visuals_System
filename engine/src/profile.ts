@@ -173,7 +173,8 @@ export interface ProfileUniforms {
 const BLACK: Rgb = [0, 0, 0];
 const WHITE: Rgb = [1, 1, 1];
 
-function hexToRgb(hex: string): Rgb {
+/** `#rrggbb` as 0–1 channels; anything else is black. */
+export function hexToRgb(hex: string): Rgb {
   const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
   if (!match) return BLACK;
   return [1, 2, 3].map((i) => parseInt(match[i]!, 16) / 255) as unknown as Rgb;

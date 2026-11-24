@@ -214,7 +214,7 @@ const look = (locator: Locator) =>
     return { border: s.borderTopWidth, weight: s.fontWeight, background: s.backgroundColor };
   });
 
-test("the active profile, camera, mode and main audio are marked by more than colour, the mark 3:1 against an inactive tile (AC20)", async ({
+test("the active profile, camera, mode, main audio and transition are marked by more than colour, the mark 3:1 against an inactive tile (AC20)", async ({
   page,
   browser,
 }) => {
@@ -224,6 +224,8 @@ test("the active profile, camera, mode and main audio are marked by more than co
     ["camera", phone.getByTestId("camera-tile")],
     ["mode", phone.getByRole("group", { name: "Mode" }).getByRole("button")],
     ["main audio", phone.getByTestId("main-audio").getByRole("button")],
+    // B-09 T7: the transition type tiles.
+    ["transition", phone.getByRole("region", { name: "Transition" }).locator(".djv-tile")],
   ];
   for (const [name, all] of groups) {
     const active = all.and(phone.locator('[aria-pressed="true"]'));

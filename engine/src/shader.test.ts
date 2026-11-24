@@ -2,6 +2,7 @@
 // ordered effect list, checked as text. `tests/browser/shader.spec.ts` compiles it.
 import { describe, expect, it } from "vitest";
 import { BUILT_IN_PROFILE, type EffectType } from "./profile.ts";
+import { MIX_FRAGMENT } from "./gl.ts";
 import { buildFragment, CUSTOM_CONTRACT } from "./shader.ts";
 
 /** The body of `vec3 fxN(vec2 uv)` in `source`. */
@@ -204,5 +205,29 @@ describe("the flash limiter (B-03)", () => {
     const main = mainOf(coded);
     expect(main.match(/outColour =/g)).toHaveLength(1);
     expect(main.trimEnd().split("\n").at(-1)).toMatch(/^\s*outColour = /);
+  });
+});
+
+// B-09 T4 (spec SD1, SD12, SD14; plan PD6, PD8 to PD10): the mix pass draws every shape by
+// `uKind`, in canvas pixels.
+describe("MIX_FRAGMENT (B-09)", () => {
+  it("branches for Crossfade, Dissolve, Wipe and Dip, and names their uniforms", () => {
+    for (const name of ["uKind", "uProgress", "uDip", "uSeed", "uOutgoing", "uIncoming"]) {
+      expect(MIX_FRAGMENT).toContain(`uniform`);
+      expect(MIX_FRAGMENT).toContain(name);
+    }
+    for (const kind of [1, 2, 3]) expect(MIX_FRAGMENT).toContain(`uKind == ${kind}`);
+  });
+
+  it("measures Dissolve's blocks and Wipe's edge in canvas pixels, a 32nd of the width and 4%", () => {
+    expect(MIX_FRAGMENT).toContain("uCanvas.x / 32.0");
+    expect(MIX_FRAGMENT).toContain("gl_FragCoord.x / uCanvas.x");
+    expect(MIX_FRAGMENT).toContain("min(0.04, 1.0 - p)");
+  });
+
+  it("dips through the colour at half way and holds no discard", () => {
+    expect(MIX_FRAGMENT).toContain("mix(outgoing, uDip, 2.0 * p)");
+    expect(MIX_FRAGMENT).toContain("mix(uDip, incoming, 2.0 * p - 1.0)");
+    expect(MIX_FRAGMENT).not.toContain("discard");
   });
 });

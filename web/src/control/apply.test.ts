@@ -55,6 +55,7 @@ function rig(started = true) {
     resetColour: vi.fn(),
     setCamera: vi.fn(),
     setMainAudio: vi.fn(),
+    setTransition: vi.fn(() => void events.push("setTransition")),
     pick: vi.fn(() => new Promise<void>((r) => (release = r))),
     refresh: vi.fn(),
     started: () => started,
@@ -194,5 +195,25 @@ describe("B-06 controls (T13, SD8, SD22, AC14, AC20)", () => {
     after.applier.receive("d1", { type: "camera", seq: 2, deviceId: "remote:d9" });
     runFrame(32);
     expect(after.deps.setCamera).toHaveBeenCalledWith("remote:d9");
+  });
+});
+
+describe("the transition control (B-09 SD19, AC25)", () => {
+  it("reaches the choice in the next frame, before the engine draws, acknowledged in that batch", () => {
+    const r = rig();
+    runFrame(16);
+    r.applier.receive("d1", { type: "transition", seq: 6, kind: "crossfade" });
+    r.applier.receive("d2", { type: "transition", seq: 2, duration: 4, keepColour: true });
+    expect(r.deps.setTransition).not.toHaveBeenCalled(); // never applied on receipt
+    runFrame(32);
+    expect(r.deps.setTransition).toHaveBeenNthCalledWith(1, { kind: "crossfade" });
+    expect(r.deps.setTransition).toHaveBeenNthCalledWith(2, { duration: 4, keepColour: true });
+    expect(r.events.slice(-3)).toEqual(["setTransition", "setTransition", "draw"]);
+    expect(r.acks).toEqual([
+      [
+        { deviceId: "d1", seq: 6 },
+        { deviceId: "d2", seq: 2 },
+      ],
+    ]);
   });
 });

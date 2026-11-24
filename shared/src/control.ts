@@ -69,6 +69,21 @@ const candidateShape = {
 const message = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
   z.strictObject({ type: z.literal(type), ...shape });
 
+/** B-09 SD1, SD19: how a pick switches. */
+export const TRANSITION_KINDS = ["cut", "crossfade", "dissolve", "wipe", "beatCut", "dip"] as const;
+export const transitionKind = z.enum(TRANSITION_KINDS);
+export type TransitionKind = z.infer<typeof transitionKind>;
+/** B-09 SD6: the duration in seconds. */
+const transitionDuration = z.number().min(0.5).max(8);
+
+/** B-09 SD5, SD9: the current transition, in the screen state and in `djv.transition`. */
+export const transitionChoiceSchema = z.strictObject({
+  kind: transitionKind,
+  duration: transitionDuration,
+  keepColour: z.boolean(),
+});
+export type TransitionChoice = z.infer<typeof transitionChoiceSchema>;
+
 // ---- Controls: what a controller asks the screen page to do. Each carries `seq`. ----
 
 export const controlSchema = z.discriminatedUnion("type", [
@@ -86,6 +101,15 @@ export const controlSchema = z.discriminatedUnion("type", [
   message("refresh", { seq }),
   /** B-06 SD22: the main-audio choice. */
   message("mainAudio", { seq, source: z.enum(["remote", "local"]) }),
+  /** B-09 SD19: changes the current transition; at least one field. */
+  message("transition", {
+    seq,
+    kind: transitionKind.optional(),
+    duration: transitionDuration.optional(),
+    keepColour: z.boolean().optional(),
+  }).refine((m) => m.kind !== undefined || m.duration !== undefined || m.keepColour !== undefined, {
+    message: "names at least one of kind, duration and keepColour",
+  }),
 ]);
 export type Control = z.infer<typeof controlSchema>;
 export type ControlType = Control["type"];
@@ -152,6 +176,8 @@ export const screenStateSchema = z.strictObject({
       label: z.string().max(40),
     })
     .nullable(),
+  /** B-09 SD19: the current transition. */
+  transition: transitionChoiceSchema,
 });
 export type ScreenState = z.infer<typeof screenStateSchema>;
 

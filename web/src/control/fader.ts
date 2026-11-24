@@ -12,7 +12,10 @@ import { createSendThrottle, type ThrottleDeps } from "./wheel-math.ts";
 /** Two faders held together send at most 2 × 1000 / 20 = 100 values a second. */
 export const FADER_GAP_MS = 20;
 
-export type FaderGestureDeps = Omit<ThrottleDeps<number>, "minGapMs">;
+export type FaderGestureDeps = Omit<ThrottleDeps<number>, "minGapMs"> & {
+  /** B-09 PD16: a fader that matters only at the next pick sends less often; default 20 ms. */
+  minGapMs?: number;
+};
 
 export interface FaderGesture {
   /** A pointer lands; `position` grows toward more. False when another pointer holds the fader. */
@@ -48,7 +51,7 @@ const KEYS: Readonly<Record<string, (value: number) => number>> = {
 };
 
 export function createFaderGesture(deps: FaderGestureDeps): FaderGesture {
-  const throttle = createSendThrottle<number>({ ...deps, minGapMs: FADER_GAP_MS });
+  const throttle = createSendThrottle<number>({ ...deps, minGapMs: deps.minGapMs ?? FADER_GAP_MS });
   let hold: {
     pointerId: number;
     position: number;

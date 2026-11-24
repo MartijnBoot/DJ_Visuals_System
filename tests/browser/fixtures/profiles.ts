@@ -36,6 +36,28 @@ export const red = (name = "Aaa Red") =>
 export const blue = (name = "Bbb Blue") =>
   flat(name, "#0000ff", { recognisability: 0.1, reactivity: 0.4 });
 
+export const GREEN_RGB = [0, 255, 0] as const;
+
+/** A custom effect that paints the whole frame with `code`'s colour (B-03). */
+const painted = (name: string, palette: string[], code: string): Definition => ({
+  name,
+  palette,
+  dials: { recognisability: 0.5, reactivity: 0 },
+  effects: [{ type: "custom", label: "Paint", amount: 1, abstraction: false, params: [], code }],
+  primary: 0,
+});
+
+/**
+ * B-09 AC4: flat red, drawn by code, while its primary slot holds a vivid green it never draws, so
+ * a frame of green can only be the dip through its primary.
+ */
+export const redOverGreen = (name = "Aaa Red over green") =>
+  painted(name, ["#00ff00", "#00ff00"], "return vec3(1.0, 0.0, 0.0);");
+
+/** B-09 AC17, AC20: paints its primary slot, live, so a carried or edited colour fills the frame. */
+export const primaryBlue = (name = "Ccc Primary blue") =>
+  painted(name, ["#0000ff", "#0000ff"], "return palette[0];");
+
 /**
  * The worst case (B-02 SD12, PD17): all twelve effects, each at strength 0.5 and each bound to an
  * audio feature, with a three-colour palette. The latency and render-scale checks run on it.

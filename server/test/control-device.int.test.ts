@@ -55,6 +55,7 @@ const state: ScreenState = {
   started: true,
   reason: null,
   mainAudio: null,
+  transition: { kind: "cut", duration: 2, keepColour: false },
 };
 
 beforeEach(async () => {

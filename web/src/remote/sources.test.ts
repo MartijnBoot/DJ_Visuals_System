@@ -4,6 +4,7 @@
 import type { AudioFeatures, FeatureSource } from "@djv/audio";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import type { AudioChoice } from "../capture/remembered.ts";
+import type { SessionState } from "../capture/session.ts";
 import type { Feed, PeerConnectionView } from "./peers.ts";
 import { createSources, type Sources, type SourcesDeps } from "./sources.ts";
 
@@ -46,6 +47,7 @@ let connections: Map<string, PeerConnectionView>;
 let active: Map<string, boolean>;
 let dropped: string[];
 let audioChoice: AudioChoice | undefined;
+let localAudio: SessionState["audio"];
 let sessionVideo: HTMLVideoElement | null;
 let cameraId: string | undefined;
 let context: AudioContext | null;
@@ -75,7 +77,7 @@ function make(overrides: Partial<SourcesDeps> = {}) {
       read: () => LOCAL,
       state: () => ({
         camera: "ok",
-        audio: "ok",
+        audio: localAudio,
         video: sessionVideo,
         contextState: context ? "running" : "none",
         ...(cameraId ? { cameraId } : {}),
@@ -129,6 +131,7 @@ beforeEach(() => {
   active = new Map();
   dropped = [];
   audioChoice = { kind: "input", deviceId: "mic-1" };
+  localAudio = "ok";
   sessionVideo = el("local");
   cameraId = "cam-1";
   context = null;
@@ -411,5 +414,31 @@ describe("remote cameras (SD8, SD9, SD12, SD21, AC14 to AC16, AC22)", () => {
     sources.setSenders([VIDEO]);
     sources.frame(1048);
     expect(changes).toBeGreaterThan(after);
+  });
+});
+
+// B-09 T6 (spec SD10, AC26; plan PD3): whether the audio that feeds the looks is ok, for Beat cut.
+describe("audioOk (B-09 SD10, PD3)", () => {
+  it("is the local session's ok while no remote main audio plays", () => {
+    expect(sources.audioOk(1000)).toBe(true);
+    for (const state of ["lost", "none"] as const) {
+      localAudio = state;
+      expect(sources.audioOk(1000), state).toBe(false);
+    }
+  });
+
+  it("is false before Start", () => {
+    localAudio = "idle";
+    expect(sources.audioOk(1000)).toBe(false);
+  });
+
+  it("is true while a remote main audio plays, whatever the local input, until it is lost", async () => {
+    localAudio = "none";
+    await audioMain();
+    expect(sources.read(1016)).toBe(REMOTE);
+    expect(sources.audioOk(1016)).toBe(true);
+    feeds = [feed("dA", "audio", true)];
+    sources.frame(2000);
+    expect(sources.audioOk(2000)).toBe(false); // local plays, and local is none
   });
 });

@@ -70,6 +70,11 @@ export interface Sources {
   audioLine(now: number): string | null;
   /** Whether the remote audio is what is analysed, and whether a remote camera is drawn. */
   analysing(now: number): { audio: string | null; video: string | null };
+  /**
+   * B-09 SD10, PD3: whether the audio that feeds the looks is `ok`, for Beat cut: a remote main
+   * audio while it plays, else the session's own input. False before Start.
+   */
+  audioOk(now: number): boolean;
   stop(): void;
 }
 
@@ -299,6 +304,11 @@ export function createSources(deps: SourcesDeps): Sources {
     facts,
 
     audioLine: (now) => main.view(now)?.line ?? null,
+
+    audioOk(now) {
+      if (main.playing(now) === "remote" && audio?.source) return true;
+      return deps.session.state().audio === "ok";
+    },
 
     analysing(now) {
       const playing = main.playing(now) === "remote" && audio?.source ? audio.deviceId : null;

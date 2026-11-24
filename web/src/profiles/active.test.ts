@@ -1,7 +1,8 @@
 // T9 (B-02 spec AC11 to AC14; plan PD1, PD16, AD2): the screen page's profile controller with
 // fakes, so its rules are tested without a browser.
 import { ProfileCompileError } from "@djv/engine";
-import type { Profile, StoredProfile } from "@djv/shared";
+import type { Profile, StoredProfile, TransitionChoice } from "@djv/shared";
+import type { SetProfileOptions } from "@djv/engine";
 import { describe, expect, it, vi } from "vitest";
 import type { ListResult, ProfileResult } from "./api.ts";
 import { createActiveProfile } from "./active.ts";
@@ -24,7 +25,13 @@ const stored = (id: string, name: string): StoredProfile => ({
 });
 
 function setup(
-  options: { remembered?: string | null; list?: ListResult; get?: ProfileResult } = {},
+  options: {
+    remembered?: string | null;
+    list?: ListResult;
+    get?: ProfileResult;
+    /** B-09: the page's current transition choice, read at each pick. */
+    choice?: { current: TransitionChoice };
+  } = {},
 ) {
   const warm = stored("w1", "Warm");
   const cool = stored("c1", "Cool");
@@ -37,7 +44,7 @@ function setup(
       async (id) => options.get ?? { kind: "ok", profile: id === "w1" ? warm : cool },
     ),
   };
-  const setProfile = vi.fn<(profile: Profile, options?: { pick?: boolean }) => Promise<void>>(
+  const setProfile = vi.fn<(profile: Profile, options?: SetProfileOptions) => Promise<void>>(
     async () => {},
   );
   const setDials = vi.fn();
@@ -49,6 +56,7 @@ function setup(
     setProfile,
     setDials,
     log,
+    ...(options.choice ? { transition: () => options.choice!.current } : {}),
   });
   return { active, api, setProfile, setDials, log, save, memory, warm, cool };
 }
@@ -469,5 +477,122 @@ describe("hosted sign-in failures (B-12 PD4, AC23)", () => {
       expect(active.state()).toMatchObject({ reason, activeId: BUILTIN_ID });
       expect(setProfile).not.toHaveBeenCalled();
     }
+  });
+});
+
+// B-09 T6 (spec SD3, SD4, SD5, SD12, SD16, SD18, AC16 to AC18, AC20; plan PD4, PD10): every pick
+// carries the choice current when it was made; Keep colour carries the outgoing primary as it is
+// on screen into the incoming profile's primary slot, live only, never stored.
+describe("picks with the transition choice (B-09)", () => {
+  const choice = (over: Partial<TransitionChoice> = {}) => ({
+    current: { kind: "cut", duration: 2, keepColour: false, ...over } as TransitionChoice,
+  });
+  const lastOptions = (setProfile: ReturnType<typeof setup>["setProfile"]) =>
+    setProfile.mock.calls.at(-1)![1]!;
+  const lastProfile = (setProfile: ReturnType<typeof setup>["setProfile"]) =>
+    setProfile.mock.calls.at(-1)![0];
+
+  it("passes the choice current at the pick, not one set after it (AC16)", async () => {
+    const current = choice({ kind: "crossfade", duration: 4 });
+    const { active, setProfile } = setup({ choice: current });
+    await active.open();
+    const picking = active.pick("w1");
+    current.current = { kind: "wipe", duration: 1, keepColour: true };
+    await picking;
+    const options = lastOptions(setProfile);
+    expect(options.pick).toBe(true);
+    expect(options.transition).toMatchObject({ kind: "crossfade", durationMs: 4000 });
+    expect(options.transition!.seed).toBeGreaterThanOrEqual(0);
+    expect(options.transition!.seed).toBeLessThan(1);
+    await active.pick("c1");
+    expect(lastOptions(setProfile).transition).toMatchObject({ kind: "wipe", durationMs: 1000 });
+  });
+
+  it("passes a Cut as before B-09: no transition, with or without a choice wired", async () => {
+    for (const wired of [undefined, choice()]) {
+      const { active, setProfile } = setup(wired ? { choice: wired } : {});
+      await active.open();
+      await active.pick("w1");
+      expect(lastOptions(setProfile)).toEqual({ pick: true });
+    }
+  });
+
+  it("dips through the live primary on screen at the pick (SD12, PD10)", async () => {
+    const { active, setProfile } = setup({ choice: choice({ kind: "dip" }) });
+    await active.open();
+    active.setColour(active.state().primary, "#00ff00"); // the built-in's primary, live
+    await active.pick("w1");
+    expect(lastOptions(setProfile).transition!.dipColour).toBe("#00ff00");
+  });
+
+  it("with Keep colour on, carries the live primary into the incoming primary slot, live only (AC17)", async () => {
+    const { active, api, setProfile, warm } = setup({ choice: choice({ keepColour: true }) });
+    await active.open();
+    active.setColour(active.state().primary, "#ff8800");
+    await active.pick("w1");
+    const slot = 0; // Warm has no primary and no colour slot: slot 0 (B-04 SD10)
+    expect(active.state().primary).toBe(slot);
+    expect(lastProfile(setProfile).palette[slot]).toBe("#ff8800");
+    expect(active.state().palette[slot]).toBe("#ff8800");
+    expect(active.state().storedPalette).toEqual(warm.palette);
+    expect(active.state().palette[1]).toBe(warm.palette[1]); // every other slot is the stored one
+    active.resetColour(slot);
+    expect(active.state().palette).toEqual(warm.palette);
+    expect(lastProfile(setProfile).palette).toEqual(warm.palette);
+    expect(Object.keys(api)).toEqual(["list", "get"]); // nothing here can write a profile
+  });
+
+  it("with Keep colour off, starts from the stored palette as before (AC17)", async () => {
+    const { active, setProfile, warm } = setup({ choice: choice({ kind: "crossfade" }) });
+    await active.open();
+    active.setColour(active.state().primary, "#ff8800");
+    await active.pick("w1");
+    expect(lastProfile(setProfile).palette).toEqual(warm.palette);
+    expect(active.state().palette).toEqual(warm.palette);
+  });
+
+  it("names the new profile only once the engine resolves: the transition's first frame (AC18)", async () => {
+    const { active, setProfile, setDials, warm } = setup({ choice: choice({ kind: "crossfade" }) });
+    await active.open();
+    let release!: () => void;
+    setProfile.mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+    const picking = active.pick("w1");
+    await vi.waitFor(() => expect(setProfile).toHaveBeenCalled());
+    expect(active.state().activeId).toBe(BUILTIN_ID);
+    expect(setDials).not.toHaveBeenCalled();
+    release();
+    await picking;
+    expect(active.state()).toMatchObject({ activeId: "w1", palette: warm.palette });
+    expect(setDials).toHaveBeenCalledWith(warm.dials);
+  });
+
+  it("re-picks the active profile with the current type, its starting dials and stored palette (AC20)", async () => {
+    const current = choice();
+    const { active, setProfile, setDials, warm } = setup({ choice: current });
+    await active.open();
+    await active.pick("w1");
+    active.setColour(0, "#123456");
+    current.current = { kind: "crossfade", duration: 2, keepColour: false };
+    await active.pick("w1");
+    expect(lastOptions(setProfile).transition).toMatchObject({ kind: "crossfade" });
+    expect(lastProfile(setProfile)).toMatchObject({ dials: warm.dials, palette: warm.palette });
+    expect(setDials).toHaveBeenLastCalledWith(warm.dials);
+    active.setColour(0, "#654321");
+    current.current = { kind: "crossfade", duration: 2, keepColour: true };
+    await active.pick("w1");
+    expect(lastProfile(setProfile).palette[0]).toBe("#654321"); // Keep colour applies
+    expect(active.state().storedPalette).toEqual(warm.palette);
+  });
+
+  it("restores the remembered profile alone, as before B-09, whatever the choice (spec edge case)", async () => {
+    const current = choice({ kind: "crossfade", keepColour: true });
+    const { active, setProfile, warm } = setup({ remembered: "w1", choice: current });
+    active.setColour(active.state().primary, "#ff8800"); // a live built-in primary to carry
+    await active.open();
+    expect(lastOptions(setProfile)).toEqual({ pick: true }); // a Cut, no transition
+    expect(lastProfile(setProfile).palette).toEqual(warm.palette);
+    expect(active.state()).toMatchObject({ activeId: "w1", palette: warm.palette });
+    await active.pick("c1"); // a person's pick still uses the choice
+    expect(lastOptions(setProfile).transition).toMatchObject({ kind: "crossfade" });
   });
 });

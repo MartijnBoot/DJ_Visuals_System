@@ -10,10 +10,14 @@
 // waits for Start; "Main audio: laptop / screen machine" shows while an audio sender is approved.
 // No control for the screen machine's input or System audio. The look is the style brief's
 // (`docs/design/controller-style.md`), in `controller.css`; inline styles only for data-driven
-// values (B-19 SD8, SD11).
-import type { ScreenState } from "@djv/shared";
+// values (B-19 SD8, SD11). Transitions (B-09 SD6, SD7, PD1, PD2): in VJ mode only, a Transition
+// section under Profiles — six type tiles, a duration fader in seconds outside the bank, and one
+// lit "Keep colour" key — each sending a `transition` control and showing the screen's choice.
+import type { ScreenState, TransitionKind } from "@djv/shared";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
+import { durationAt, formatDuration, positionOf } from "../profiles/transition.ts";
+import { Fader } from "./Fader.tsx";
 import { FaderBank } from "./FaderBank.tsx";
 import { VjPanel } from "./VjPanel.tsx";
 import { Wheel } from "./Wheel.tsx";
@@ -49,6 +53,19 @@ const DIALS = [
   ["recognisability", "Recognisability"],
   ["reactivity", "Audio reactivity"],
 ] as const;
+
+/** B-09 SD1: the six types, in the spec's order. */
+const TRANSITIONS: readonly (readonly [TransitionKind, string])[] = [
+  ["cut", "Cut"],
+  ["crossfade", "Crossfade"],
+  ["dissolve", "Dissolve"],
+  ["wipe", "Wipe"],
+  ["beatCut", "Beat cut"],
+  ["dip", "Dip to colour"],
+];
+
+/** B-09 PD16: the duration matters only at the next pick, so it sends at most every 100 ms. */
+const DURATION_GAP_MS = 100;
 
 /** B-06 SD8, SD22: the switch, in DJ and VJ mode while an audio sender is approved. */
 const MAIN_AUDIO = [
@@ -204,6 +221,52 @@ export function Controller() {
                 ))}
               </div>
             </section>
+
+            {mode === "vj" && (
+              <section aria-label="Transition" className="djv-section">
+                <h2 className="djv-legend">Transition</h2>
+                <div className="djv-grid">
+                  {TRANSITIONS.map(([kind, label]) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      data-testid={`transition-${kind}`}
+                      aria-pressed={state.transition.kind === kind}
+                      disabled={locked}
+                      className="djv-key djv-tile"
+                      onClick={() => link.send({ type: "transition", kind })}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <Fader
+                  testId="transition-duration"
+                  label="Duration"
+                  value={positionOf(state.transition.duration)}
+                  disabled={
+                    locked || state.transition.kind === "cut" || state.transition.kind === "beatCut"
+                  }
+                  format={(x) => formatDuration(durationAt(x))}
+                  gapMs={DURATION_GAP_MS}
+                  onSend={(x) => link.send({ type: "transition", duration: durationAt(x) })}
+                />
+                <div className="djv-row">
+                  <button
+                    type="button"
+                    data-testid="transition-keep-colour"
+                    aria-pressed={state.transition.keepColour}
+                    disabled={locked}
+                    className="djv-key"
+                    onClick={() =>
+                      link.send({ type: "transition", keepColour: !state.transition.keepColour })
+                    }
+                  >
+                    Keep colour
+                  </button>
+                </div>
+              </section>
+            )}
 
             <section aria-label="Camera" className="djv-section">
               <h2 className="djv-legend">Camera</h2>

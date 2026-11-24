@@ -13,6 +13,10 @@
 // gets — the session's local ones or a sender's — so a loss falls back in the frame it is seen.
 // The panel lists the senders' cameras and the main audio from the sources' facts, and each
 // sender's connection from the page's own peer (PD5); nothing about a peer goes to the server.
+// Transitions (B-09): the current choice is loaded from `djv.transition` at mount and is part of
+// the state every controller mirrors; a `transition` control merges into it and saves it. Each
+// pick reads it then (`profiles/active.ts`), and each frame tells the engine whether the audio
+// that feeds the looks is ok, for Beat cut (`remote/sources.ts`).
 import { createFeatureSource, ZERO_FEATURES } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
 import {
@@ -23,6 +27,7 @@ import {
   type LatencyReading,
   type RenderScale,
 } from "@djv/engine";
+import type { TransitionChoice } from "@djv/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createLatencyWindow } from "../../engine/src/latency.ts";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "./capture/devices.ts";
@@ -46,6 +51,7 @@ import { sharedToEngine } from "./profile-compat.ts";
 import { createActiveProfile } from "./profiles/active.ts";
 import { getProfile, listProfiles } from "./profiles/api.ts";
 import { loadProfileId, saveProfileId } from "./profiles/remembered.ts";
+import { loadTransition, saveTransition } from "./profiles/transition.ts";
 import { createWakeLock } from "./wake-lock.ts";
 
 const IDLE: SessionState = { camera: "idle", audio: "idle", video: null, contextState: "none" };
@@ -128,9 +134,16 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
   const [remembered] = useState(() => loadRemembered());
   const [remote, setRemote] = useState<PanelRemote>(NO_REMOTE);
   const [wakeLock] = useState(() => createWakeLock(navigator, document));
+  // B-09 SD9: the remembered transition choice, read once at mount.
+  const [transition, setTransition] = useState(() => loadTransition());
   // What the screen's state is built from, read at the start of a frame rather than from React
   // state, whose updates land after it (B-04 PD5).
-  const facts = useRef({ dials: DEFAULT_DIALS, capture: IDLE, cameras: [] as DeviceOption[] });
+  const facts = useRef({
+    dials: DEFAULT_DIALS,
+    capture: IDLE,
+    cameras: [] as DeviceOption[],
+    transition,
+  });
   const startedRef = useRef(false);
   /** Dials go to the engine at once and to the panel's sliders (B-04 AC19). */
   const applyDials = useCallback((next: Dials) => {
@@ -147,6 +160,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
         engineRef.current?.setProfile(sharedToEngine(profile), options) ?? Promise.resolve(),
       setDials: (next) => applyDials(next),
       log: (id) => console.info("profile", { id }),
+      transition: () => facts.current.transition, // the choice at the moment of each pick (B-09)
     }),
   );
   const [profiles, setProfiles] = useState(() => active.state());
@@ -160,6 +174,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       resetColour: (slot) => active.resetColour(slot),
       setCamera: (deviceId) => sourcesRef.current?.setCamera(deviceId),
       setMainAudio: (source) => sourcesRef.current?.setMainAudio(source),
+      setTransition: (change) => changeTransition(change),
       pick: (id) => active.pick(id),
       refresh: () => void active.open(),
       started: () => startedRef.current,
@@ -220,7 +235,15 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       const drawn = sourcesRef.current?.analysing(performance.now()).video;
       return drawn === entry.deviceId ? "on screen" : "connected";
     };
-    return { applier, link, peers, senders: () => senders, senderState };
+    /** B-09 SD5, SD9: merged into the current choice, saved, and in the next frame's state. */
+    const changeTransition = (change: Partial<TransitionChoice>) => {
+      const next = { ...facts.current.transition, ...change };
+      facts.current.transition = next;
+      saveTransition(next);
+      setTransition(next);
+      link.markDirty();
+    };
+    return { applier, link, peers, senders: () => senders, senderState, changeTransition };
   });
   // B-12 SD1, AC21: hosted use has no External control and no remote input, so the screen link
   // never starts and `/api/control/screen` is never asked for.
@@ -297,6 +320,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       () => {
         control.link.flush(control.applier.drain());
         sources.frame(performance.now());
+        engine.setAudioOk(sources.audioOk(performance.now())); // Beat cut's rule (B-09 SD10)
         const next = sources.video();
         if (next !== video) engine.setSource((video = next));
       },
@@ -449,6 +473,8 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
           read={read}
           profiles={profiles}
           onProfile={(id) => void active.pick(id)}
+          transition={transition}
+          onTransition={control.changeTransition}
           control={controlView}
           onControl={(action) => void control.link.send(action)}
           {...(hosted ? { hosted: { signedOut, onSignInAgain: () => void hosted.signIn() } } : {})}

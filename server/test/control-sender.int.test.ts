@@ -199,6 +199,7 @@ const STATE = {
   started: false,
   reason: null,
   mainAudio: null,
+  transition: { kind: "cut", duration: 2, keepColour: false },
 };
 const SDP = (size: number) => `v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\n${"a=x\r\n".repeat(size / 5)}`;
 const CANDIDATE = {

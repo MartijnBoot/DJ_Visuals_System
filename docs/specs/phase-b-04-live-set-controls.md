@@ -72,11 +72,14 @@ The owner's answers from the interview (2026-11-14), then defaults marked as suc
 - **SD6 — Profile switches stay a hard cut.** A controller's pick is the existing pick
   (`web/src/profiles/active.ts:118-137`, B-02 SD15): prepared, then swapped on a frame boundary,
   applying the profile's starting dials. Transitions of any kind are a new backlog item, B-09,
-  with more types than a crossfade and their own latency check.
+  with more types than a crossfade and their own latency check. *Amended by B-09 SD20:* a pick
+  uses the current transition; Cut is B-02 SD15's hard cut.
 - **SD7 — A live colour change edits the active profile's palette slots in memory.** It is
   never saved (ADR 0001, "Live changes are never saved into profiles"). Picking a profile, the
   same one included, starts again from its stored palette. A global colour layer that survives
-  switches (hue shift, tint) is a new backlog item, B-10, on top of this.
+  switches (hue shift, tint) is a new backlog item, B-10, on top of this. *Amended by B-09 SD4:*
+  while Keep colour is on, a pick carries the outgoing look's primary colour, as it is on screen,
+  into the incoming profile's primary slot, live only; Reset restores the stored colour.
 - **SD8 — The controller gets profile, colours, the two dials and the camera, plus read-only
   status.** Profile picker; palette colours (SD9, SD11); recognisability and audio reactivity;
   the camera picker, listing the screen machine's own cameras with their labels. Status: camera
@@ -91,7 +94,9 @@ The owner's answers from the interview (2026-11-14), then defaults marked as suc
   swatch (each opens the same wheel), the full status strip, the latency readout (SD17) and
   pending approval requests (SD18). On first open a viewport narrower than 600 CSS px starts in
   DJ mode, otherwise VJ; the toggle overrides and is remembered in that device's browser
-  storage. The screen page never knows a device's mode.
+  storage. The screen page never knows a device's mode. *Amended by B-09 SD7:* VJ mode also
+  has a Transition section directly under Profiles (six type tiles, a duration fader, Keep
+  colour); DJ mode is unchanged and its picks use the current choice.
 - **SD10 — A profile names one palette slot as its primary colour.** `primary` is an optional
   palette index in the profile. When absent it is derived: the `colourSlot` of the first effect
   in the stack that has one, else slot 0 (the built-in derives slot 1, white). No migration;

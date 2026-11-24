@@ -3,15 +3,18 @@
 // profile's look (`shader.ts`, `profile.ts`) into one of two ping-pong targets, reading the
 // other as the previous frame, and blits the result to the canvas. A profile with another
 // effect list is linked while the old one keeps drawing and swapped in at the start of a frame
-// (B-02 SD15, PD4).
+// (B-02 SD15, PD4). What one look holds — its profile, program, dials and targets — is a `Look`
+// (`look-state.ts`, B-09 T2). B-09: a pick with a transition other than Cut keeps the old look
+// drawing as the outgoing one, frozen at its dials and palette, beside the incoming one, each in
+// its own targets; a mix pass puts the two on the canvas in place of the present until progress
+// reaches 1 (`transition.ts`), and the next frame draws the incoming look alone.
 import { DEFAULT_DIALS, ZERO_FEATURES, type AudioFeatures, type Dials } from "./features.ts";
 import {
   beginProgram,
   createProgram,
-  createTarget,
   createTexture,
-  deleteTarget,
   FULLSCREEN_VERTEX,
+  MIX_FRAGMENT,
   PRESENT_FRAGMENT,
   programReady,
   type Linking,
@@ -19,9 +22,11 @@ import {
   type Target,
 } from "./gl.ts";
 import { createLatencyWindow, type LatencyReading } from "./latency.ts";
+import { dropTargets, sizeTargets, type Look } from "./look-state.ts";
 import {
   BUILT_IN_PROFILE,
   customUniforms,
+  hexToRgb,
   PALETTE_SLOTS,
   profileUniforms,
   type Profile,
@@ -29,11 +34,14 @@ import {
 import { createScaleController, type RenderScale } from "./scale.ts";
 import { buildFragment, fragmentLayout, type FragmentEntry } from "./shader.ts";
 import { locateErrors, ProfileCompileError, type BodyLines } from "./compile-error.ts";
+import type { Rgb } from "./colour.ts";
 import { createFrameStats, type EngineStats } from "./stats.ts";
+import { createBeatWait, MIX_KIND, progress, type TransitionKind } from "./transition.ts";
 
 export type { EngineStats, FrameStats } from "./stats.ts";
 export type { LatencyReading } from "./latency.ts";
 export type { RenderScale } from "./scale.ts";
+export type { TransitionKind } from "./transition.ts";
 export type { AudioFeatures, Dials } from "./features.ts";
 export { DEFAULT_DIALS, ZERO_FEATURES } from "./features.ts";
 export type {
@@ -61,6 +69,8 @@ export interface Engine {
   setFeatures(features: AudioFeatures): void;
   /** The two dials; applied on the next frame (AC9). */
   setDials(dials: Dials): void;
+  /** B-09 SD10, PD3: whether the audio that feeds the looks is `ok`; false until told. */
+  setAudioOk(ok: boolean): void;
   /** The camera, or `null` for the generative input (SD10). */
   setSource(video: HTMLVideoElement | null): void;
   /** The panel's quality cap: the automatic render scale never exceeds it (SD8). */
@@ -72,6 +82,9 @@ export interface Engine {
    * rejects when the program does not link (the old profile keeps drawing) or when a later
    * call supersedes it. While the guard has bypassed this profile's custom effects, a call with
    * the same program key keeps the bypass; `pick` or another key ends it (B-03 PD8).
+   * B-09: with a `transition` other than Cut it resolves at the frame the transition starts, a
+   * pick of the active list included (PD12); a call without `pick` on the active list changes
+   * the incoming look's values only, and a running transition keeps its own options (AC16).
    */
   setProfile(profile: Profile, options?: SetProfileOptions): Promise<void>;
   /** Called when the guard bypasses custom effects (B-03 SD8, PD8); returns an unsubscribe. */
@@ -84,6 +97,18 @@ export interface SetProfileOptions {
    * "retry"; named for the act, as the gate's guard reads a test's `retry` as a test retry).
    */
   pick?: boolean;
+  /** B-09 PD4: how to switch; absent is Cut. A pick's look starts at its profile's dials (PD5). */
+  transition?: TransitionOptions;
+}
+
+/** B-09 PD4: a transition as the engine draws it. */
+export interface TransitionOptions {
+  kind: TransitionKind;
+  durationMs: number;
+  /** Dip to colour's colour as `#rrggbb`, captured by the caller at the pick (PD10). */
+  dipColour: string;
+  /** Fixes Dissolve's block thresholds for the transition (PD9). */
+  seed: number;
 }
 
 /** What the runtime guard did (B-03 SD8, PD8). */
@@ -181,9 +206,30 @@ interface PendingSwitch {
   linking: Linking | null;
   /** Where each custom body sits in the fragment, to locate a compile error (PD9). */
   bodies: BodyLines[];
+  /** B-09: what the call asked for. */
+  request: Request;
+  /** B-09 SD10: a Beat cut's wait, from the frame its program is ready. */
+  wait: ReturnType<typeof createBeatWait> | null;
   resolve(): void;
   reject(error: Error): void;
 }
+
+/** What a `setProfile` call asks for beyond the profile (B-09 PD4). */
+interface Request {
+  pick: boolean;
+  transition: TransitionOptions | null;
+}
+
+const VALUES_ONLY: Request = { pick: false, transition: null };
+
+/** A transition with two looks and a mix (B-09 SD1): neither Cut nor Beat cut. */
+const mixes = (request: Request) =>
+  request.transition !== null &&
+  request.transition.kind !== "cut" &&
+  request.transition.kind !== "beatCut";
+
+/** B-09 SD10: a Beat cut waits for a beat once ready. */
+const waits = (request: Request) => request.transition?.kind === "beatCut";
 
 /** The chain a profile's program draws: its effect list, custom code included (B-03 SD3). */
 const entriesOf = (profile: Profile): FragmentEntry[] =>
@@ -231,18 +277,30 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 
   const builtInKey = keyOf(BUILT_IN_PROFILE);
   const cache = new Map<string, Linked>();
-  let active: { profile: Profile; linked: Linked } = {
+  let active: Look<Linked> = {
     profile: BUILT_IN_PROFILE,
     linked: linked(
       builtInKey,
       createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(BUILT_IN_PROFILE)),
       false,
     ),
+    dials: DEFAULT_DIALS,
+    targets: null,
+    current: 0,
+    fresh: false,
   };
   cache.set(builtInKey, active.linked);
   let pending: PendingSwitch | null = null;
-  /** The first frame after a swap mixes nothing of the old look into the new one (PD4). */
-  let swapped = false;
+  /** B-09: during a transition, the look going out, drawn as it was at the start (SD3). */
+  let outgoing: Look<Linked> | null = null;
+  /** B-09: the running transition, with its options as they were at the start (AC16). */
+  let transition: (TransitionOptions & { t0: number; ended: boolean; dip: Rgb }) | null = null;
+  /** The outgoing look is drawn alone from now on: its targets go (PD7, SD2). */
+  const endTransition = () => {
+    if (outgoing) dropTargets(gl, outgoing);
+    outgoing = null;
+    transition = null;
+  };
   /** Keys that did not link, with why: logged once; custom code is not compiled again (PD9). */
   const failures = new Map<string, Error>();
   const noteFailure = (key: string, error: Error) => {
@@ -270,6 +328,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     for (const [key, old] of cache) {
       if (cache.size <= PROGRAM_CACHE) break;
       if (key === builtInKey || key === active.linked.key || key === entry.key) continue;
+      if (key === outgoing?.linked.key) continue; // it still draws (B-09 PD13)
       gl.deleteProgram(old.program);
       cache.delete(key);
     }
@@ -282,16 +341,20 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     pending = null;
   };
 
-  /** At the start of a frame: swap a ready profile in, or settle a failed one. */
-  const advance = () => {
+  /**
+   * At the start of a frame: end a transition whose progress reached 1 on the frame before, then
+   * swap a ready profile in or start its transition, or settle a failed one.
+   */
+  const advance = (timestamp: number) => {
+    if (transition?.ended) endTransition();
     if (!pending) return;
     const next = pending;
     let entry = cache.get(next.key);
     if (!entry) {
       const state = programReady(gl, next.linking!, parallel);
       if (state.state === "pending") return;
-      pending = null;
       if (state.state === "failed") {
+        pending = null;
         const issues = locateErrors(state.message, next.bodies);
         const error =
           issues.length > 0 ? new ProfileCompileError(issues) : new Error(state.message);
@@ -306,12 +369,44 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
         return;
       }
       entry = linked(next.key, state.program, hasCustom(next.profile));
+      next.linking = null; // linked: kept in the cache from now on, through a Beat cut's wait
+      remember(entry);
+    }
+    if (waits(next.request)) {
+      // SD10: the old look keeps drawing, and the promise waits, until the beat says cut.
+      next.wait ??= createBeatWait(timestamp);
+      if (!next.wait.cut(timestamp, features.beat, audioOk)) return;
     }
     pending = null;
     remember(entry);
-    active = { profile: next.profile, linked: entry };
+    // B-09 PD5: a picked look starts at its profile's dials from its first frame.
+    const dials = next.request.pick ? next.profile.dials : active.dials;
+    if (mixes(next.request)) {
+      // SD2, PD11: a running transition ends here with its incoming look fully on, and that
+      // look goes out; never three looks. The incoming look gets a pair of its own (SD15).
+      if (outgoing) dropTargets(gl, outgoing);
+      outgoing = active;
+      active = {
+        profile: next.profile,
+        linked: entry,
+        dials,
+        targets: null,
+        current: 0,
+        fresh: true,
+      };
+      const { kind, durationMs, dipColour, seed } = next.request.transition!;
+      // SD12, PD10: the dip colour is parsed once, at the start; a later colour change is the
+      // incoming look's, not the dip's.
+      const dip = hexToRgb(dipColour);
+      transition = { kind, durationMs, dipColour, seed, dip, t0: timestamp, ended: false };
+    } else {
+      endTransition(); // a Cut during a transition ends it (SD2)
+      active.profile = next.profile;
+      active.linked = entry;
+      active.dials = dials;
+      active.fresh = true; // the first frame after a swap mixes nothing of the old look (PD4)
+    }
     customSince = null; // a new custom program gets its own 3 s before the guard looks
-    swapped = true;
     next.resolve();
   };
 
@@ -328,30 +423,30 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   };
   let present = createPresent();
 
+  /** B-09 PD6: the program that mixes two looks onto the canvas, in place of the present. */
+  const createMix = () => {
+    const program = createProgram(gl, FULLSCREEN_VERTEX, MIX_FRAGMENT);
+    const at = (name: string) => gl.getUniformLocation(program, name);
+    return {
+      program,
+      uOutgoing: at("uOutgoing"),
+      uIncoming: at("uIncoming"),
+      uCanvas: at("uCanvas"),
+      uProgress: at("uProgress"),
+      uKind: at("uKind"),
+      uDip: at("uDip"),
+      uSeed: at("uSeed"),
+    };
+  };
+  let mix = createMix();
+
   const frames = createFrameStats();
   const scaler = createScaleController(frames);
   const latency = createLatencyWindow();
   let handle: number | null = null;
   let features: AudioFeatures = ZERO_FEATURES;
-  let dials: Dials = DEFAULT_DIALS;
+  let audioOk = false;
   let video: HTMLVideoElement | null = null;
-  let targets: [Target, Target] | null = null;
-  let current = 0;
-
-  const targetsFor = (width: number, height: number): [Target, Target] => {
-    if (targets && targets[0].width === width && targets[0].height === height) return targets;
-    const old = targets;
-    targets = [createTarget(gl, width, height), createTarget(gl, width, height)];
-    if (old) {
-      // In a profile with code the limiter needs the real previous frame (B-03 PD4): the last
-      // output, scaled into the new previous target. Built-in profiles start from black.
-      if (active.linked.custom) copy(old[1 - current]!, targets[1 - current]!);
-      for (const t of old) deleteTarget(gl, t);
-      // Recreated targets are cleared black: no smear on the next frame, or it mixes that in.
-      swapped = true;
-    }
-    return targets;
-  };
 
   /** Scales one target's picture into another. */
   const copy = (from: Target, to: Target) => {
@@ -392,7 +487,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   const frame = (timestamp: number) => {
     handle = requestAnimationFrame(frame);
     if (lost) return; // nothing can draw until the context is restored (B-03 AC12)
-    advance();
+    advance(timestamp);
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     if (canvas.width !== width || canvas.height !== height) {
@@ -416,6 +511,9 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   canvas.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
     lost = true;
+    // Every target is gone with the context: the restore draws the incoming look alone (AC11).
+    outgoing = null;
+    transition = null;
     if (pending) {
       pending.reject(new Error("the WebGL context was lost"));
       pending = null;
@@ -432,10 +530,11 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     parallel = gl.getExtension("KHR_parallel_shader_compile") as unknown as ParallelCompile | null;
     cache.clear();
     failures.clear();
-    targets = null;
-    current = 0;
+    active.targets = null;
+    active.current = 0;
     sourceTexture = createTexture(gl);
     present = createPresent();
+    mix = createMix();
     const wanted = active.profile;
     const hadCustom = bypassed !== null || hasCustom(wanted);
     if (bypassed === null && hasCustom(wanted)) bypassed = keyOf(wanted);
@@ -447,10 +546,11 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       drawn = BUILT_IN_PROFILE; // built-ins only always link; this is a last resort
       program = createProgram(gl, FULLSCREEN_VERTEX, fragmentFor(drawn));
     }
-    active = { profile: drawn, linked: linked(keyOf(drawn), program, false) };
+    active.profile = drawn;
+    active.linked = linked(keyOf(drawn), program, false);
     cache.set(active.linked.key, active.linked);
     customSince = null;
-    swapped = true;
+    active.fresh = true;
     emitGuard({ kind: "contextLost", customBypassed: hadCustom });
   });
 
@@ -468,7 +568,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
   /**
    * SD8: custom code that keeps the GPU above budget at 50% for 3 s, after running for 3 s, is
    * turned off; built-ins and the camera keep drawing. Never while a switch is pending, so a
-   * guard cannot cancel a pick.
+   * guard cannot cancel a pick, nor during a transition, whose two looks are load (B-09 SD11).
    */
   const guardSlow = (timestamp: number) => {
     if (!active.linked.custom) {
@@ -476,7 +576,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       return;
     }
     customSince ??= timestamp;
-    if (bypassed !== null || pending) return;
+    if (bypassed !== null || pending || outgoing) return;
     if (timestamp - customSince < GUARD_AFTER_MS) return;
     if (scaler.starvedFor(timestamp) < GUARD_AFTER_MS) return;
     bypassed = active.linked.key;
@@ -484,34 +584,32 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     emitGuard({ kind: "slow", customBypassed: true });
   };
 
-  const draw = (timestamp: number, canvasWidth: number, canvasHeight: number) => {
-    // The internal resolution (SD8): the pass runs at canvas size × scale; the present draw
-    // scales it up to the canvas (D-14).
-    const scale = scaler.scale();
-    const width = Math.max(1, Math.round(canvasWidth * scale));
-    const height = Math.max(1, Math.round(canvasHeight * scale));
-    const pair = targetsFor(width, height);
-    const target = pair[current]!;
-    const previous = pair[1 - current]!;
-    const size = uploadSource();
-    const u = profileUniforms(active.profile, features, dials, timestamp, size !== null, width);
+  /**
+   * Draws one look into its current target, reading its other target as the previous frame, and
+   * returns the target drawn. The camera's frame is uploaded once per frame, before.
+   */
+  const drawLook = (
+    look: Look<Linked>,
+    pair: [Target, Target],
+    hasSource: boolean,
+    cover: [number, number],
+    timestamp: number,
+    width: number,
+    height: number,
+  ): Target => {
+    const target = pair[look.current]!;
+    const previous = pair[1 - look.current]!;
+    const u = profileUniforms(look.profile, features, look.dials, timestamp, hasSource, width);
     // A profile with code starts with both targets holding the last output, so a body that
     // discards a pixel leaves a picture at most one limited step old (B-03 PD3, PD4).
-    if (swapped && active.linked.custom) copy(previous, target);
-    if (swapped) u.feedback = 0;
-    swapped = false;
-    const loc = active.linked.loc;
-
-    // Cover fit: the camera fills the frame, cropped on the long side, never stretched.
-    let cover: [number, number] = [1, 1];
-    if (size) {
-      const ratio = size.width / size.height / (width / height);
-      cover = ratio > 1 ? [1 / ratio, 1] : [1, ratio];
-    }
+    if (look.fresh && look.linked.custom) copy(previous, target);
+    if (look.fresh) u.feedback = 0;
+    look.fresh = false;
+    const loc = look.linked.loc;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
     gl.viewport(0, 0, width, height);
-    gl.useProgram(active.linked.program);
+    gl.useProgram(look.linked.program);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, sourceTexture);
     gl.uniform1i(loc.uSource, 0);
@@ -520,7 +618,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     gl.uniform1i(loc.uPrevious, 1);
     gl.uniform2f(loc.uResolution, width, height);
     gl.uniform2f(loc.uCover, cover[0], cover[1]);
-    gl.uniform1f(loc.uHasSource, size ? 1 : 0);
+    gl.uniform1f(loc.uHasSource, hasSource ? 1 : 0);
     gl.uniform1f(loc.uTime, u.time);
     gl.uniform3f(loc.uTint, ...u.tint);
     gl.uniform1f(loc.uTintWeight, u.tintWeight);
@@ -542,9 +640,9 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     gl.uniform1f(loc.uMirror, u.mirror);
     gl.uniform1f(loc.uSegments, u.segments);
     gl.uniform1f(loc.uRgbSplit, u.rgbSplit);
-    const custom = active.linked.custom;
+    const custom = look.linked.custom;
     if (custom) {
-      const c = customUniforms(active.profile, features, dials);
+      const c = customUniforms(look.profile, features, look.dials);
       gl.uniform1fv(custom.uCustomStrength, c.strength);
       gl.uniform4fv(custom.uCustomParam, c.params);
       gl.uniform1f(custom["uAudio.level"], c.audio.level);
@@ -554,8 +652,12 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       gl.uniform1f(custom["uAudio.beat"], c.audio.beat);
     }
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    look.current = 1 - look.current;
+    return target;
+  };
 
-    // Onto the canvas by a draw, never a blit (D-14): the target's texture, scaled up LINEAR.
+  /** Onto the canvas by a draw, never a blit (D-14): the target's texture, scaled up LINEAR. */
+  const presentTarget = (target: Target, canvasWidth: number, canvasHeight: number) => {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvasWidth, canvasHeight);
     gl.useProgram(present.program);
@@ -564,11 +666,71 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     gl.uniform1i(present.uFrame, 0);
     gl.uniform2f(present.uCanvas, canvasWidth, canvasHeight);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    current = 1 - current;
+  };
+
+  /** B-09 PD6: the two looks' targets just drawn, mixed onto the canvas by progress `p`. */
+  const mixTargets = (
+    from: Target,
+    to: Target,
+    running: NonNullable<typeof transition>,
+    p: number,
+    width: number,
+    height: number,
+  ) => {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, width, height);
+    gl.useProgram(mix.program);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, from.texture);
+    gl.uniform1i(mix.uOutgoing, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, to.texture);
+    gl.uniform1i(mix.uIncoming, 1);
+    gl.uniform2f(mix.uCanvas, width, height);
+    gl.uniform1f(mix.uProgress, p);
+    gl.uniform1i(mix.uKind, MIX_KIND[running.kind]);
+    gl.uniform3f(mix.uDip, ...running.dip);
+    gl.uniform1f(mix.uSeed, running.seed);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+
+  const draw = (timestamp: number, canvasWidth: number, canvasHeight: number) => {
+    // The internal resolution (SD8): the pass runs at canvas size × scale; the present draw
+    // scales it up to the canvas (D-14).
+    const scale = scaler.scale();
+    const width = Math.max(1, Math.round(canvasWidth * scale));
+    const height = Math.max(1, Math.round(canvasHeight * scale));
+    // B-09 SD17: a scale step or a resize recreates both looks' targets.
+    const from = outgoing;
+    const fromPair = from ? sizeTargets(gl, from, width, height, copy) : null;
+    const starting = from !== null && active.targets === null;
+    const pair = sizeTargets(gl, active, width, height, copy);
+    // SD15, PD11: the incoming look's history starts from the outgoing look's latest output, the
+    // frame on screen, for a look with code as at today's swap (B-03 PD4).
+    if (from && fromPair && starting && active.linked.custom) {
+      copy(fromPair[1 - from.current]!, pair[1 - active.current]!);
+    }
+    const size = uploadSource();
+    // Cover fit: the camera fills the frame, cropped on the long side, never stretched.
+    let cover: [number, number] = [1, 1];
+    if (size) {
+      const ratio = size.width / size.height / (width / height);
+      cover = ratio > 1 ? [1 / ratio, 1] : [1, ratio];
+    }
+    if (from && fromPair && transition) {
+      const a = drawLook(from, fromPair, size !== null, cover, timestamp, width, height);
+      const b = drawLook(active, pair, size !== null, cover, timestamp, width, height);
+      const p = progress(timestamp, transition.t0, transition.durationMs);
+      mixTargets(a, b, transition, p, canvasWidth, canvasHeight);
+      if (p >= 1) transition.ended = true; // the next frame draws the incoming look alone (PD7)
+      return;
+    }
+    const target = drawLook(active, pair, size !== null, cover, timestamp, width, height);
+    presentTarget(target, canvasWidth, canvasHeight);
   };
 
   /** Switches the drawn profile (B-02 SD15, PD4); `setProfile` adds the guard's rules. */
-  const switchTo = (profile: Profile): Promise<void> => {
+  const switchTo = (profile: Profile, request: Request = VALUES_ONLY): Promise<void> => {
     const key = keyOf(profile);
     if (pending && pending.key === key && pending.linking) {
       // The same list is already linking: keep the link, take the newer values.
@@ -576,12 +738,24 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       pending.linking = null;
       supersede();
       return new Promise((resolve, reject) => {
-        pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile) };
+        pending = {
+          profile,
+          key,
+          linking,
+          resolve,
+          reject,
+          bodies: bodiesOf(profile),
+          request,
+          wait: null,
+        };
       });
     }
     supersede();
-    if (key === active.linked.key) {
-      active = { ...active, profile };
+    // B-09 PD12: a pick of the active list with a transition transitions; anything else on it
+    // is a value change, on the incoming look during a transition (SD3).
+    if (key === active.linked.key && !(request.pick && (mixes(request) || waits(request)))) {
+      if (request.pick) endTransition(); // a Cut picked during a transition ends it (SD2)
+      active.profile = profile;
       return Promise.resolve();
     }
     // Code that did not compile is not compiled again on the next slider move (PD9).
@@ -597,7 +771,16 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
           return;
         }
       }
-      pending = { profile, key, linking, resolve, reject, bodies: bodiesOf(profile) };
+      pending = {
+        profile,
+        key,
+        linking,
+        resolve,
+        reject,
+        bodies: bodiesOf(profile),
+        request,
+        wait: null,
+      };
     });
   };
 
@@ -619,7 +802,10 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       features = next;
     },
     setDials(next) {
-      dials = next;
+      active.dials = next;
+    },
+    setAudioOk(ok) {
+      audioOk = ok;
     },
     setSource(next) {
       video = next;
@@ -631,14 +817,17 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       if (lost) {
         // Nothing links now; the restore draws this one (without custom effects).
         if (options.pick || keyOf(profile) !== bypassed) bypassed = null;
-        active = { ...active, profile };
+        active.profile = profile;
         return Promise.resolve();
       }
       if (bypassed !== null && !options.pick && keyOf(profile) === bypassed) {
         return switchTo(withoutCustom(profile)); // a slider or a live colour keeps the bypass
       }
       bypassed = null;
-      return switchTo(profile);
+      return switchTo(profile, {
+        pick: options.pick === true,
+        transition: options.transition ?? null,
+      });
     },
     onGuard(listener) {
       guardListeners.add(listener);

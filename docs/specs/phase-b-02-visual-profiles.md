@@ -105,7 +105,8 @@ to author, store or switch.
 - **SD15 — Switching profiles is a hard cut, prepared before it happens.** The new profile is
   fully built (any shader compiled) while the old one keeps drawing; the swap happens on a frame
   boundary, so no blank or half-built frame is ever shown. A crossfade is B-04's (its open
-  question). *(default, not asked)*
+  question). *(default, not asked)* *Amended by B-09 SD20:* a pick uses the current transition;
+  Cut is this hard cut.
 - **SD16 — The screen page remembers the picked profile id** in browser storage beside the
   device ids (`djv.sources`' sibling key), and selects it on the next load while it exists,
   otherwise the built-in. The starting dials of the picked profile apply on pick and on load.

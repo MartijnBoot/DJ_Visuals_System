@@ -6,8 +6,9 @@
 // applied control is acknowledged in that frame's one `applied` batch; a pick when it settles,
 // i.e. at the swap, in the batch of the frame after. B-06 (T13): a `camera` may name a remote
 // camera (`remote:<deviceId>`), which goes to the same choice; `mainAudio` sets the main-audio
-// choice (SD22).
-import type { AppliedEntry, Control } from "@djv/shared";
+// choice (SD22). B-09 (T1): `transition` changes the current transition choice (SD19), applied and
+// acknowledged like the dials.
+import type { AppliedEntry, Control, TransitionChoice } from "@djv/shared";
 import type { Dials } from "@djv/engine";
 
 export interface ApplierDeps {
@@ -21,6 +22,8 @@ export interface ApplierDeps {
   setCamera(deviceId: string): void;
   /** The main-audio choice (B-06 SD22). */
   setMainAudio(source: "remote" | "local"): void;
+  /** Merges into the current transition choice, saves it and marks the state (B-09 SD5, SD9). */
+  setTransition(change: Partial<TransitionChoice>): void;
   /** The panel picker's pick: prepared, hard cut, starting dials, remembered (AC18). */
   pick(id: string): Promise<void>;
   /** Lists the profiles again (SD22). */
@@ -65,11 +68,23 @@ export function createApplier(deps: ApplierDeps): Applier {
       case "mainAudio":
         deps.setMainAudio(control.source);
         break;
+      case "transition": {
+        const { kind, duration, keepColour } = control;
+        deps.setTransition({
+          ...(kind !== undefined ? { kind } : {}),
+          ...(duration !== undefined ? { duration } : {}),
+          ...(keepColour !== undefined ? { keepColour } : {}),
+        });
+        break;
+      }
       case "pick": {
         const settle = () => void settled.push(ack);
         deps.pick(control.id).then(settle, settle);
         return; // acknowledged at the swap
       }
+      default:
+        // B-09 PD15: a control type with no case fails the type check here.
+        control satisfies never;
     }
     acks.push(ack);
   };
