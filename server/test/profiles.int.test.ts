@@ -464,12 +464,63 @@ describe("import (AC10)", () => {
 
   it("answers 422 for another format version, checked before the rest of the file", async () => {
     await boot();
-    for (const formatVersion of [3, 0]) {
+    for (const formatVersion of [4, 0]) {
       const response = await post("/api/profiles/import", { formatVersion, profiles: "nonsense" });
       expect(response.status).toBe(422);
       expect(await response.json()).toEqual({ error: "unsupported_version" });
     }
     expect(await list()).toEqual([]);
+  });
+
+  // B-18 SD2, SD3, AC1, AC3: the fader flags through the API, a file and a restart.
+  it("stores the fader flags, returns them, and refuses a second DJ tick", async () => {
+    await boot();
+    const flagged: Profile = {
+      ...authored,
+      name: "Flagged",
+      effects: [
+        { type: "zoom", amount: 0.1, dj: true },
+        { ...customEffect("Swirl"), vj: true },
+        { ...customEffect("Glow"), vj: true, dj: false },
+      ],
+    };
+    const stored = await create(flagged);
+    expect(stored).toMatchObject({ ...flagged, revision: 1 });
+    const got = await fetch(`${base}/api/profiles/${stored.id}`);
+    expect(storedProfileSchema.parse(await got.json()).effects).toEqual(flagged.effects);
+    await restart();
+    expect((await list())[0]!.effects).toEqual(flagged.effects);
+
+    const second = { ...flagged, name: "Two DJ" };
+    second.effects = [...flagged.effects.slice(0, 2), { ...customEffect("Glow"), dj: true }];
+    const response = await post("/api/profiles", second);
+    expect(response.status).toBe(400);
+    expect(invalidErrorSchema.parse(await response.json()).issues).toEqual([
+      {
+        path: "effects.2.dj",
+        message: "effect 2 is the second with the DJ fader; one effect has it",
+      },
+    ]);
+    const put2 = await put(stored.id, { ...second, name: "Flagged", revision: 1 });
+    expect(put2.status).toBe(400);
+
+    const file = toProfileFile([stored]);
+    expect(file.formatVersion).toBe(3);
+    const imported = await post("/api/profiles/import", file);
+    expect(imported.status).toBe(201);
+    const copy = (await list()).find((p) => p.name === "Flagged (2)")!;
+    expect(copy.effects.map((e) => [e.dj, e.vj])).toEqual([
+      [true, undefined],
+      [undefined, true],
+      [undefined, true],
+    ]);
+    const v2 = await post("/api/profiles/import", { ...file, formatVersion: 2 });
+    expect(v2.status).toBe(400);
+    expect(invalidErrorSchema.parse(await v2.json()).issues).toEqual([
+      { path: "profiles.0.effects.0", message: expect.stringMatching(/dj/), profile: "Flagged" },
+      { path: "profiles.0.effects.1", message: expect.stringMatching(/vj/), profile: "Flagged" },
+      { path: "profiles.0.effects.2", message: expect.stringMatching(/vj/), profile: "Flagged" },
+    ]);
   });
 
   // B-03 SD15, AC19, AC20 (plan PD13).

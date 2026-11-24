@@ -193,7 +193,7 @@ describe("the file format", () => {
 
   it("exports only name, palette, dials and effects, at format version 1", () => {
     const file = toProfileFile([stored]);
-    expect(SUPPORTED_FORMAT_VERSIONS).toEqual([1, 2]);
+    expect(SUPPORTED_FORMAT_VERSIONS).toEqual([1, 2, 3]);
     expect(file.formatVersion).toBe(1);
     const text = JSON.stringify(file);
     for (const key of ["id", "revision", "createdAt", "updatedAt"]) {
@@ -207,9 +207,9 @@ describe("the file format", () => {
     expect(profileFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
   });
 
-  it("rejects format version 3, an empty bundle and a bad profile with its path", () => {
+  it("rejects format version 4, an empty bundle and a bad profile with its path", () => {
     expect(
-      profileFileSchema.safeParse({ formatVersion: 3, profiles: [builtInShaped] }).success,
+      profileFileSchema.safeParse({ formatVersion: 4, profiles: [builtInShaped] }).success,
     ).toBe(false);
     expect(profileFileSchema.safeParse({ formatVersion: 1, profiles: [] }).success).toBe(false);
     const result = profileFileSchema.safeParse({
@@ -275,13 +275,192 @@ describe("format version 2 (B-03)", () => {
   });
 
   it("tells a supported version from any other", () => {
-    expect([0, 1, 2, 3, 1.5].map(isSupportedFormatVersion)).toEqual([
+    expect([0, 1, 2, 3, 4, 1.5].map(isSupportedFormatVersion)).toEqual([
       false,
+      true,
       true,
       true,
       false,
       false,
     ]);
+  });
+});
+
+// B-18 SD2, SD3, AC1, AC2, AC3 (plan PD2, PD3): the two fader flags and format version 3.
+describe("the fader flags (B-18)", () => {
+  const custom = {
+    type: "custom" as const,
+    label: "Swirl",
+    amount: 0.5,
+    abstraction: false,
+    params: [],
+    code: "return source(uv);",
+  };
+  const flagged: Profile = {
+    ...builtInShaped,
+    name: "Flagged",
+    effects: [
+      { type: "zoom", amount: 0.2, dj: true },
+      { type: "smear", amount: 0.4, vj: true },
+      { ...custom, vj: true, dj: false },
+    ],
+  };
+
+  it("accepts dj and vj on a built-in and a custom effect, either value (AC1)", () => {
+    expect(profileSchema.parse(flagged)).toEqual(flagged);
+    const both = withEffects([
+      { ...custom, dj: true, vj: true },
+      { type: "zoom", amount: 0 },
+    ]);
+    expect(profileSchema.parse(both)).toEqual(both);
+    const off = withEffects([{ type: "mirror", amount: 1, segments: 4, dj: false, vj: false }]);
+    expect(profileSchema.safeParse(off).success).toBe(true);
+  });
+
+  it("refuses a flag that is not a boolean, at its path", () => {
+    expect(failingPaths(withEffects([{ type: "zoom", amount: 0, dj: 1 }]))).toEqual([
+      "effects.0.dj",
+    ]);
+    expect(failingPaths(withEffects([{ ...custom, vj: "yes" }]))).toEqual(["effects.0.vj"]);
+  });
+
+  it("refuses a second dj: true, naming the second effect's index (AC1, SD2)", () => {
+    const two = withEffects([
+      { type: "zoom", amount: 0, dj: true },
+      { type: "smear", amount: 0, vj: true },
+      { ...custom, dj: true },
+    ]);
+    const result = profileSchema.safeParse(two);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(issuesFrom(result.error)).toEqual([
+        {
+          path: "effects.2.dj",
+          message: "effect 2 is the second with the DJ fader; one effect has it",
+        },
+      ]);
+    }
+    const vjOnly = withEffects([
+      { type: "zoom", amount: 0, vj: true },
+      { type: "smear", amount: 0, vj: true, dj: false },
+      { ...custom, dj: true, vj: true },
+    ]);
+    expect(profileSchema.safeParse(vjOnly).success).toBe(true);
+  });
+
+  it("applies the one-DJ rule to the stored and update shapes too", () => {
+    const two = withEffects([
+      { type: "zoom", amount: 0, dj: true },
+      { type: "smear", amount: 0, dj: true },
+    ]) as Profile;
+    const result = updateProfileSchema.safeParse({ ...two, revision: 2 });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(issuesFrom(result.error)[0]?.path).toBe("effects.1.dj");
+    const stored = {
+      ...two,
+      id: "abc",
+      revision: 1,
+      createdAt: "2026-11-12T10:00:00.000Z",
+      updatedAt: "2026-11-12T10:00:00.000Z",
+    };
+    expect(storedProfileSchema.safeParse(stored).success).toBe(false);
+  });
+
+  it("writes version 3 when any effect has a flag set (AC2)", () => {
+    const file = toProfileFile([builtInShaped, flagged]);
+    expect(file.formatVersion).toBe(3);
+    expect(profileFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
+    const vjOnly: Profile = { ...builtInShaped, effects: [{ type: "zoom", amount: 0, vj: true }] };
+    expect(toProfileFile([vjOnly]).formatVersion).toBe(3);
+  });
+
+  it("writes no key for an off flag, and version 1 or 2 byte for byte without one (AC2)", () => {
+    const file = toProfileFile([flagged]);
+    expect(file.profiles[0]!.effects[2]).toEqual({ ...custom, vj: true });
+    expect(file.profiles[0]!.effects[2]).not.toHaveProperty("dj");
+    const off: Profile = {
+      ...builtInShaped,
+      effects: [
+        { type: "zoom", amount: 0.5, dj: false },
+        { type: "flash", amount: 0, colourSlot: 1, vj: false, dj: false },
+      ],
+    };
+    const plain: Profile = {
+      ...builtInShaped,
+      effects: [
+        { type: "zoom", amount: 0.5 },
+        { type: "flash", amount: 0, colourSlot: 1 },
+      ],
+    };
+    expect(JSON.stringify(toProfileFile([off]))).toBe(
+      JSON.stringify({ formatVersion: 1, profiles: [plain] }),
+    );
+    const offCustom: Profile = { ...builtInShaped, effects: [{ ...custom, dj: false }] };
+    expect(JSON.stringify(toProfileFile([offCustom]))).toBe(
+      JSON.stringify({ formatVersion: 2, profiles: [{ ...builtInShaped, effects: [custom] }] }),
+    );
+  });
+
+  it("reads a version 3 file with flags and one without (AC3)", () => {
+    const parsed = profileFileSchema.parse({ formatVersion: 3, profiles: [flagged] });
+    expect(parsed.profiles[0]!.effects.map((e) => [e.dj, e.vj])).toEqual([
+      [true, undefined],
+      [undefined, true],
+      [false, true],
+    ]);
+    expect(
+      profileFileSchema.safeParse({ formatVersion: 3, profiles: [builtInShaped] }).success,
+    ).toBe(true);
+  });
+
+  it("refuses a version 1 or 2 file holding a flag key, as a stray key (AC3)", () => {
+    const key = (version: number, effect: Record<string, unknown>) => {
+      const result = profileFileSchema.safeParse({
+        formatVersion: version,
+        profiles: [
+          builtInShaped,
+          { ...builtInShaped, effects: [{ type: "smear", amount: 0 }, effect] },
+        ],
+      });
+      expect(result.success).toBe(false);
+      return result.success ? [] : result.error.issues;
+    };
+    for (const version of [1, 2]) {
+      for (const flag of ["dj", "vj"]) {
+        for (const value of [true, false]) {
+          expect(key(version, { type: "zoom", amount: 0, [flag]: value })).toEqual([
+            expect.objectContaining({
+              code: "unrecognized_keys",
+              keys: [flag],
+              path: ["profiles", 1, "effects", 1],
+            }),
+          ]);
+        }
+      }
+    }
+    // The same issue a stray key gets today.
+    const stray = profileFileSchema.safeParse({
+      formatVersion: 1,
+      profiles: [{ ...builtInShaped, effects: [{ type: "zoom", amount: 0, dj: true }] }],
+    });
+    const today = profileFileSchema.safeParse({
+      formatVersion: 1,
+      profiles: [{ ...builtInShaped, effects: [{ type: "zoom", amount: 0, xx: true }] }],
+    });
+    expect(stray.success || today.success).toBe(false);
+    if (!stray.success && !today.success) {
+      const [a] = issuesFrom(stray.error);
+      const [b] = issuesFrom(today.error);
+      expect(a!.path).toBe(b!.path);
+      expect(a!.message).toBe(b!.message.replace("xx", "dj"));
+    }
+  });
+
+  it("reads a version 1 or 2 file without flags unchanged (AC3)", () => {
+    for (const version of [1, 2]) {
+      const file = { formatVersion: version, profiles: [builtInShaped] };
+      expect(profileFileSchema.parse(file)).toEqual(file);
+    }
   });
 });
 

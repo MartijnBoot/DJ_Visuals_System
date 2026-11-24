@@ -674,7 +674,7 @@ test("delete then import the bundle: it returns with a new id; import again: 'Na
   expect(await names(page)).toEqual(["Built-in", "Alpha", "Alpha (2)"]);
 });
 
-test("a file with one broken field, a version 2 file and a text file each store nothing and say why (AC10)", async ({
+test("a file with one broken field, a version 4 file and a text file each store nothing and say why (AC10)", async ({
   page,
   request,
 }) => {
@@ -692,8 +692,8 @@ test("a file with one broken field, a version 2 file and a text file each store 
 
   await importFile(
     page,
-    "v3.json",
-    JSON.stringify({ ...JSON.parse(bundle.text), formatVersion: 3 }),
+    "v4.json",
+    JSON.stringify({ ...JSON.parse(bundle.text), formatVersion: 4 }),
   );
   await expect(message).toHaveText("unsupported file version");
 

@@ -28,7 +28,9 @@ to write. You write two files and run one script; the owner does the rest.
 ## 3. Write the profile: `profiles/$1.json`
 
 - The export format: `{ "formatVersion": 2, "profiles": [ { ... } ] }` with one profile: `name`,
-  `palette`, `dials` (`recognisability`, `reactivity`, 0 to 1), `effects`.
+  `palette`, `dials` (`recognisability`, `reactivity`, 0 to 1), `effects`. An effect may also
+  carry `"dj": true` (one effect at most) or `"vj": true` for a fader on `/control`; a file with
+  either is `"formatVersion": 3`. Leave both out unless the owner asks: they tick them in the builder.
 - Use the built-in effects where they say it already (palette map, smear, grain, mirror, …) and
   `custom` effects for what they cannot. Write every custom effect against
   [docs/custom-effects.md](../../docs/custom-effects.md): its names, its rules (no `#`, no

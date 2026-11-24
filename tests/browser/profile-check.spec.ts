@@ -80,10 +80,22 @@ test("code that does not compile exits 1 naming the effect and the line in its b
   );
 });
 
-test("a version-3 file and a text file each exit 1 with one line (AC10)", async () => {
-  const v3 = await check(write("v3.json", JSON.stringify({ formatVersion: 3, profiles: [] })));
-  expect(v3.code).toBe(1);
-  expect(v3.lines).toEqual(["unsupported file version"]);
+// B-18 SD3 (plan T1): the fader flags are version 3, which the check reads like import does.
+test("a version-3 file with the fader flags exits 0", async () => {
+  const profile = swirl("Flagged");
+  profile.effects[0] = { ...profile.effects[0]!, dj: true };
+  profile.effects[1] = { ...profile.effects[1]!, vj: true };
+  const text = JSON.stringify({ formatVersion: 3, profiles: [profile] });
+  const run = await check(write("flagged.json", text), "--out", join(dir, "stills"));
+  expect(run.stderr).toBe("");
+  expect(run.code).toBe(0);
+  expect(run.lines).toContain('profile "Flagged": compiles');
+});
+
+test("a version-4 file and a text file each exit 1 with one line (AC10)", async () => {
+  const v4 = await check(write("v4.json", JSON.stringify({ formatVersion: 4, profiles: [] })));
+  expect(v4.code).toBe(1);
+  expect(v4.lines).toEqual(["unsupported file version"]);
   const text = await check(write("notes.txt", "these are not profiles"));
   expect(text.code).toBe(1);
   expect(text.lines).toEqual(["not a JSON file"]);

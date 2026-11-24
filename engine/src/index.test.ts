@@ -352,6 +352,41 @@ describe("setProfile and the prepared swap (B-02 SD15, PD4)", () => {
     expect(uniform(frames()[1]!, "uZoom")).toBeCloseTo(1.12, 9);
   });
 
+  // B-18 AC11, SD5 (plan T1): a live strength on a fader-flagged effect is a values-only swap.
+  it("links nothing when a flagged effect's strength changes, built-in or custom", async () => {
+    const { engine, fake, calls } = started();
+    engine.setDials({ recognisability: 1, reactivity: 0 });
+    frameAt(0);
+    const flagged = (zoom: number, custom: number): Profile => ({
+      ...BUILT_IN_PROFILE,
+      name: "Flagged",
+      effects: [
+        { type: "zoom", amount: zoom, dj: true },
+        {
+          type: "custom",
+          label: "Tint",
+          amount: custom,
+          abstraction: false,
+          params: [],
+          code: "return source(uv);",
+          vj: true,
+        },
+      ],
+    });
+    const first = engine.setProfile(flagged(0, 0.25));
+    fake.completeLinks();
+    frameAt(16);
+    await first;
+    const linked = looksLinked(calls);
+    await engine.setProfile(flagged(1, 0.75));
+    frameAt(32);
+    expect(looksLinked(calls)).toBe(linked);
+    const last = frames().at(-1)!;
+    expect(uniform(last, "uZoom")).toBeCloseTo(1.12, 9);
+    expect(uniform(last, "uCustomStrength")).toEqual(expect.arrayContaining([0.75]));
+    expect(usedProgram(last)).toBe(usedProgram(frames()[1]!));
+  });
+
   it("rejects a failed link, logs it once and keeps drawing the old profile", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { engine, fake } = started(640, 360, { parallel: false });

@@ -53,7 +53,7 @@ describe("readImport (AC10)", () => {
   });
 
   it("says unsupported_version for another format version, before looking at the rest", () => {
-    expect(readImport(JSON.stringify({ formatVersion: 3, profiles: "nonsense" }))).toEqual({
+    expect(readImport(JSON.stringify({ formatVersion: 4, profiles: "nonsense" }))).toEqual({
       kind: "unsupported_version",
     });
     expect(readImport(JSON.stringify({ formatVersion: 0, profiles: [] }))).toEqual({
@@ -119,5 +119,44 @@ describe("readImport (AC10)", () => {
         { field: "formatVersion", message: "a file with a custom effect is formatVersion 2" },
       ],
     });
+  });
+
+  // B-18 SD3, AC2, AC3 (plan PD3).
+  it("exports the fader flags as version 3 and reads them back", () => {
+    const flagged = stored("Warm");
+    flagged.effects = [
+      { type: "zoom", amount: 0.5, dj: true },
+      { type: "flash", amount: 0, colourSlot: 2, vj: true, dj: false },
+    ];
+    const text = exportFile([flagged]);
+    const parsed = JSON.parse(text) as {
+      formatVersion: number;
+      profiles: { effects: unknown[] }[];
+    };
+    expect(parsed.formatVersion).toBe(3);
+    expect(parsed.profiles[0]!.effects).toEqual([
+      { type: "zoom", amount: 0.5, dj: true },
+      { type: "flash", amount: 0, colourSlot: 2, vj: true },
+    ]);
+    const result = readImport(text);
+    expect(result.kind).toBe("ok");
+    if (result.kind === "ok")
+      expect(result.file.profiles[0]!.effects).toEqual(parsed.profiles[0]!.effects);
+  });
+
+  it("refuses a version 1 or 2 file holding a flag key, naming the profile and effect", () => {
+    const file = JSON.parse(exportFile([stored("Warm")])) as {
+      formatVersion: number;
+      profiles: { effects: Record<string, unknown>[] }[];
+    };
+    file.profiles[0]!.effects[1]!.vj = false;
+    for (const formatVersion of [1, 2]) {
+      const result = readImport(JSON.stringify({ ...file, formatVersion }));
+      expect(result).toEqual({
+        kind: "invalid",
+        issues: [{ profile: "Warm", field: "effects.1", message: expect.stringMatching(/"vj"/) }],
+      });
+    }
+    expect(readImport(JSON.stringify({ ...file, formatVersion: 3 })).kind).toBe("ok");
   });
 });
