@@ -5,7 +5,7 @@ Status: Approved by Martijn Boot on 2026-11-19 (B-19 plan, H2) · Spec:
 Plan: [phase-b-19-controller-lighting-desk](../plans/phase-b-19-controller-lighting-desk.md) (T1) ·
 Mockups: [controller-style-mockups.html](controller-style-mockups.html)
 
-Amended by B-16 (SD6), approval at `/review` · Spec:
+Amended by B-16 (SD6), approved by Martijn Boot on 2026-11-24 at `/review` (H1) · Spec:
 [phase-b-16-colour-wheel-always-on](../specs/phase-b-16-colour-wheel-always-on.md) · Plan:
 [phase-b-16-colour-wheel-always-on](../plans/phase-b-16-colour-wheel-always-on.md) (T6): the
 colour wheel's dialog becomes the pinned colour block; no new token.

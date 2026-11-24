@@ -399,7 +399,8 @@ only in the page's memory (SD3, Out of scope: no remembering).
   - [x] Notes: 2026-11-24 — the device check passed on a phone and on an iPad, on the owner's
     attestation ("they look great"), against PR #16 at dc403be. Orientations and per-item
     observations not recorded.
-  - [ ] The brief and mockups approved against the built page (AC19): not yet recorded.
+  - [x] The brief and mockups approved (AC19): 2026-11-24, by the owner, the content of
+    `docs/design/controller-style.md` and `controller-style-mockups.html` at dc403be.
 - Pushing, the PR and the merge are the owner's.
 
 ## Out of scope for this plan
