@@ -15,6 +15,8 @@
 // lit "Keep colour" key — each sending a `transition` control and showing the screen's choice.
 // The colour block (B-16 SD1, SD2, SD3, PD10): pinned between the scrolling middle and the bank,
 // never a dialog; DJ mode aims it at the primary slot, VJ mode at the swatch last tapped.
+// Effect strength (B-18 SD1, SD8, SD10, SD11): the DJ-ticked effect's fader after the two dials in
+// the bank, in both modes; in VJ mode an Effects section under Transition with the VJ-ticked ones.
 import type { ScreenState, TransitionKind } from "@djv/shared";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
@@ -25,6 +27,7 @@ import { VjPanel } from "./VjPanel.tsx";
 import { Wheel } from "./Wheel.tsx";
 import { useArrangement } from "./arrangement.ts";
 import { createDeviceLink, LINK_GROUP, openSocket, type DeviceLink } from "./device-link.ts";
+import { effectFader, placeEffects, type EffectControl } from "./effect-faders.ts";
 import { createSendBudget } from "./send-budget.ts";
 import { keyStore, modeStore, type Mode } from "./remembered.ts";
 // The controller's look (B-19 PD2): a <style> inside this page's own root, never a linked file,
@@ -127,6 +130,7 @@ export function Controller() {
   const tap = (send: () => unknown) => budget.tap(() => send() !== null);
   /** One control's newest value (PD5's key): replaces that control's waiting value. */
   const value = (key: string, send: () => unknown) => budget.value(key, () => send() !== null);
+  const sendEffect = (control: EffectControl) => link.send(control);
 
   const choose = (next: Mode) => {
     setMode(next);
@@ -154,6 +158,8 @@ export function Controller() {
       ? target.slot
       : state.primary;
   const locked = view.locked;
+  /** B-18 SD8: the bank's effect fader and the Effects section's, for this mode. */
+  const placed = placeEffects(state?.effects ?? [], mode);
   const asking = !locked
     ? false
     : [
@@ -326,6 +332,16 @@ export function Controller() {
               </section>
             )}
 
+            {mode === "vj" && placed.section.length > 0 && (
+              <section aria-label="Effects" data-testid="effects" className="djv-section">
+                <h2 className="djv-legend">Effects</h2>
+                {placed.section.map((effect) => {
+                  const fader = effectFader(effect, state.activeId, value, sendEffect);
+                  return <Fader key={fader.testId} {...fader} disabled={locked} />;
+                })}
+              </section>
+            )}
+
             <section aria-label="Camera" className="djv-section">
               <h2 className="djv-legend">Camera</h2>
               {!state.started && (
@@ -417,13 +433,16 @@ export function Controller() {
         <FaderBank
           arrangement={arrangement}
           locked={locked}
-          faders={DIALS.map(([dial, label]) => ({
-            testId: `dial-${dial}`,
-            label,
-            value: state.dials[dial],
-            onSend: (x: number) =>
-              value(`dials:${dial}`, () => link.send({ type: "dials", [dial]: x })),
-          }))}
+          faders={[
+            ...DIALS.map(([dial, label]) => ({
+              testId: `dial-${dial}`,
+              label,
+              value: state.dials[dial],
+              onSend: (x: number) =>
+                value(`dials:${dial}`, () => link.send({ type: "dials", [dial]: x })),
+            })),
+            ...(placed.bank ? [effectFader(placed.bank, state.activeId, value, sendEffect)] : []),
+          ]}
         />
       )}
     </main>
