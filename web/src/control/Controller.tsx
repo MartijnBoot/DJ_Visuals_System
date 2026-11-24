@@ -13,6 +13,8 @@
 // values (B-19 SD8, SD11). Transitions (B-09 SD6, SD7, PD1, PD2): in VJ mode only, a Transition
 // section under Profiles — six type tiles, a duration fader in seconds outside the bank, and one
 // lit "Keep colour" key — each sending a `transition` control and showing the screen's choice.
+// The colour block (B-16 SD1, SD2, SD3, PD10): pinned between the scrolling middle and the bank,
+// never a dialog; DJ mode aims it at the primary slot, VJ mode at the swatch last tapped.
 import type { ScreenState, TransitionKind } from "@djv/shared";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
@@ -95,8 +97,8 @@ export function Controller() {
   const arrangement = useArrangement();
   const [code, setCode] = useState("");
   const [approvalsOpen, setApprovalsOpen] = useState(false);
-  /** The palette slot the wheel is open on, or null. */
-  const [wheel, setWheel] = useState<number | null>(null);
+  /** VJ mode's wheel target (B-16 SD3); null is the primary slot. */
+  const [target, setTarget] = useState<number | null>(null);
   const view = useSyncExternalStore(
     (fn) => link.subscribe(fn),
     () => link.view(),
@@ -129,6 +131,12 @@ export function Controller() {
   };
 
   const state: ScreenState | null = view.state;
+  /** The wheel's slot (B-16 SD3): DJ mode's is the primary, VJ mode's the target or the primary. */
+  const slot = !state
+    ? null
+    : mode === "vj" && target !== null && target < state.palette.length
+      ? target
+      : state.primary;
   const locked = view.locked;
   const asking = !locked
     ? false
@@ -352,27 +360,6 @@ export function Controller() {
               </section>
             )}
 
-            <section aria-label="Colour" className="djv-section">
-              <div className="djv-row">
-                <button
-                  type="button"
-                  data-testid="primary-colour"
-                  disabled={locked}
-                  className="djv-key djv-colour-key"
-                  onClick={() => setWheel(state.primary)}
-                >
-                  <span
-                    aria-hidden
-                    data-testid="primary-swatch"
-                    data-colour={state.palette[state.primary]}
-                    className="djv-chip"
-                    style={{ background: state.palette[state.primary] }}
-                  />
-                  Primary colour
-                </button>
-              </div>
-            </section>
-
             {mode === "vj" && (
               <VjPanel
                 state={state}
@@ -380,31 +367,29 @@ export function Controller() {
                 locked={locked}
                 pending={view.pending}
                 roundTrip={roundTrip}
-                onSwatch={setWheel}
+                onSwatch={setTarget}
                 onAccept={(deviceId) => tap(() => link.send({ type: "accept", deviceId }))}
                 onReject={(deviceId) => tap(() => link.send({ type: "reject", deviceId }))}
-              />
-            )}
-
-            {wheel !== null && wheel < state.palette.length && (
-              <Wheel
-                key={wheel}
-                slot={wheel}
-                current={state.palette[wheel]!}
-                stored={state.storedPalette[wheel] ?? state.palette[wheel]!}
-                disabled={locked}
-                onColour={(hex) =>
-                  value(`colour:${wheel}`, () =>
-                    link.send({ type: "colour", slot: wheel, value: hex }),
-                  )
-                }
-                onReset={() => tap(() => link.send({ type: "resetColour", slot: wheel }))}
-                onDone={() => setWheel(null)}
               />
             )}
           </>
         )}
       </div>
+
+      {state && slot !== null && (
+        <Wheel
+          key={slot}
+          slot={slot}
+          primary={slot === state.primary}
+          current={state.palette[slot]!}
+          stored={state.storedPalette[slot] ?? state.palette[slot]!}
+          disabled={locked}
+          onColour={(hex) =>
+            value(`colour:${slot}`, () => link.send({ type: "colour", slot, value: hex }))
+          }
+          onReset={() => tap(() => link.send({ type: "resetColour", slot }))}
+        />
+      )}
 
       {state && (
         <FaderBank

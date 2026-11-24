@@ -292,7 +292,7 @@ async function tabThrough(phone: Page, max: number): Promise<Ring[]> {
   return seen;
 }
 
-test("every control shows a focus ring 3:1 against its surroundings, the wheel's too (AC21)", async ({
+test("every control shows a focus ring 3:1 against its surroundings, the colour block's too (AC21, B-16 AC17)", async ({
   page,
   browser,
 }) => {
@@ -305,8 +305,10 @@ test("every control shows a focus ring 3:1 against its surroundings, the wheel's
       "refresh",
       "camera-tile",
       "main-audio-remote",
-      "primary-colour",
       "swatch",
+      "wheel-disc",
+      "wheel-brightness",
+      "wheel-reset",
       "dial-recognisability",
       "dial-reactivity",
     ]),
@@ -316,20 +318,9 @@ test("every control shows a focus ring 3:1 against its surroundings, the wheel's
     expect(ring.width, ring.what).toBeGreaterThanOrEqual(2);
     expect(contrast(ring.colour, ring.background), ring.what).toBeGreaterThanOrEqual(3);
   }
-
-  await phone.locator('[data-testid=swatch][data-slot="0"]').click();
-  await expect(phone.getByTestId("wheel")).toBeVisible();
-  const inWheel = await tabThrough(phone, 12);
-  expect(inWheel.map((s) => s.what)).toEqual(
-    expect.arrayContaining(["wheel-disc", "wheel-brightness", "wheel-reset", "wheel-done"]),
-  );
-  for (const ring of inWheel) {
-    expect(ring.style, ring.what).toBe("solid");
-    expect(contrast(ring.colour, ring.background), ring.what).toBeGreaterThanOrEqual(3);
-  }
 });
 
-test("the wheel works by keyboard alone: disc, brightness, Reset and Done as before (AC11)", async ({
+test("the wheel works by keyboard alone: disc, brightness and Reset (AC11, B-16 AC17)", async ({
   page,
   browser,
 }) => {
@@ -360,7 +351,4 @@ test("the wheel works by keyboard alone: disc, brightness, Reset and Done as bef
   await phone.keyboard.press("Enter");
   await expect(current).toHaveAttribute("data-colour", stored);
   await expect(swatch).toHaveAttribute("data-colour", stored);
-  await focusOn("wheel-done");
-  await phone.keyboard.press("Enter");
-  await expect(phone.getByTestId("wheel")).toHaveCount(0);
 });

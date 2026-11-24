@@ -188,13 +188,10 @@ test("a paired /control through pairing, a tile, both faders, the wheel and a tu
   await expect(tile).toHaveAttribute("aria-pressed", "true");
   await setFader(phone.getByTestId("dial-recognisability"), 0.6);
   await setFader(phone.getByTestId("dial-reactivity"), 0.4);
-  await phone.getByTestId("primary-colour").click();
   await phone.getByTestId("wheel-disc").focus();
   await phone.keyboard.press("ArrowUp");
   await phone.getByTestId("wheel-brightness").focus();
   await phone.keyboard.press("PageDown");
-  await phone.getByTestId("wheel-done").click();
-  await expect(phone.getByTestId("wheel")).toHaveCount(0);
   await phone.setViewportSize({ width: 568, height: 320 });
   await expect(phone.getByTestId("dial-recognisability")).toHaveAttribute(
     "aria-orientation",

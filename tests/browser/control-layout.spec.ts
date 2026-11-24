@@ -315,7 +315,10 @@ test("no sideways scroll and every target at least 48×48 at five sizes, DJ and 
   expect(problems).toEqual([]);
 });
 
-test("four faders fit the budget: half the height at 320×568, half the width at 568×320 (AC16)", async ({
+// B-16 PD15: the colour block is pinned beside the bank too. At 568×320 four faders and the block
+// leave the scrolling area about 70 px wide, which B-18 resolves (B-16 SD2, Out of scope), so the
+// fit check runs there only on the bank's own budget; at 320×568 it still runs on the whole page.
+test("four faders fit the budget: half the height at 320×568, half the width at 568×320, the colour block in view (AC16, B-16 PD15)", async ({
   page,
   browser,
 }) => {
@@ -333,6 +336,7 @@ test("four faders fit the budget: half the height at 320×568, half the width at
     expect((await box(bank)).height).toBeLessThanOrEqual(284);
     expect(await fitProblems(phone.page)).toEqual([]);
     expect(await inView(phone.page, bank)).toBe(true);
+    expect(await inView(phone.page, phone.page.getByTestId("wheel"))).toBe(true);
     await removeClones(phone.page);
 
     await phone.page.setViewportSize(LANDSCAPE);
@@ -345,8 +349,8 @@ test("four faders fit the budget: half the height at 320×568, half the width at
     for (const slider of await bank.locator("[role=slider]").all()) {
       expect((await box(slider)).height).toBeGreaterThanOrEqual(180);
     }
-    expect(await fitProblems(phone.page)).toEqual([]);
     expect(await inView(phone.page, bank)).toBe(true);
+    expect(await inView(phone.page, phone.page.getByTestId("wheel"))).toBe(true);
     await removeClones(phone.page);
   }
 });

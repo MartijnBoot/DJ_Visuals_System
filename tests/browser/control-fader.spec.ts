@@ -265,7 +265,6 @@ test("the wheel's brightness is a fader, by keys and by a drag (AC11)", async ({
   browser,
 }) => {
   const phone = await paired(page, browser, await screen(page));
-  await phone.page.getByTestId("primary-colour").click();
   const current = phone.page.getByTestId("wheel-current");
   await expect(current).toHaveAttribute("data-colour", "#ffffff");
   const brightness = phone.page.getByTestId("wheel-brightness");

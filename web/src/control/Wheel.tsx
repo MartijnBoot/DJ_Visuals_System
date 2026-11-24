@@ -1,7 +1,8 @@
-// The colour wheel (B-04 spec SD11, AC20, AC21, AC23, UI "Colour wheel"): a modal over the
-// controller with a hue and saturation disc drawn by hand on a canvas, a brightness fader (the
-// controller's own fader, horizontal: B-19 AC11), the current and the stored colour side by side,
-// Reset and Done. Touch-drag first, with pointer
+// The colour block (B-04 spec SD11, AC20, AC21; B-16 SD1, SD2, SD5, SD10, PD8, PD13): a section
+// pinned in the controller's grid, never a dialog, with a hue and saturation disc drawn by hand on
+// a canvas, the brightness fader standing vertically beside it at the disc's height (the
+// controller's own fader, B-19 AC11, B-16 PD9), the label naming the slot, the current colour with
+// its hex value, the stored colour and Reset. Touch-drag first, with pointer
 // capture; arrow keys move hue (left, right) and saturation (up, down) for a laptop without a
 // mouse. While dragging, at most one change per animation frame and always the last position
 // (`wheel-math.ts`). It edits the active profile's palette in memory only; nothing is saved.
@@ -18,6 +19,8 @@ import {
 
 export interface WheelProps {
   slot: number;
+  /** Whether `slot` is the profile's primary slot: the label says so (B-16 SD3, AC9, AC10). */
+  primary: boolean;
   /** The colour on screen now (the live palette). */
   current: string;
   /** The profile's stored colour for the slot. */
@@ -25,7 +28,6 @@ export interface WheelProps {
   disabled: boolean;
   onColour(value: string): void;
   onReset(): void;
-  onDone(): void;
 }
 
 const SIZE = 240;
@@ -56,7 +58,6 @@ function drawDisc(canvas: HTMLCanvasElement, v: number) {
 }
 
 export function Wheel(props: WheelProps) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const disc = useRef<HTMLCanvasElement>(null);
   const [hsv, setHsv] = useState<Hsv>(() => hexToHsv(props.current));
   const send = useRef(props.onColour);
@@ -72,9 +73,6 @@ export function Wheel(props: WheelProps) {
     [],
   );
 
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
   useEffect(() => {
     if (disc.current) drawDisc(disc.current, hsv.v);
   }, [hsv.v]);
@@ -100,113 +98,103 @@ export function Wheel(props: WheelProps) {
   const value = hsvToHex(hsv);
 
   return (
-    <dialog
-      ref={dialog}
+    <section
       data-testid="wheel"
       data-slot={props.slot}
       aria-label={`Colour ${props.slot + 1}`}
-      className="djv-dialog"
-      onClose={props.onDone}
+      className="djv-colour"
     >
-      <div className="djv-wheel">
-        <div className="djv-disc">
-          <canvas
-            ref={disc}
-            data-testid="wheel-disc"
-            width={SIZE}
-            height={SIZE}
-            tabIndex={0}
-            role="application"
-            aria-label="Hue and saturation: arrow keys move hue left and right, saturation up and down"
-            className="djv-disc-canvas"
-            onPointerDown={(e) => {
-              if (props.disabled) return;
-              e.currentTarget.setPointerCapture(e.pointerId);
-              fromPointer(e);
-            }}
-            onPointerMove={(e) => {
-              if (!props.disabled && e.currentTarget.hasPointerCapture(e.pointerId)) fromPointer(e);
-            }}
-            onPointerUp={() => throttle.release()}
-            onPointerCancel={() => throttle.release()}
-            onKeyDown={(e) => {
-              if (props.disabled) return;
-              const moves: Record<string, Partial<Hsv>> = {
-                ArrowLeft: { h: (hsv.h - HUE_STEP + 360) % 360 },
-                ArrowRight: { h: (hsv.h + HUE_STEP) % 360 },
-                ArrowUp: { s: Math.min(1, hsv.s + SAT_STEP) },
-                ArrowDown: { s: Math.max(0, hsv.s - SAT_STEP) },
-              };
-              const move = moves[e.key];
-              if (!move) return;
-              e.preventDefault();
-              change({ ...hsv, ...move }, true);
-            }}
-          />
-          <span
-            aria-hidden
-            className="djv-marker"
-            style={{
-              left: `${50 + (marker.x / SIZE) * 100}%`,
-              top: `${50 + (marker.y / SIZE) * 100}%`,
-            }}
-          />
-        </div>
-        <div className="djv-wheel-fader">
-          <Fader
-            testId="wheel-brightness"
-            label="Brightness"
-            value={hsv.v}
-            disabled={props.disabled}
-            onSend={(v) => change({ ...hsv, v }, true)}
-          />
-        </div>
-        <div className="djv-row">
-          <span className="djv-pair">
-            <span
-              data-testid="wheel-current"
-              data-colour={props.current}
-              className="djv-pair-swatch"
-              style={{ background: props.current }}
-            />
-            on screen
-          </span>
-          <span className="djv-pair">
-            <span
-              data-testid="wheel-stored"
-              data-colour={props.stored}
-              className="djv-pair-swatch"
-              style={{ background: props.stored }}
-            />
-            stored
-          </span>
-          <span data-testid="wheel-value" className="djv-note">
-            {value}
-          </span>
-        </div>
-        <div className="djv-row">
-          <button
-            type="button"
-            data-testid="wheel-reset"
-            disabled={props.disabled}
-            className="djv-key"
-            onClick={() => {
-              setHsv(hexToHsv(props.stored));
-              props.onReset();
-            }}
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            data-testid="wheel-done"
-            className="djv-key is-lit"
-            onClick={() => dialog.current?.close()}
-          >
-            Done
-          </button>
-        </div>
+      <h2 data-testid="wheel-label" className="djv-legend djv-colour-label">
+        {`Colour ${props.slot + 1}${props.primary ? " · primary" : ""}`}
+      </h2>
+      <div className="djv-disc">
+        <canvas
+          ref={disc}
+          data-testid="wheel-disc"
+          width={SIZE}
+          height={SIZE}
+          tabIndex={0}
+          role="application"
+          aria-label="Hue and saturation: arrow keys move hue left and right, saturation up and down"
+          className="djv-disc-canvas"
+          onPointerDown={(e) => {
+            if (props.disabled) return;
+            e.currentTarget.setPointerCapture(e.pointerId);
+            fromPointer(e);
+          }}
+          onPointerMove={(e) => {
+            if (!props.disabled && e.currentTarget.hasPointerCapture(e.pointerId)) fromPointer(e);
+          }}
+          onPointerUp={() => throttle.release()}
+          onPointerCancel={() => throttle.release()}
+          onKeyDown={(e) => {
+            if (props.disabled) return;
+            const moves: Record<string, Partial<Hsv>> = {
+              ArrowLeft: { h: (hsv.h - HUE_STEP + 360) % 360 },
+              ArrowRight: { h: (hsv.h + HUE_STEP) % 360 },
+              ArrowUp: { s: Math.min(1, hsv.s + SAT_STEP) },
+              ArrowDown: { s: Math.max(0, hsv.s - SAT_STEP) },
+            };
+            const move = moves[e.key];
+            if (!move) return;
+            e.preventDefault();
+            change({ ...hsv, ...move }, true);
+          }}
+        />
+        <span
+          aria-hidden
+          className="djv-marker"
+          style={{
+            left: `${50 + (marker.x / SIZE) * 100}%`,
+            top: `${50 + (marker.y / SIZE) * 100}%`,
+          }}
+        />
       </div>
-    </dialog>
+      <div className="djv-colour-fader">
+        <Fader
+          testId="wheel-brightness"
+          label="Brightness"
+          value={hsv.v}
+          disabled={props.disabled}
+          orientation="vertical"
+          onSend={(v) => change({ ...hsv, v }, true)}
+        />
+      </div>
+      <div className="djv-colour-info">
+        <span className="djv-pair djv-pair-current">
+          <span
+            data-testid="wheel-current"
+            data-colour={props.current}
+            role="img"
+            aria-label="on screen"
+            className="djv-pair-swatch"
+            style={{ background: props.current }}
+          />
+          <span data-testid="wheel-value">{value}</span>
+        </span>
+        <span className="djv-pair djv-pair-stored">
+          <span
+            data-testid="wheel-stored"
+            data-colour={props.stored}
+            aria-hidden
+            className="djv-pair-swatch"
+            style={{ background: props.stored }}
+          />
+          stored
+        </span>
+        <button
+          type="button"
+          data-testid="wheel-reset"
+          disabled={props.disabled}
+          className="djv-key djv-colour-reset"
+          onClick={() => {
+            setHsv(hexToHsv(props.stored));
+            props.onReset();
+          }}
+        >
+          Reset
+        </button>
+      </div>
+    </section>
   );
 }

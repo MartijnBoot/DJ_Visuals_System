@@ -20,7 +20,7 @@ export interface FaderProps {
   format?: (value: number) => string;
   /** B-09 PD16: the least time between two sends while dragging; absent, B-19's 20 ms. */
   gapMs?: number;
-  /** The axis; the stylesheet lays it out from the page's arrangement (PD3). */
+  /** The axis; `is-vertical` on the root lays it out (PD3; B-16 PD9: outside the bank too). */
   orientation?: "horizontal" | "vertical";
 }
 
@@ -67,7 +67,10 @@ export function Fader(props: FaderProps) {
   const number = props.format ? props.format(shown) : String(readout(shown));
 
   return (
-    <div className="djv-fader" style={{ "--level": level } as CSSProperties}>
+    <div
+      className={vertical ? "djv-fader is-vertical" : "djv-fader"}
+      style={{ "--level": level } as CSSProperties}
+    >
       <div
         role="slider"
         tabIndex={0}
