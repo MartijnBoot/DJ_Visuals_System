@@ -19,17 +19,16 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 | # | ID | Feature | Size | Status |
 |---|---|---|---|---|
 | 1 | B-17 | Echo as a built-in effect | S | idea |
-| 2 | B-18 | Effect strength sliders on the controller | M | idea |
-| 3 | B-14 | Image assets in profiles | M | idea |
-| 4 | B-07 | Scenes | M | idea |
-| 5 | B-10 | Global colour layer | S | idea |
-| 6 | B-11 | "No camera" as a feed option | S | idea |
-| 7 | B-13 | Selling it | L | idea |
-| 8 | B-15 | iPad as an audio source | L | idea |
-| 9 | B-20 | Profile authoring kit for outside designers | M | idea |
-| 10 | B-21 | Profile preview without the app | L | idea |
-| 11 | B-24 | The builder in the controller's look | M | idea |
-| 12 | B-25 | The panel, `/send` and `/trust` in the same look | M | idea |
+| 2 | B-14 | Image assets in profiles | M | idea |
+| 3 | B-07 | Scenes | M | idea |
+| 4 | B-10 | Global colour layer | S | idea |
+| 5 | B-11 | "No camera" as a feed option | S | idea |
+| 6 | B-13 | Selling it | L | idea |
+| 7 | B-15 | iPad as an audio source | L | idea |
+| 8 | B-20 | Profile authoring kit for outside designers | M | idea |
+| 9 | B-21 | Profile preview without the app | L | idea |
+| 10 | B-24 | The builder in the controller's look | M | idea |
+| 11 | B-25 | The panel, `/send` and `/trust` in the same look | M | idea |
 
 ## Items
 
@@ -629,7 +628,7 @@ B-02 effect table. A guess: no server change.
 
 ### B-18 — Effect strength sliders on the controller
 
-- **Status:** idea
+- **Status:** specced → `docs/specs/phase-b-18-effect-strength-faders.md`
 - **Added:** 2026-11-19
 - **Size:** M
 
