@@ -25,6 +25,7 @@ import {
   sentFrames,
   type SentFrame,
 } from "./sockets.ts";
+import { discKeys } from "./wheel.ts";
 
 const PORTRAIT = { width: 320, height: 568 };
 const LANDSCAPE = { width: 568, height: 320 };
@@ -289,9 +290,7 @@ test("768×1024, VJ: a 240 px disc, swatch 3 recolours slot 3, a re-pick goes ba
 
   // A second controller changes the primary colour: the first one's marker follows.
   await expect(other.getByTestId("wheel")).toHaveAttribute("data-slot", "0");
-  await other.getByTestId("wheel-disc").focus();
-  for (let i = 0; i < 6; i++) await other.keyboard.press("ArrowUp");
-  const fromOther = (await other.getByTestId("wheel-value").textContent())!;
+  const fromOther = await discKeys(other, "ArrowUp", 6);
   expect(fromOther).not.toBe("#808080");
   await expect(vj.getByTestId("wheel-value")).toHaveText(fromOther);
 
