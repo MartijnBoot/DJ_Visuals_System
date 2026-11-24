@@ -15,6 +15,7 @@ import {
 import { LAN_CONTEXT, startControlServer, type ControlServer } from "./control-server.ts";
 import { createProfile, flat, type Stored } from "./fixtures/profiles.ts";
 import { dropNetwork, keepSockets } from "./sockets.ts";
+import { discKeys } from "./wheel.ts";
 
 const PHONE = { width: 320, height: 568 };
 const LANDSCAPE = { width: 568, height: 320 };
@@ -128,8 +129,8 @@ async function expectOnScreenValue(phone: Page) {
     .toBe("same");
 }
 
-/** Presses `key` on the disc `n` times. */
-async function discKeys(phone: Page, key: string, n: number) {
+/** Presses `key` on the disc `n` times at once, waiting for nothing: for a locked disc. */
+async function pressDisc(phone: Page, key: string, n: number) {
   await phone.getByTestId("wheel-disc").focus();
   for (let i = 0; i < n; i++) await phone.keyboard.press(key);
 }
@@ -165,9 +166,8 @@ test("another controller's change, its Reset and a pick each show on the wheel t
   await expect(value(a)).toHaveText("#808080");
 
   // B changes the primary colour by keys; A follows.
-  await discKeys(b, "ArrowUp", 6);
-  await expect(value(b)).not.toHaveText("#808080");
-  const changed = (await value(b).textContent())!;
+  const changed = await discKeys(b, "ArrowUp", 6);
+  expect(changed).not.toBe("#808080");
   await expect(onScreen(a)).toHaveAttribute("data-colour", changed);
   await expect(value(a)).toHaveText(changed);
 
@@ -195,9 +195,8 @@ test("with Keep colour on, a pick shows the carried colour (AC12, B-09 SD4)", as
   const b = await paired(page, browser, url);
   await tileOf(b, grey).click();
   await expect(value(a)).toHaveText("#808080");
-  await discKeys(b, "ArrowUp", 6);
-  await expect(value(b)).not.toHaveText("#808080");
-  const carried = (await value(b).textContent())!;
+  const carried = await discKeys(b, "ArrowUp", 6);
+  expect(carried).not.toBe("#808080");
   await expect(value(a)).toHaveText(carried);
 
   await b.getByTestId("mode-vj").click();
@@ -226,8 +225,7 @@ test("while A holds the disc, B's change does not move A's marker; after the rel
   const heldValue = (await value(a).textContent())!;
   await expect(onScreen(b)).toHaveAttribute("data-colour", heldValue);
 
-  await discKeys(b, "ArrowLeft", 24); // another hue, 120° away
-  const fromB = (await value(b).textContent())!;
+  const fromB = await discKeys(b, "ArrowLeft", 24); // another hue, 120° away
   expect(fromB).not.toBe(heldValue);
   await expect(onScreen(a)).toHaveAttribute("data-colour", fromB);
   await a.waitForTimeout(200);
@@ -268,7 +266,7 @@ test("offline the block is locked: keys, a drag, brightness and Reset send nothi
   await a.mouse.up();
 
   // Every input while locked.
-  await discKeys(a, "ArrowRight", 3);
+  await pressDisc(a, "ArrowRight", 3);
   await a.mouse.move(cx, cy);
   await a.mouse.down();
   await a.mouse.move(cx, cy - r, { steps: 4 });
@@ -305,8 +303,7 @@ test("a pointer cancel mid-drag lets go: nothing after it, the screen's value ba
   const held = (await value(a).textContent())!;
   await expect(onScreen(b)).toHaveAttribute("data-colour", held);
   // While A's finger still holds the disc, B moves the slot elsewhere.
-  await discKeys(b, "ArrowLeft", 24);
-  const fromB = (await value(b).textContent())!;
+  const fromB = await discKeys(b, "ArrowLeft", 24);
   expect(fromB).not.toBe(held);
   await expect(onScreen(a)).toHaveAttribute("data-colour", fromB);
   await expect(value(a)).toHaveText(held);

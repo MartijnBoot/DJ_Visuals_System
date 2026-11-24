@@ -18,6 +18,7 @@ import { createProfile, flat } from "./fixtures/profiles.ts";
 import { start } from "./helpers.ts";
 import { remote, type Remote } from "./remote-fixtures.ts";
 import { dropNetwork, keepSockets } from "./sockets.ts";
+import { discKeys } from "./wheel.ts";
 
 const PHONE = { width: 320, height: 568 };
 
@@ -339,10 +340,11 @@ test("the wheel works by keyboard alone: disc, brightness and Reset (AC11, B-16 
     await expect(phone.getByTestId(id)).toBeFocused();
   };
   await focusOn("wheel-disc");
-  for (let i = 0; i < 6; i++) await phone.keyboard.press("ArrowUp"); // more saturation
-  await phone.keyboard.press("ArrowRight"); // another hue
-  await expect(current).not.toHaveAttribute("data-colour", stored);
-  const disc = (await current.getAttribute("data-colour"))!;
+  // One settled press at a time (wheel.ts): a burst could read back an earlier key's echo.
+  await discKeys(phone, "ArrowUp", 6); // more saturation
+  const disc = await discKeys(phone, "ArrowRight", 1); // another hue
+  expect(disc).not.toBe(stored);
+  await expect(current).toHaveAttribute("data-colour", disc);
   await focusOn("wheel-brightness");
   await phone.keyboard.press("PageDown");
   await expect(current).not.toHaveAttribute("data-colour", disc);
