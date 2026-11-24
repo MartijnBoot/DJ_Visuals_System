@@ -487,6 +487,22 @@
 .djv-control .djv-swatch.is-primary {
   border: 4px solid var(--select);
 }
+/* The wheel's target (B-16 SD3, PD2, AC18): a bar of --text under the swatch, on the panel, so it
+   is 3:1 whatever the swatch's colour, and apart from the primary's edge and the focus ring. */
+.djv-control .djv-swatch {
+  position: relative;
+}
+.djv-control .djv-swatch.is-target::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -10px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--text);
+  pointer-events: none;
+}
 .djv-control .djv-swatch:disabled {
   border-style: dashed;
   cursor: default;

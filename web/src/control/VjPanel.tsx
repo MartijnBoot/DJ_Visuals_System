@@ -1,5 +1,6 @@
 // VJ mode's additions (B-04 spec SD9, SD17, SD18, AC8, AC23, AC43, UI "/control, VJ mode"): every
-// palette swatch (each opens the wheel on its own slot), the status strip — camera, audio, Start,
+// palette swatch (each aims the pinned wheel at its slot, B-16 SD3; the wheel's slot is pressed and
+// carries the target mark, a bar under it, apart from the primary's edge, B-16 PD2), the status strip — camera, audio, Start,
 // link, and the round trip from sending a change to the screen's acknowledgement of the frame that
 // applied it, last and p95 over 10 s — and pending requests inline with Accept and Reject.
 import type { DeviceEntry, ScreenState } from "@djv/shared";
@@ -13,6 +14,8 @@ export interface VjPanelProps {
   locked: boolean;
   pending: readonly DeviceEntry[];
   roundTrip(): RoundTripReading;
+  /** The slot the pinned wheel aims at (B-16 PD2): exactly one swatch is marked. */
+  target: number;
   onSwatch(slot: number): void;
   onAccept(deviceId: string): void;
   onReject(deviceId: string): void;
@@ -43,8 +46,15 @@ export function VjPanel(props: VjPanelProps) {
               data-slot={slot}
               data-colour={colour}
               aria-label={`Colour ${slot + 1}${slot === state.primary ? ", primary" : ""}`}
+              aria-pressed={slot === props.target}
               disabled={props.locked}
-              className={slot === state.primary ? "djv-swatch is-primary" : "djv-swatch"}
+              className={[
+                "djv-swatch",
+                slot === state.primary && "is-primary",
+                slot === props.target && "is-target",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               style={{ background: colour }}
               onClick={() => props.onSwatch(slot)}
             />

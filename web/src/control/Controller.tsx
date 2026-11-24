@@ -97,8 +97,11 @@ export function Controller() {
   const arrangement = useArrangement();
   const [code, setCode] = useState("");
   const [approvalsOpen, setApprovalsOpen] = useState(false);
-  /** VJ mode's wheel target (B-16 SD3); null is the primary slot. */
-  const [target, setTarget] = useState<number | null>(null);
+  /**
+   * VJ mode's wheel target (B-16 SD3), with the profile it was tapped on; null is the primary slot.
+   * Page memory only: a reload starts at null.
+   */
+  const [target, setTarget] = useState<{ slot: number; profile: string | null } | null>(null);
   const view = useSyncExternalStore(
     (fn) => link.subscribe(fn),
     () => link.view(),
@@ -128,14 +131,27 @@ export function Controller() {
   const choose = (next: Mode) => {
     setMode(next);
     modes.save(next);
+    if (next === "dj") setTarget(null); // SD3: DJ mode always aims at the primary slot
   };
 
   const state: ScreenState | null = view.state;
+  const activeId = state?.activeId ?? null;
+  const paletteSize = state?.palette.length ?? 0;
+  // SD3, PD1: a new active profile, whoever picked it, sends the wheel back to the primary slot.
+  useEffect(() => setTarget(null), [activeId]);
+  // PD14: so does a palette without the target's slot, for good: a palette that grows again later
+  // does not bring the old target back.
+  useEffect(() => {
+    if (target && target.slot >= paletteSize) setTarget(null);
+  }, [target, paletteSize]);
   /** The wheel's slot (B-16 SD3): DJ mode's is the primary, VJ mode's the target or the primary. */
   const slot = !state
     ? null
-    : mode === "vj" && target !== null && target < state.palette.length
-      ? target
+    : mode === "vj" &&
+        target !== null &&
+        target.profile === activeId &&
+        target.slot < state.palette.length
+      ? target.slot
       : state.primary;
   const locked = view.locked;
   const asking = !locked
@@ -246,7 +262,11 @@ export function Controller() {
                     aria-pressed={p.id === state.activeId}
                     disabled={locked}
                     className="djv-key djv-tile"
-                    onClick={() => tap(() => link.send({ type: "pick", id: p.id }))}
+                    onClick={() => {
+                      // SD3, PD1: any pick, the active profile included, aims at the primary.
+                      setTarget(null);
+                      tap(() => link.send({ type: "pick", id: p.id }));
+                    }}
                   >
                     {p.name}
                   </button>
@@ -367,7 +387,8 @@ export function Controller() {
                 locked={locked}
                 pending={view.pending}
                 roundTrip={roundTrip}
-                onSwatch={setTarget}
+                target={slot ?? state.primary}
+                onSwatch={(tapped) => setTarget({ slot: tapped, profile: activeId })}
                 onAccept={(deviceId) => tap(() => link.send({ type: "accept", deviceId }))}
                 onReject={(deviceId) => tap(() => link.send({ type: "reject", deviceId }))}
               />
