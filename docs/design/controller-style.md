@@ -5,6 +5,11 @@ Status: Approved by Martijn Boot on 2026-11-19 (B-19 plan, H2) · Spec:
 Plan: [phase-b-19-controller-lighting-desk](../plans/phase-b-19-controller-lighting-desk.md) (T1) ·
 Mockups: [controller-style-mockups.html](controller-style-mockups.html)
 
+Amended by B-16 (SD6), approval at `/review` · Spec:
+[phase-b-16-colour-wheel-always-on](../specs/phase-b-16-colour-wheel-always-on.md) · Plan:
+[phase-b-16-colour-wheel-always-on](../plans/phase-b-16-colour-wheel-always-on.md) (T6): the
+colour wheel's dialog becomes the pinned colour block; no new token.
+
 The look of `/control`, and only `/control` (SD8). Every later B-19 task builds against this
 file: the tokens below become custom properties on `.djv-control` in
 `web/src/control/controller.css` under the same names, and `tests/meta/control-look.test.ts`
@@ -33,11 +38,11 @@ One dark theme; `prefers-color-scheme` is ignored (SD11).
 | Token | Value | Use |
 |---|---|---|
 | `--bg` | `#0b0c0e` | The page: the scrolling area behind the sections; the code field; the waiting badge |
-| `--panel` | `#15181c` | A section's surface, the fader bank, dialogs |
+| `--panel` | `#15181c` | A section's surface, the fader bank, the colour block, dialogs |
 | `--line-soft` | `#2e343c` | A section's frame (decoration; no contrast needed) |
-| `--line` | `#69727e` | Every control's edge: keys, tiles, the code field, fader tracks, the bank's edge |
+| `--line` | `#69727e` | Every control's edge: keys, tiles, the code field, fader tracks, the bank's and the colour block's edge, the disc's edge |
 | `--key` | `#23272e` | A key or tile at rest |
-| `--text` | `#eef1f4` | Text; the 3 px edge of a lit key |
+| `--text` | `#eef1f4` | Text; the 3 px edge of a lit key; the wheel's target mark under a swatch |
 | `--text-muted` | `#a3acb7` | Section legends, fader labels, notes, the VJ status strip |
 | `--text-disabled` | `#6b737e` | A disabled key's text (inactive controls are exempt from 4.5:1) |
 | `--select` | `#3db8f5` | The lit key (the active choice), the fader's level fill, the primary swatch's mark |
@@ -49,7 +54,7 @@ One dark theme; `prefers-color-scheme` is ignored (SD11).
 | `--stop` | `#c62828` | Status bar, stop group (red family) |
 | `--on-stop` | `#ffffff` | Status bar text, stop group |
 | `--track` | `#191c21` | A fader's track |
-| `--hatch` | `#262b32` | The second stripe of a locked track's hatching |
+| `--hatch` | `#262b32` | The second stripe of a locked track's hatching; the stripes over a locked disc |
 | `--fill` | `#3db8f5` | The level fill in the groove (the select colour) |
 | `--cap` | `#e6e9ed` | The fader cap |
 | `--cap-line` | `#0b0c0e` | The cap's index line and its 2 px outline |
@@ -101,29 +106,59 @@ One dark theme; `prefers-color-scheme` is ignored (SD11).
   `--fs-legend` `--text-muted`, like a label printed on the panel: PROFILE, CAMERA, MAIN AUDIO,
   PALETTE, WAITING FOR APPROVAL, and TRANSITION in VJ mode (B-09, approved by the owner at its
   plan's audit, 2026-11-23). No other heading is added or removed. The mode toggle (DJ, VJ) is a row
-  of two keys above the sections; the Primary colour key and VJ's status strip sit in sections
-  without a legend, as today.
+  of two keys above the sections; VJ's status strip sits in a section without a legend, as today.
+  The colour block is not in the scrolling area: it is pinned (below).
 - **Keys and tiles.** At rest: `--key`, 1px `--line` edge, `--text`, weight 600, at least
   `--target` both ways. Tiles keep today's grid (`minmax(120px, 1fr)`) and wrap a long name.
   Disabled: `--text-disabled` text and a dashed edge.
 - **Lit key — the active mark** (active profile tile, active camera tile, active mode, active main
-  audio choice, Done). `--select` background, `--on-select` text, weight 800 and a **3px
+  audio choice). `--select` background, `--on-select` text, weight 800 and a **3px
   `--text` edge** instead of 1px `--line`. It is marked three ways: a light surface instead of a
   dark one (lightness, not only hue), a three-times-heavier edge, and heavier type — the edge
   width and the weight are what T7's test reads as "more than colour" (AC20). A lit key that is
   disabled keeps its light surface and takes the dashed edge.
 - **Code field.** `--bg`, 1px `--line` edge, `--radius-key`, letter spacing 4px, upper case.
   Connect is a key.
-- **Primary colour, palette swatches.** The swatch shows its own colour; its edge is 2px
-  `--text-muted`. The primary swatch's edge is 4px `--select`.
+- **Palette swatches** (VJ mode). The swatch shows its own colour; its edge is 2px
+  `--text-muted`. The primary swatch's edge is 4px `--select`. The swatch the pinned wheel aims at
+  is pressed and carries the **target mark**: a 4px `--text` bar, 6px in from each side, 4px below
+  the swatch, on the section — so it holds 3:1 whatever the swatch's colour, and it is neither the
+  primary's edge nor the focus ring. Exactly one swatch carries it, the primary by default; the
+  primary swatch then shows both marks (B-16 PD2).
 - **VJ status strip.** `--fs-note`, `--text-muted`, tabular figures, items with a 16px gap.
-- **Dialogs** (approvals, colour wheel). `--panel`, 1px `--line` edge, `--radius-dialog`, 16px
-  padding, the page behind dimmed by a backdrop of black at 72%. The wheel keeps its disc, marker,
-  "on screen" and "stored" swatches, Reset (a key) and Done (a lit key); brightness is a
-  horizontal fader, full width of the dialog.
+- **Dialogs** (approvals only). `--panel`, 1px `--line` edge, `--radius-dialog`, 16px
+  padding, the page behind dimmed by a backdrop of black at 72%.
 - **Focus ring** (every control, `:focus-visible`). A 3px `--focus` outline 2px outside the
   control, the 2px gap filled with `--focus-halo`. White against the dark page and panels, black
   against anything light, so it holds 3:1 wherever it lands.
+
+### The colour block (B-16 SD1, SD2, SD5)
+
+Pinned between the scrolling area and the bank, never a dialog, once the screen's state has
+arrived (as the bank). `--panel`, 8px padding, and a `--fader-edge` `--line` edge on the side it
+meets the scrolling area: the top in the horizontal arrangement, the left in the vertical one.
+The focus order is the page's: status bar, scrolling area, block (disc, brightness, Reset), bank.
+
+- **Disc.** `--disc` square: `clamp(150px, 31.25vmin, 240px)`, so 150px at 320×568, 320×640 and
+  568×320 and 240px at 768×1024 and 1024×768, the same in both modes. A hue and saturation disc
+  drawn on a canvas (240×240, scaled), with a 2px `--line` edge over its rim. The marker is a 16px
+  ring, 2px white with a 2px black ring outside it — the focus ring's two tones, so it holds 3:1
+  on any colour of the disc.
+- **Brightness.** The fader, standing vertically beside the disc at the disc's height, in both
+  arrangements: the vertical fader below, selected by class (`.djv-fader.is-vertical`).
+- **Label.** `--fs-legend` `--text-muted`: "COLOUR *n* · PRIMARY" on the primary slot, "COLOUR
+  *n*" on any other. At 320 CSS px it may wrap to two lines.
+- **Pair.** The colour on screen and the stored colour, each a 24px swatch with a 2px
+  `--text-muted` edge: the first captioned with its hex value, the second with "stored"
+  (`--fs-note`, `--text-muted`, tabular figures). They are not targets.
+- **Reset.** A key.
+- **Horizontal** (phone portrait): full width; the disc on the left, the brightness fader beside
+  it, then an 86px column at 320 CSS px holding the label, the pair and Reset, top to bottom.
+- **Vertical** (phone landscape, tablet): a column under the status bar, left of the bank; the
+  disc and the fader on top, the label under them, then the pair with Reset beside it.
+- **Locked.** The label's place shows the "Locked" tag; the disc is covered by the bank's 135°
+  stripes, every other 6px stripe `--hatch` over the disc's colours; the brightness fader takes the
+  fader's locked look and Reset the disabled key's. Nothing moves.
 
 ### The fader
 
@@ -154,7 +189,8 @@ While the controls are locked, each track is hatched — 135° stripes of `--tra
 6px each — the cap turns `--cap-locked`, the fill `--fill-locked`, and the bank's legend row
 shows a **"Locked"** tag in place of its "Faders" legend: `--fs-label` in `--on-attention` on
 `--attention`, 6px side padding. So the locked look is the hatching, the dimmed cap and the word,
-not a colour alone. The readouts and caps stay where the screen's values put them. Every
+not a colour alone. The colour block does the same in its label's place, with the stripes over
+the disc (above). The readouts and caps stay where the screen's values put them. Every
 control the lock disables today takes its disabled look (dashed edge); the mode toggle stays
 live, as today.
 
@@ -206,6 +242,9 @@ Text pairs need at least 4.5:1, non-text pairs at least 3:1 (SD11). The table is
 | N15 | `--cap-locked` | `--hatch` | 3 | 3.82 | Locked cap against the hatching |
 | N16 | `--focus-halo` | `--attention` | 3 | 10.09 | Focus ring's halo on the waiting badge, inside the attention bar |
 | N17 | `--focus` | `--stop` | 3 | 5.62 | Focus ring on the waiting badge, inside the stop bar |
+| N18 | `--line` | `--panel` | 3 | 3.65 | The disc's edge and the colour block's edge against the block (B-16) |
+| N19 | `--text` | `--panel` | 3 | 15.71 | The wheel's target mark against the Palette section (B-16) |
+| N20 | `--text-muted` | `--panel` | 3 | 7.75 | The colour block's pair swatches' edge against the block (B-16) |
 
 The waiting badge is never disabled: the lock disables only Accept and Reject, and the pending list
 lasts until pairing ends (`web/src/control/device-link.ts:122`), so the badge stays focusable
@@ -265,6 +304,30 @@ four; at 768×1024, 632px.
 - *Targets:* every fader is 56px across and at least 238px long; every key at least 48×48. The
   status bar is 48px tall; the waiting badge is the bar's full height.
 
+**The colour block (B-16 SD1, SD2, AC5).** Horizontal block height = 2 (edge) + 8 (pad) +
+`--disc` + 8 (pad) = 18 + `--disc`; vertical block width = 2 (edge) + 8 (pad) + `--disc` + 6 (gap)
++ 56 (brightness) + 8 (pad) = 80 + `--disc`. The scrolling area keeps what the bar, the block and
+the bank leave:
+
+| Viewport | Arrangement | Disc | Block | Faders | Scrolling area keeps | Needed (AC5) |
+|---|---|---|---|---|---|---|
+| 320×568 | horizontal | 150 | 168 tall (≤ 180) | 2 | 568 − 48 − 168 − 154 = 198 tall | ≥ 180 |
+| 320×568 | horizontal | 150 | 168 tall | 4 | 568 − 48 − 168 − 278 = 74 tall | B-18's |
+| 320×640 | horizontal | 150 | 168 tall | 2 | 640 − 48 − 168 − 154 = 270 tall | — |
+| 320×640 | horizontal | 150 | 168 tall | 4 | 640 − 48 − 168 − 278 = 146 tall | B-18's |
+| 568×320 | vertical | 150 | 230 wide (≤ 240) | 2 | 568 − 230 − 136 = 202 wide | ≥ 190 |
+| 568×320 | vertical | 150 | 230 wide | 4 | 568 − 230 − 260 = 78 wide | B-18's |
+| 768×1024 | vertical | 240 | 320 wide | 2 | 768 − 320 − 136 = 312 wide | — |
+| 768×1024 | vertical | 240 | 320 wide | 4 | 768 − 320 − 260 = 188 wide | — |
+| 1024×768 | vertical | 240 | 320 wide | 2 | 1024 − 320 − 136 = 568 wide | — |
+| 1024×768 | vertical | 240 | 320 wide | 4 | 1024 − 320 − 260 = 444 wide | — |
+
+The scrolling-area figures under the bank's tables above are B-19's, before the block. In the
+vertical arrangement the column is 8 + `--disc` + 6 + 16 (label) + 6 + 54 (the pair beside Reset)
++ 8 tall: 248px at 568×320, inside the 272px under the bar, so it never scrolls. With four faders
+the scrolling area is about 74px tall in portrait and 78px wide at 568×320; B-18 amends this
+budget or shows fewer faders there (B-16 SD1, SD2).
+
 Every number above is a CSS pixel in the mockups, which use these tokens.
 
 ## Mockups
@@ -273,6 +336,8 @@ Every number above is a CSS pixel in the mockups, which use these tokens.
 script, no external file: phone portrait (320×568), phone landscape (568×320) and tablet
 (768×1024) at real CSS pixels, each in DJ and VJ mode; a locked bank under "Reconnecting…"; the
 four-fader bank at 320×568 and 568×320 (faders 3 and 4 are placeholders for B-18's capacity, not
-a design for them); pairing with the code field; the colour wheel's dialog; and the status bar in
-all thirteen link states. Open it on a phone and a tablet from the file; turn the phone to
+a design for them); pairing with the code field; and the status bar in all thirteen link states.
+Since B-16 every frame with a bank shows the pinned colour block — aimed at the primary slot in
+DJ mode, at swatch 3 with the target mark in VJ mode, locked in the locked frames — and the colour
+wheel's dialog frame is gone. Open it on a phone and a tablet from the file; turn the phone to
 landscape to see the 568×320 frames at full size. Each frame scrolls inside itself like the page.
