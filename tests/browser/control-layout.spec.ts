@@ -87,7 +87,7 @@ async function inView(phone: Page, locator: Locator): Promise<boolean> {
   );
 }
 
-/** AC15: no horizontal scroll, and every visible target at least 48×48. */
+/** AC15: no horizontal scroll, and every visible target at least 48×48 (B-16 AC6: the disc too). */
 async function fitProblems(phone: Page): Promise<string[]> {
   const problems: string[] = [];
   for (const id of ["controller", "control-scroll"]) {
@@ -97,7 +97,9 @@ async function fitProblems(phone: Page): Promise<string[]> {
     if (scrollWidth > clientWidth)
       problems.push(`${id} scrolls sideways: ${scrollWidth} > ${clientWidth}`);
   }
-  for (const target of await phone.locator("button, input, [role=slider]").all()) {
+  for (const target of await phone
+    .locator("button, input, [role=slider], [role=application]")
+    .all()) {
     if (!(await target.isVisible())) continue;
     const b = await box(target);
     if (b.width < 48 || b.height < 48) {
@@ -173,7 +175,7 @@ test("the bank is pinned at the bottom with horizontal faders in portrait, at th
   }
 });
 
-test("scrolled to its end, the status bar and the whole bank stay in view, DJ and VJ, both arrangements (AC13)", async ({
+test("scrolled to its start or end, the status bar, the whole colour block and the whole bank stay in view, DJ and VJ, both arrangements (AC13, B-16 AC2)", async ({
   page,
   browser,
 }) => {
@@ -183,9 +185,17 @@ test("scrolled to its end, the status bar and the whole bank stay in view, DJ an
     await phone.page.setViewportSize(viewport);
     for (const mode of ["dj", "vj"] as const) {
       await phone.page.getByTestId(`mode-${mode}`).click();
-      await scrollToEnd(phone.page);
       const where = `${viewport.width}×${viewport.height} ${mode}`;
+      // B-16 AC2: the whole colour block too, at the scroll's start and at its end.
+      await phone.page.getByTestId("control-scroll").evaluate((el) => (el.scrollTop = 0));
+      for (const id of ["status-bar", "wheel", "fader-bank"]) {
+        expect(await inView(phone.page, phone.page.getByTestId(id)), `${where} start ${id}`).toBe(
+          true,
+        );
+      }
+      await scrollToEnd(phone.page);
       expect(await inView(phone.page, phone.page.getByTestId("status-bar")), where).toBe(true);
+      expect(await inView(phone.page, phone.page.getByTestId("wheel")), where).toBe(true);
       expect(await inView(phone.page, phone.page.getByTestId("fader-bank")), where).toBe(true);
       // Scrolled, something did move: the middle scrolls, not the page.
       expect(
@@ -197,12 +207,22 @@ test("scrolled to its end, the status bar and the whole bank stay in view, DJ an
   }
 });
 
-test("turning the device re-lays the page out without a reload, keeping the mode, the link and the values (AC14)", async ({
+test("turning the device re-lays the page out without a reload, keeping the mode, the link, the values and the wheel's target (AC14, B-16 AC4)", async ({
   page,
   browser,
 }) => {
+  await createProfile(api, {
+    ...flat("Three", "#112233"),
+    palette: ["#112233", "#445566", "#778899"],
+  });
   const phone = await paired(page, browser, PORTRAIT);
   await phone.page.getByTestId("mode-vj").click();
+  const three = phone.page.getByTestId("profile-tile").filter({ hasText: "Three" });
+  await three.click();
+  await expect(three).toHaveAttribute("aria-pressed", "true");
+  await phone.page.locator('[data-testid=swatch][data-slot="2"]').click();
+  const wheel = phone.page.getByTestId("wheel");
+  await expect(wheel).toHaveAttribute("data-slot", "2");
   await setFader(phone.page.getByTestId("dial-recognisability"), 0.42);
   await setFader(phone.page.getByTestId("dial-reactivity"), 0.77);
   await phone.page.evaluate(() => ((window as unknown as { __kept: boolean }).__kept = true));
@@ -221,12 +241,16 @@ test("turning the device re-lays the page out without a reload, keeping the mode
     "0.42",
   );
   await expect(phone.page.getByTestId("dial-reactivity")).toHaveAttribute("aria-valuenow", "0.77");
+  await expect(wheel).toHaveAttribute("data-slot", "2");
+  await expect(phone.page.getByTestId("wheel-current")).toHaveAttribute("data-colour", "#778899");
   await phone.page.setViewportSize(PORTRAIT);
   await expect(phone.page.getByTestId("controller")).toHaveAttribute(
     "data-arrangement",
     "horizontal",
   );
   await expect(phone.page.getByTestId("mode-vj")).toHaveAttribute("aria-pressed", "true");
+  await expect(wheel).toHaveAttribute("data-slot", "2");
+  await expect(phone.page.getByTestId("wheel-label")).toHaveText("Colour 3");
 });
 
 test("a re-layout mid-drag lets go: the screen's value shows and nothing follows the release (AC9)", async ({
@@ -382,4 +406,152 @@ test("locked, every fader is disabled with the locked look and the bank says Loc
     await expect(fader).toBeEnabled();
     expect(await fader.evaluate((el) => getComputedStyle(el).backgroundImage)).toBe("none");
   }
+});
+
+// ---- B-16 T2b: the pinned colour block, measured (AC1, AC2, AC3, AC5, AC9) ----
+
+const FIVE = [
+  PORTRAIT,
+  { width: 320, height: 640 },
+  LANDSCAPE,
+  TABLET,
+  { width: 1024, height: 768 },
+] as const;
+
+test("at five sizes, DJ and VJ, the colour block is there with no dialog, no Primary colour key and no Done (B-16 AC1)", async ({
+  page,
+  browser,
+}) => {
+  const phone = await paired(page, browser, PORTRAIT);
+  for (const viewport of FIVE) {
+    await phone.page.setViewportSize(viewport);
+    for (const mode of ["dj", "vj"] as const) {
+      await phone.page.getByTestId(`mode-${mode}`).click();
+      const where = `${viewport.width}×${viewport.height} ${mode}`;
+      const wheel = phone.page.getByTestId("wheel");
+      await expect(wheel, where).toBeVisible();
+      expect(await wheel.evaluate((el) => el.tagName), where).toBe("SECTION");
+      for (const id of [
+        "wheel-disc",
+        "wheel-brightness",
+        "wheel-label",
+        "wheel-current",
+        "wheel-stored",
+        "wheel-value",
+        "wheel-reset",
+      ]) {
+        await expect(phone.page.getByTestId(id), `${where} ${id}`).toBeVisible();
+      }
+      await expect(phone.page.locator("dialog[open]"), where).toHaveCount(0);
+      await expect(phone.page.getByTestId("primary-colour"), where).toHaveCount(0);
+      await expect(phone.page.getByTestId("wheel-done"), where).toHaveCount(0);
+    }
+  }
+});
+
+test("the block is full width above the bank in portrait, a column left of the bank under the bar in landscape (B-16 AC2)", async ({
+  page,
+  browser,
+}) => {
+  const phone = await paired(page, browser, PORTRAIT);
+  const wheel = phone.page.getByTestId("wheel");
+  const bank = phone.page.getByTestId("fader-bank");
+  const scroll = phone.page.getByTestId("control-scroll");
+  for (const mode of ["dj", "vj"] as const) {
+    await phone.page.getByTestId(`mode-${mode}`).click();
+
+    await phone.page.setViewportSize(PORTRAIT);
+    await expect(phone.page.getByTestId("controller")).toHaveAttribute(
+      "data-arrangement",
+      "horizontal",
+    );
+    let w = await box(wheel);
+    let b = await box(bank);
+    let s = await box(scroll);
+    expect(Math.round(w.x), mode).toBe(0);
+    expect(Math.round(w.width), mode).toBe(320);
+    expect(Math.round(w.y + w.height), mode).toBe(Math.round(b.y));
+    expect(Math.round(s.y + s.height), mode).toBe(Math.round(w.y));
+
+    await phone.page.setViewportSize(LANDSCAPE);
+    await expect(phone.page.getByTestId("controller")).toHaveAttribute(
+      "data-arrangement",
+      "vertical",
+    );
+    w = await box(wheel);
+    b = await box(bank);
+    s = await box(scroll);
+    const bar = await box(phone.page.getByTestId("status-bar"));
+    expect(Math.round(w.x + w.width), mode).toBe(Math.round(b.x));
+    expect(Math.round(w.y), mode).toBe(Math.round(bar.y + bar.height));
+    expect(Math.round(s.x + s.width), mode).toBe(Math.round(w.x));
+    expect(await inView(phone.page, wheel), mode).toBe(true);
+  }
+});
+
+test("the disc is 150 px at the phone sizes and 240 px at the tablet sizes, DJ and VJ alike, the brightness fader as tall beside it (B-16 AC3)", async ({
+  page,
+  browser,
+}) => {
+  const phone = await paired(page, browser, PORTRAIT);
+  for (const viewport of FIVE) {
+    await phone.page.setViewportSize(viewport);
+    const expected = Math.min(viewport.width, viewport.height) >= 768 ? 240 : 150;
+    for (const mode of ["dj", "vj"] as const) {
+      await phone.page.getByTestId(`mode-${mode}`).click();
+      const where = `${viewport.width}×${viewport.height} ${mode}`;
+      const disc = await box(phone.page.getByTestId("wheel-disc"));
+      expect(Math.abs(disc.width - expected), `${where} disc ${disc.width}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(disc.height - expected), `${where} disc ${disc.height}`).toBeLessThanOrEqual(
+        1,
+      );
+      const brightness = phone.page.getByTestId("wheel-brightness");
+      await expect(brightness).toHaveAttribute("aria-orientation", "vertical");
+      const fader = await box(brightness);
+      expect(
+        Math.abs(fader.height - disc.height),
+        `${where} fader ${fader.height}`,
+      ).toBeLessThanOrEqual(1);
+      // Beside the disc: level with it, to its right.
+      expect(Math.abs(fader.y - disc.y), where).toBeLessThanOrEqual(1);
+      expect(fader.x, where).toBeGreaterThanOrEqual(disc.x + disc.width);
+    }
+  }
+});
+
+test("with two faders the block keeps to 180 px of height at 320×568 and 240 px of width at 568×320, the scrolling area keeping 180 and 190 (B-16 AC5)", async ({
+  page,
+  browser,
+}) => {
+  const phone = await paired(page, browser, PORTRAIT);
+  const wheel = phone.page.getByTestId("wheel");
+  const scroll = phone.page.getByTestId("control-scroll");
+  await expect(phone.page.getByTestId("fader-bank").getByRole("slider")).toHaveCount(2);
+  for (const mode of ["dj", "vj"] as const) {
+    await phone.page.getByTestId(`mode-${mode}`).click();
+    await phone.page.setViewportSize(PORTRAIT);
+    await expect(phone.page.getByTestId("controller")).toHaveAttribute(
+      "data-arrangement",
+      "horizontal",
+    );
+    expect((await box(wheel)).height, `${mode} block height`).toBeLessThanOrEqual(180);
+    expect((await box(scroll)).height, `${mode} scroll height`).toBeGreaterThanOrEqual(180);
+    await phone.page.setViewportSize(LANDSCAPE);
+    await expect(phone.page.getByTestId("controller")).toHaveAttribute(
+      "data-arrangement",
+      "vertical",
+    );
+    expect((await box(wheel)).width, `${mode} block width`).toBeLessThanOrEqual(240);
+    expect((await box(scroll)).width, `${mode} scroll width`).toBeGreaterThanOrEqual(190);
+  }
+});
+
+test("in DJ mode the wheel aims at the primary slot and says so: Colour 2 · primary on the built-in (B-16 AC9)", async ({
+  page,
+  browser,
+}) => {
+  const phone = await paired(page, browser, PORTRAIT);
+  await expect(phone.page.getByTestId("mode-dj")).toHaveAttribute("aria-pressed", "true");
+  await expect(phone.page.getByTestId("wheel")).toHaveAttribute("data-slot", "1");
+  await expect(phone.page.getByTestId("wheel-label")).toHaveText("Colour 2 · primary");
 });
