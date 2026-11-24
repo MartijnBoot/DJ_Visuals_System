@@ -263,7 +263,13 @@ export function Wheel(props: WheelProps) {
             redraw();
           }}
           onSend={(v) => {
-            const next = { ...hsv, v };
+            // From the refs, not the render's `hsv`: the fader sends from an animation frame that
+            // can run before a disc move in the same frame has re-rendered, and the render's hue
+            // and saturation would undo that move.
+            const next = {
+              ...(faderHeld.current ? (drag.current ?? own.current) : own.current),
+              v,
+            };
             if (faderHeld.current) drag.current = next;
             else {
               own.current = next;

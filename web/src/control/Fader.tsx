@@ -66,6 +66,9 @@ export function Fader(props: FaderProps) {
   useEffect(() => {
     if (holder.current !== null) letGo();
   }, [vertical, props.layout]);
+  // And so does leaving the page (B-16: the wheel's fader goes with its slot): a frame still
+  // waiting would send for a control that no longer exists.
+  useEffect(() => () => gesture.letGo(), [gesture]);
 
   /** The pointer's position along the axis, growing toward more. */
   const along = (e: { clientX: number; clientY: number }) => (vertical ? -e.clientY : e.clientX);

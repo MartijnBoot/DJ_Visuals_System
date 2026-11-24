@@ -245,8 +245,142 @@ test("three fingers for two seconds — the disc and both faders — keep 10 ms 
   await expect(phone.getByTestId("wheel-value")).toHaveText(lastColour);
 });
 
+/** A colour's hue in degrees, as `hexToHsv` gives it (`web/src/control/wheel-math.ts`). */
+function hueOf(hex: string): number {
+  const n = Number.parseInt(hex.slice(1), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => c / 255) as [
+    number,
+    number,
+    number,
+  ];
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  if (d === 0) return 0;
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+}
+
+test("the disc and the brightness fader moved in one touch event: the screen ends on the disc's last hue, not the one before (AC12, AC8)", async ({
+  page,
+  browser,
+}) => {
+  const url = await screen(page);
+  const phone = await paired(page, browser, url, "dj");
+  const brightness = phone.getByTestId("wheel-brightness");
+  // Full brightness first, so every hue below is a distinct colour.
+  await brightness.focus();
+  await phone.keyboard.press("End");
+  await expect(phone.getByTestId("wheel-current")).toHaveAttribute(
+    "data-colour",
+    (await phone.getByTestId("wheel-value").textContent())!,
+  );
+  const b = await box(phone.getByTestId("wheel-disc"));
+  const r = (b.width / 2) * 0.8;
+  /** The disc at hue `deg` (the canvas's y grows downward, as `pointToHueSat` reads it). */
+  const atHue = (deg: number) => ({
+    x: b.x + b.width / 2 + Math.cos((deg * Math.PI) / 180) * r,
+    y: b.y + b.height / 2 + Math.sin((deg * Math.PI) / 180) * r,
+  });
+  const bright = await faderPath(brightness);
+  const cdp = await phone.context().newCDPSession(phone);
+  const from = await pageNow(phone);
+
+  await touch(cdp, "touchStart", [atHue(0), bright(0.8)]);
+  await phone.waitForTimeout(50);
+  await touch(cdp, "touchMove", [atHue(5), bright(0.7)]);
+  await phone.waitForTimeout(50);
+  // The last move of both in one event: each sends from the same frame.
+  await touch(cdp, "touchMove", [atHue(180), bright(0.6)]);
+  await phone.waitForTimeout(50);
+  await touch(cdp, "touchEnd", []);
+  await phone.waitForTimeout(300);
+
+  const colours = ofType(
+    (await sentFrames(phone)).filter((f) => f.t >= from),
+    "colour",
+  );
+  const last = colours.at(-1)!.message.value as string;
+  expect(Math.abs(hueOf(last) - 180), `last colour ${last}`).toBeLessThan(10);
+  await expect(phone.getByTestId("wheel-current")).toHaveAttribute("data-colour", last);
+  await expect(phone.getByTestId("wheel-value")).toHaveText(last);
+});
+
+type FrameWindow = { __held: Map<number, FrameRequestCallback>; __release(): void };
+
+/**
+ * Holds the page's animation frames until `releaseFrames`, so a throttle's waiting value stays
+ * waiting while the page changes under it. Playwright's own checks run in another world and keep
+ * their frames.
+ */
+const holdFrames = (phone: Page) =>
+  phone.evaluate(() => {
+    const w = window as unknown as FrameWindow;
+    const request = window.requestAnimationFrame.bind(window);
+    const cancel = window.cancelAnimationFrame.bind(window);
+    let next = -1;
+    w.__held = new Map();
+    window.requestAnimationFrame = (fn) => {
+      w.__held.set(next, fn);
+      return next--;
+    };
+    window.cancelAnimationFrame = (id) => {
+      if (!w.__held.delete(id)) cancel(id);
+    };
+    w.__release = () => {
+      window.requestAnimationFrame = request;
+      window.cancelAnimationFrame = (id) => {
+        if (!w.__held.delete(id)) cancel(id);
+      };
+      const due = [...w.__held.values()];
+      w.__held.clear();
+      for (const fn of due) fn(performance.now());
+    };
+  });
+const releaseFrames = (phone: Page) =>
+  phone.evaluate(() => (window as unknown as FrameWindow).__release());
+
 const tileOf = (phone: Page, stored: Stored) =>
   phone.locator(`[data-testid=profile-tile][data-profile-id="${stored.id}"]`);
+
+test("the wheel's slot changes under a held brightness drag: the old slot's waiting value is never sent (AC11, PD11)", async ({
+  page,
+  browser,
+}) => {
+  const stored = await createProfile(api, {
+    name: "First primary",
+    palette: ["#808080", "#336699", "#ffcc00"],
+    primary: 0,
+    dials: { recognisability: 0.5, reactivity: 0.5 },
+    effects: [{ type: "paletteMap", amount: 1 }],
+  });
+  const url = await screen(page);
+  const phone = await paired(page, browser, url, "dj");
+  const other = await paired(page, browser, url, "dj");
+  await expect(phone.getByTestId("wheel")).toHaveAttribute("data-slot", "1"); // the built-in
+  const brightness = phone.getByTestId("wheel-brightness");
+  const before = await brightness.getAttribute("aria-valuenow");
+  const bright = await faderPath(brightness);
+  const cdp = await phone.context().newCDPSession(phone);
+  const from = await pageNow(phone);
+
+  await touch(cdp, "touchStart", [bright(0.5)]);
+  await holdFrames(phone);
+  await touch(cdp, "touchMove", [bright(0.2)]);
+  // The move is in: the cap shows it, and its send waits for a frame.
+  await expect(brightness).not.toHaveAttribute("aria-valuenow", before!);
+  // Another controller's pick moves this wheel to the new profile's primary slot.
+  await tileOf(other, stored).click();
+  await expect(phone.getByTestId("wheel")).toHaveAttribute("data-slot", "0");
+  await releaseFrames(phone);
+  await touch(cdp, "touchEnd", []);
+  await phone.waitForTimeout(300);
+
+  const stale = ofType(
+    (await sentFrames(phone)).filter((f) => f.t >= from),
+    "colour",
+  ).filter((f) => f.message.slot === 1);
+  expect(stale).toEqual([]);
+});
 
 test("768×1024, VJ: a 240 px disc, swatch 3 recolours slot 3, a re-pick goes back to the primary, another controller moves the marker, and a drop mid-drag locks with nothing after (Verification 3, AC15)", async ({
   page,
