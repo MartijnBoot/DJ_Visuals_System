@@ -396,6 +396,10 @@ only in the page's memory (SD3, Out of scope: no remembering).
   content. Then, on a phone in portrait and in landscape against a running screen: drag a colour,
   move the abstraction dial, go back to the colour, all without opening or closing anything. AC19's
   approval exists only here.
+  - [x] Notes: 2026-11-24 — the device check passed on a phone and on an iPad, on the owner's
+    attestation ("they look great"), against PR #16 at dc403be. Orientations and per-item
+    observations not recorded.
+  - [ ] The brief and mockups approved against the built page (AC19): not yet recorded.
 - Pushing, the PR and the merge are the owner's.
 
 ## Out of scope for this plan
