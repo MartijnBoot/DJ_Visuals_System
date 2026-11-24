@@ -295,7 +295,10 @@ test("a pinned-wheel colour reaches that slot only, the next frames, with no new
   await dragToRed(dj.page);
   const red = (await dj.page.getByTestId("wheel-value").textContent())!;
   await expect.poll(() => palette(observer.page)).toEqual([red, "#336699", "#ffcc00"]);
-  await expect.poll(() => redness(page)).toBeGreaterThan(before + 20);
+  // The screen's state above shows it applied the colour. How soon the canvas reads show it
+  // depends on the frame rate, which a loaded machine slows to a few frames a second: the wait
+  // gets a minute, not `expect.poll`'s five seconds (B-08: no wall-clock assertion).
+  await expect.poll(() => redness(page), { timeout: 60_000 }).toBeGreaterThan(before + 20);
 
   // VJ mode, swatch 3: slot 3 only.
   await dj.page.getByTestId("mode-vj").click();
