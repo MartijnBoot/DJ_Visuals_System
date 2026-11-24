@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   availableTypes,
   canAddCustom,
+  djFaderAt,
   isDirty,
   primaryUnused,
   reduce,
@@ -132,6 +133,76 @@ describe("effects (SD12)", () => {
   });
 });
 
+// B-18 SD2, SD13, AC5, AC6 (plan T4): the two fader ticks, at most one DJ.
+describe("the fader ticks (B-18)", () => {
+  it("ticks DJ and VJ, and unticking deletes the key, never writing false", () => {
+    const ticked = run(
+      base,
+      { type: "effectFader", index: 1, which: "dj", on: true },
+      { type: "effectFader", index: 1, which: "vj", on: true },
+    );
+    expect(ticked.effects[1]).toMatchObject({ dj: true, vj: true });
+    expect(validate(ticked)).toEqual([]);
+    const off = run(
+      ticked,
+      { type: "effectFader", index: 1, which: "dj", on: false },
+      { type: "effectFader", index: 1, which: "vj", on: false },
+    );
+    expect(off.effects[1]).toEqual(base.effects[1]);
+    expect(off.effects[1]).not.toHaveProperty("dj");
+    expect(off.effects[1]).not.toHaveProperty("vj");
+  });
+
+  it("refuses a second DJ tick, leaving the draft as it was (SD2)", () => {
+    const one = run(base, { type: "effectFader", index: 0, which: "dj", on: true });
+    expect(djFaderAt(one)).toBe(0);
+    expect(reduce(one, { type: "effectFader", index: 2, which: "dj", on: true })).toBe(one);
+    const moved = run(
+      one,
+      { type: "effectFader", index: 0, which: "dj", on: false },
+      { type: "effectFader", index: 2, which: "dj", on: true },
+    );
+    expect(djFaderAt(moved)).toBe(2);
+    expect(moved.effects[0]).not.toHaveProperty("dj");
+  });
+
+  it("takes a VJ tick on every effect", () => {
+    const all = run(
+      base,
+      ...base.effects.map((_, index): Action => ({
+        type: "effectFader",
+        index,
+        which: "vj",
+        on: true,
+      })),
+    );
+    expect(all.effects.every((e) => e.vj === true)).toBe(true);
+    expect(validate(all)).toEqual([]);
+  });
+
+  it("changes nothing for a tick it already has, an untick it lacks, or no effect", () => {
+    const one = run(base, { type: "effectFader", index: 0, which: "vj", on: true });
+    expect(reduce(one, { type: "effectFader", index: 0, which: "vj", on: true })).toBe(one);
+    expect(reduce(base, { type: "effectFader", index: 0, which: "dj", on: false })).toBe(base);
+    expect(reduce(base, { type: "effectFader", index: 9, which: "vj", on: true })).toBe(base);
+    expect(reduce(base, { type: "effectFader", index: -1, which: "dj", on: true })).toBe(base);
+  });
+
+  it("ticks a custom effect too, and marks the draft unsaved (AC5)", () => {
+    const custom = run(base, { type: "customAdd" });
+    const at = custom.effects.length - 1;
+    const ticked = run(custom, { type: "effectFader", index: at, which: "dj", on: true });
+    expect(ticked.effects[at]).toMatchObject({ type: "custom", dj: true });
+    expect(isDirty(ticked, custom)).toBe(true);
+    const back = run(ticked, { type: "effectFader", index: at, which: "dj", on: false });
+    expect(isDirty(back, custom)).toBe(false);
+  });
+
+  it("knows no DJ fader in a draft without one", () => {
+    expect(djFaderAt(base)).toBe(-1);
+  });
+});
+
 describe("validate (AC3, AC8)", () => {
   it("reports an empty and an over-long name by path, and nothing for a good draft", () => {
     expect(validate(base)).toEqual([]);
@@ -176,6 +247,7 @@ describe("validate (AC3, AC8)", () => {
           amount: pick(odd),
         },
         { type: "bindingClear", index },
+        { type: "effectFader", index, which: pick(["dj", "vj"] as const), on: next() > 0.4 },
       ]);
       draft = reduce(draft, action);
       const issues = validate(draft).filter((i) => i.path !== "name");
@@ -435,6 +507,7 @@ describe("custom effect actions (B-03)", () => {
         { type: "customParamRemove", index, param },
         { type: "customParamName", index, param, name: pick(texts) },
         { type: "customParamValue", index, param, value: pick(odd) },
+        { type: "effectFader", index, which: pick(["dj", "vj"] as const), on: next() > 0.4 },
       ]);
       draft = reduce(draft, action);
       const allowed = /^(name|effects\.\d+\.(label|code|params\.\d+\.name))$/;

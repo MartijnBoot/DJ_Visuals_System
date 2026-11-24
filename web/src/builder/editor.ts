@@ -47,7 +47,9 @@ export type Action =
   | { type: "customParamAdd"; index: number }
   | { type: "customParamRemove"; index: number; param: number }
   | { type: "customParamName"; index: number; param: number; name: string }
-  | { type: "customParamValue"; index: number; param: number; value: number };
+  | { type: "customParamValue"; index: number; param: number; value: number }
+  /** B-18 SD2, SD13: a fader on the controller in DJ or VJ mode; off deletes the key. */
+  | { type: "effectFader"; index: number; which: "dj" | "vj"; on: boolean };
 
 /** What a colour added to the palette starts as. */
 export const NEW_COLOUR = "#808080";
@@ -98,6 +100,11 @@ export function availableTypes(draft: Profile): EffectType[] {
   if (draft.effects.length >= LIMITS.effects) return [];
   const present = new Set<string>(draft.effects.map((e) => e.type));
   return EFFECT_TYPES.filter((t) => !present.has(t));
+}
+
+/** The place of the effect with the DJ fader, or -1 (B-18 SD2: at most one has it). */
+export function djFaderAt(draft: Profile): number {
+  return draft.effects.findIndex((e) => e.dj === true);
 }
 
 /** "Custom" is offered while the stack has room (B-03 SD4: custom effects count toward 12). */
@@ -310,6 +317,19 @@ export function reduce(draft: Profile, action: Action): Profile {
         ...p,
         value: clamp01(action.value),
       }));
+
+    case "effectFader": {
+      const { index, which, on } = action;
+      // SD2: a second DJ tick is refused; the builder disables the box with its reason.
+      const dj = djFaderAt(draft);
+      if (which === "dj" && on && dj !== -1 && dj !== index) return draft;
+      return withEffect(draft, index, (e) => {
+        if ((e[which] === true) === on) return e;
+        if (on) return { ...e, [which]: true };
+        const { [which]: _off, ...rest } = e;
+        return rest as Effect;
+      });
+    }
   }
 }
 

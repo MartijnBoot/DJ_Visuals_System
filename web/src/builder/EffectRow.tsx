@@ -1,5 +1,6 @@
 // One effect in the stack (B-02 spec SD4, SD12, AC3; plan T11): move up and down, remove, the base
 // strength, the effect's own parameter, and one audio binding. Native controls, each labelled.
+// B-18 (SD13, PD8): two fader ticks, addressed by the effect's place in the stack.
 // Test ids carry `id`: the effect type, unique in a profile, or `custom-<n>` for the n-th custom
 // effect (B-03 PD14), which shows its label and has no own parameter here.
 import { EFFECTS } from "@djv/engine";
@@ -15,6 +16,8 @@ export interface EffectRowProps {
   count: number;
   paletteLength: number;
   disabled: boolean;
+  /** Another effect of the draft has the DJ fader, so this one cannot (B-18 SD2). */
+  djElsewhere: boolean;
   dispatch: Dispatch<Action>;
   /** Shown under the title line: a custom effect's label field (B-03 T10). */
   header?: ReactNode;
@@ -29,13 +32,17 @@ export function EffectRow({
   count,
   paletteLength,
   disabled,
+  djElsewhere,
   dispatch,
   header,
   children,
 }: EffectRowProps) {
   const name = effect.type === "custom" ? effect.label : effect.type;
   const abstraction = effect.type !== "custom" && EFFECTS[effect.type].abstraction;
+  /** Scaled by recognisability, a built-in by its type or a custom effect by its flag (SD5). */
+  const scaled = effect.type === "custom" ? effect.abstraction : abstraction;
   const label = (what: string) => `${what} of ${name}`;
+  const djRefused = djElsewhere && effect.dj !== true;
   return (
     <li
       data-testid={`effect-row-${id}`}
@@ -178,6 +185,46 @@ export function EffectRow({
           }
         />
       </div>
+      {/* B-18 SD13: a strength fader for this effect on the controller; the preview ignores it. */}
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            data-testid={`effect-dj-${index}`}
+            aria-label={`Fader in DJ mode for ${name}`}
+            aria-describedby={djRefused ? `effect-dj-reason-${index}` : undefined}
+            checked={effect.dj === true}
+            disabled={disabled || djRefused}
+            onChange={(e) =>
+              dispatch({ type: "effectFader", index, which: "dj", on: e.target.checked })
+            }
+          />
+          Fader in DJ mode
+        </label>
+        <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            data-testid={`effect-vj-${index}`}
+            aria-label={`Fader in VJ mode for ${name}`}
+            checked={effect.vj === true}
+            disabled={disabled}
+            onChange={(e) =>
+              dispatch({ type: "effectFader", index, which: "vj", on: e.target.checked })
+            }
+          />
+          Fader in VJ mode
+        </label>
+      </div>
+      {djRefused && (
+        <div id={`effect-dj-reason-${index}`} data-testid={`effect-dj-reason-${index}`}>
+          another effect already has the DJ fader
+        </div>
+      )}
+      {scaled && (
+        <div data-testid={`effect-fader-note-${index}`}>
+          scaled by recognisability still applies
+        </div>
+      )}
       {children}
     </li>
   );

@@ -12,6 +12,7 @@ import { programKey, type CompileReport, type CompileState } from "./Preview.tsx
 import {
   availableTypes,
   canAddCustom,
+  djFaderAt,
   isDirty,
   primaryUnused,
   reduce,
@@ -291,12 +292,14 @@ export function Editor({
         <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {rowIds(draft).map((id, index) => {
             const effect = draft.effects[index]!;
+            const djAt = djFaderAt(draft);
             const row = {
               id,
               index,
               count: draft.effects.length,
               paletteLength: draft.palette.length,
               disabled: readOnly,
+              djElsewhere: djAt !== -1 && djAt !== index,
               dispatch,
             };
             return effect.type === "custom" ? (
