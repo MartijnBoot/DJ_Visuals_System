@@ -94,8 +94,20 @@ const colourSends = (phone: Page) =>
     return { all: colour.length, after: colour.filter((s) => s.t > w.__mark).length };
   });
 
-const setMark = (phone: Page) =>
-  phone.evaluate(() => ((window as unknown as WheelWindow).__mark = performance.now()));
+/**
+ * Marks the first moment one of the page's sockets hears `close`: the link locks right there, so
+ * a frame a throttle still had waiting may go before it, and none may go after it.
+ */
+const markAtClose = (phone: Page) =>
+  phone.evaluate(() => {
+    const w = window as unknown as WheelWindow & { __sockets: WebSocket[] };
+    w.__mark = Infinity;
+    for (const ws of w.__sockets) {
+      ws.addEventListener("close", () => (w.__mark = Math.min(w.__mark, performance.now())), {
+        once: true,
+      });
+    }
+  });
 const clearMark = (phone: Page) =>
   phone.evaluate(() => ((window as unknown as WheelWindow).__mark = Infinity));
 
@@ -237,11 +249,12 @@ test("offline the block is locked: keys, a drag, brightness and Reset send nothi
   // A lock in the middle of a held disc drag.
   await holdDisc(a, 90);
   await expect.poll(async () => (await colourSends(a)).all).toBeGreaterThan(0);
-  await setMark(a);
+  await markAtClose(a);
   await dropNetwork(a);
   await expect(a.getByTestId("link-line")).toHaveText("Reconnecting…");
   await expect(a.getByTestId("wheel-locked")).toHaveText("Locked");
   await expect(a.getByTestId("wheel-label")).toHaveCount(0);
+  expect(await a.evaluate(() => (window as unknown as WheelWindow).__mark)).toBeLessThan(Infinity);
   // The locked look: hatching over the disc, not only a colour.
   expect(
     await a
