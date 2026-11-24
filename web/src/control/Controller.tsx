@@ -23,6 +23,7 @@ import { VjPanel } from "./VjPanel.tsx";
 import { Wheel } from "./Wheel.tsx";
 import { useArrangement } from "./arrangement.ts";
 import { createDeviceLink, LINK_GROUP, openSocket, type DeviceLink } from "./device-link.ts";
+import { createSendBudget } from "./send-budget.ts";
 import { keyStore, modeStore, type Mode } from "./remembered.ts";
 // The controller's look (B-19 PD2): a <style> inside this page's own root, never a linked file,
 // so no other route has a rule of it and none requests anything new.
@@ -81,6 +82,14 @@ function mainAudioLine(main: NonNullable<ScreenState["mainAudio"]>): string {
 
 export function Controller() {
   const [link] = useState(createLink);
+  // B-16 SD4, PD3: every send goes through one page-wide budget; a lock drops what waits (SD8).
+  const [budget] = useState(() =>
+    createSendBudget({
+      now: () => performance.now(),
+      setTimer: (fn, ms) => window.setTimeout(fn, ms),
+      clearTimer: (id) => window.clearTimeout(id),
+    }),
+  );
   const [modes] = useState(() => modeStore());
   const [mode, setMode] = useState<Mode>(() => modes.initial(window.innerWidth));
   const arrangement = useArrangement();
@@ -98,6 +107,21 @@ export function Controller() {
     link.start();
     return () => link.stop();
   }, [link]);
+
+  useEffect(() => {
+    const off = link.subscribe(() => {
+      if (link.view().locked) budget.drop();
+    });
+    return () => {
+      off();
+      budget.drop();
+    };
+  }, [link, budget]);
+
+  /** A tap (PD5): through the budget, never replaced. */
+  const tap = (send: () => unknown) => budget.tap(() => send() !== null);
+  /** One control's newest value (PD5's key): replaces that control's waiting value. */
+  const value = (key: string, send: () => unknown) => budget.value(key, () => send() !== null);
 
   const choose = (next: Mode) => {
     setMode(next);
@@ -135,8 +159,8 @@ export function Controller() {
             disabled={locked}
             open={approvalsOpen}
             onOpen={setApprovalsOpen}
-            onAccept={(deviceId) => link.send({ type: "accept", deviceId })}
-            onReject={(deviceId) => link.send({ type: "reject", deviceId })}
+            onAccept={(deviceId) => tap(() => link.send({ type: "accept", deviceId }))}
+            onReject={(deviceId) => tap(() => link.send({ type: "reject", deviceId }))}
           />
         )}
       </div>
@@ -194,7 +218,7 @@ export function Controller() {
                   data-testid="refresh"
                   disabled={locked}
                   className="djv-key"
-                  onClick={() => link.send({ type: "refresh" })}
+                  onClick={() => tap(() => link.send({ type: "refresh" }))}
                 >
                   Refresh
                 </button>
@@ -214,7 +238,7 @@ export function Controller() {
                     aria-pressed={p.id === state.activeId}
                     disabled={locked}
                     className="djv-key djv-tile"
-                    onClick={() => link.send({ type: "pick", id: p.id })}
+                    onClick={() => tap(() => link.send({ type: "pick", id: p.id }))}
                   >
                     {p.name}
                   </button>
@@ -234,7 +258,7 @@ export function Controller() {
                       aria-pressed={state.transition.kind === kind}
                       disabled={locked}
                       className="djv-key djv-tile"
-                      onClick={() => link.send({ type: "transition", kind })}
+                      onClick={() => tap(() => link.send({ type: "transition", kind }))}
                     >
                       {label}
                     </button>
@@ -249,7 +273,11 @@ export function Controller() {
                   }
                   format={(x) => formatDuration(durationAt(x))}
                   gapMs={DURATION_GAP_MS}
-                  onSend={(x) => link.send({ type: "transition", duration: durationAt(x) })}
+                  onSend={(x) =>
+                    value("transition:duration", () =>
+                      link.send({ type: "transition", duration: durationAt(x) }),
+                    )
+                  }
                 />
                 <div className="djv-row">
                   <button
@@ -259,7 +287,9 @@ export function Controller() {
                     disabled={locked}
                     className="djv-key"
                     onClick={() =>
-                      link.send({ type: "transition", keepColour: !state.transition.keepColour })
+                      tap(() =>
+                        link.send({ type: "transition", keepColour: !state.transition.keepColour }),
+                      )
                     }
                   >
                     Keep colour
@@ -285,7 +315,7 @@ export function Controller() {
                     aria-pressed={c.deviceId === state.cameraId}
                     disabled={locked || !state.started}
                     className="djv-key djv-tile"
-                    onClick={() => link.send({ type: "camera", deviceId: c.deviceId })}
+                    onClick={() => tap(() => link.send({ type: "camera", deviceId: c.deviceId }))}
                   >
                     {c.label || `Camera ${i + 1}`}
                     {c.remote && (
@@ -310,7 +340,7 @@ export function Controller() {
                       aria-pressed={state.mainAudio?.choice === source}
                       disabled={locked}
                       className="djv-key"
-                      onClick={() => link.send({ type: "mainAudio", source })}
+                      onClick={() => tap(() => link.send({ type: "mainAudio", source }))}
                     >
                       {label}
                     </button>
@@ -351,8 +381,8 @@ export function Controller() {
                 pending={view.pending}
                 roundTrip={roundTrip}
                 onSwatch={setWheel}
-                onAccept={(deviceId) => link.send({ type: "accept", deviceId })}
-                onReject={(deviceId) => link.send({ type: "reject", deviceId })}
+                onAccept={(deviceId) => tap(() => link.send({ type: "accept", deviceId }))}
+                onReject={(deviceId) => tap(() => link.send({ type: "reject", deviceId }))}
               />
             )}
 
@@ -363,8 +393,12 @@ export function Controller() {
                 current={state.palette[wheel]!}
                 stored={state.storedPalette[wheel] ?? state.palette[wheel]!}
                 disabled={locked}
-                onColour={(value) => link.send({ type: "colour", slot: wheel, value })}
-                onReset={() => link.send({ type: "resetColour", slot: wheel })}
+                onColour={(hex) =>
+                  value(`colour:${wheel}`, () =>
+                    link.send({ type: "colour", slot: wheel, value: hex }),
+                  )
+                }
+                onReset={() => tap(() => link.send({ type: "resetColour", slot: wheel }))}
                 onDone={() => setWheel(null)}
               />
             )}
@@ -380,7 +414,8 @@ export function Controller() {
             testId: `dial-${dial}`,
             label,
             value: state.dials[dial],
-            onSend: (value: number) => link.send({ type: "dials", [dial]: value }),
+            onSend: (x: number) =>
+              value(`dials:${dial}`, () => link.send({ type: "dials", [dial]: x })),
           }))}
         />
       )}
