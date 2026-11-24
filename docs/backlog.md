@@ -23,13 +23,14 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 | 3 | B-18 | Effect strength sliders on the controller | M | idea |
 | 4 | B-14 | Image assets in profiles | M | idea |
 | 5 | B-07 | Scenes | M | idea |
-| 6 | B-09 | Transitions | M | idea |
-| 7 | B-10 | Global colour layer | S | idea |
-| 8 | B-11 | "No camera" as a feed option | S | idea |
-| 9 | B-13 | Selling it | L | idea |
-| 10 | B-15 | iPad as an audio source | L | idea |
-| 11 | B-20 | Profile authoring kit for outside designers | M | idea |
-| 12 | B-21 | Profile preview without the app | L | idea |
+| 6 | B-10 | Global colour layer | S | idea |
+| 7 | B-11 | "No camera" as a feed option | S | idea |
+| 8 | B-13 | Selling it | L | idea |
+| 9 | B-15 | iPad as an audio source | L | idea |
+| 10 | B-20 | Profile authoring kit for outside designers | M | idea |
+| 11 | B-21 | Profile preview without the app | L | idea |
+| 12 | B-24 | The builder in the controller's look | M | idea |
+| 13 | B-25 | The panel, `/send` and `/trust` in the same look | M | idea |
 
 ## Items
 
@@ -361,39 +362,6 @@ regression.
 `docs/specs/defect-register.md` (D-02), `docs/invariants.md` (B-01 and B-02 compat rows),
 B-01 SD2/AC10, B-02 AC17. Bug-fix rules apply: it starts with a failing test (the induced-load
 reproduction).
-
-### B-09 — Transitions
-
-- **Status:** idea
-- **Added:** 2026-11-14
-- **Size:** M (a guess)
-
-**Problem.** A profile switch is a hard cut (B-02 SD15, B-04 SD6). Mid-set a cut is sometimes
-right and often too abrupt: a mood change wants to arrive, not jump.
-
-**Idea.** A family of transitions between profiles, chosen live from the controller: hard cut,
-crossfade, and more types (for example a wipe, a dissolve through noise, a cut on the next beat,
-a flash to the primary colour). Each with a duration where it has one.
-
-**Why it matters.** It lets a VJ shape the change of mood as part of the show rather than only
-choosing its end state. Split out of B-04 at its spec interview: the owner wants more options
-than cut and crossfade.
-
-**Not this.** A transition that drops frames or pushes the audio-to-frame p95 over B-01's 50 ms
-on the owner's machine. A pre-scripted sequence (that is a timeline, which B-07 also rules out).
-
-**Open questions.**
-
-- Which transition types come first, and which take a duration.
-- What a pick during a running transition does: restart from the current mix, queue, or cut.
-- The GPU cost of rendering two profiles at once (two programs, the old look's smear feedback),
-  and how render scaling (B-01 SD8) treats a transition.
-- Whether "cut on the next beat" belongs here, since it uses the audio features.
-- The controller UI: a default transition plus a per-pick override, or one current choice.
-- Whether B-07 scenes reuse these transitions.
-
-**Touches.** `engine/` (two looks in one frame, a mix pass), B-04's controller and messages,
-B-01's latency and render-scale checks, B-07. Depends on B-04.
 
 ### B-10 — Global colour layer
 
@@ -799,3 +767,65 @@ sends the designer's profile anywhere.
 
 **Touches.** A guess: `engine/` reused as is, a new standalone page, hosting (ADR 0001, B-12).
 Depends on B-20.
+
+### B-24 — The builder in the controller's look
+
+- **Status:** idea
+- **Added:** 2026-11-23
+- **Size:** M (a guess)
+
+(B-22 and B-23 are taken on the local branch `fix/d-18-gate-ceiling`, not yet merged here.)
+
+**Problem.** Moving from `/control` to `/builder` feels like switching products: the controller
+has the dark lighting-desk look (B-19), the builder still looks like a plain web form.
+
+**Idea.** The builder takes the controller's look — its colours, type, keys, sections and faders.
+The style brief stops being the controller's alone and becomes the app's one style, with new parts
+for what only the builder has: the code editor, the preview, the profile list, and the import,
+export and conflict dialogs.
+
+**Why it matters.** The app reads as one product, not two; without it, every new page has to pick
+between two looks. (Proposed wording, from the owner's "it looks like two different products".)
+
+**Not this.** New controls, new behaviour or a changed builder workflow (proposed, as in B-19).
+Restyling the `s` panel, `/send` or `/trust` (B-25). A second, separate style brief for the
+builder.
+
+**Open questions.**
+
+- Whether the builder's sliders become B-19's faders, or a smaller slider in the same style.
+- How the code editor and its error lines look in the dark theme, and whether they keep the
+  contrast rules.
+- Whether the preview gets a section frame or stays as it is.
+- How the brief splits into app-wide and controller-only parts, and how
+  `tests/meta/control-look.test.ts` follows that split.
+
+**Touches.** A guess: `web/src/builder/` (eight files, inline styles today),
+`docs/design/controller-style.md` (a change to `docs/design/`, so the owner's),
+`web/src/control/controller.css` (its tokens move somewhere app-wide), the builder's browser tests.
+Amends B-19 SD8 for the builder. Depends on B-19.
+
+### B-25 — The panel, `/send` and `/trust` in the same look
+
+- **Status:** idea
+- **Added:** 2026-11-23
+- **Size:** M (a guess)
+
+**Problem.** After B-24, three surfaces still wear the old look: the screen's `s` panel, the
+phone's sending page and the certificate page.
+
+**Idea.** They follow the app-wide brief from B-24, so every page of the app shares one look.
+
+**Why it matters.** It finishes what B-24 starts: no page left in the old style.
+
+**Not this.** Any change to the picture on the screen or the overlay during a set. New controls or
+behaviour.
+
+**Open questions.**
+
+- Whether the panel, which sits over the live picture, needs its own treatment (see-through or
+  solid, size).
+- Whether `/trust` is worth including, given it is seen once per device.
+
+**Touches.** A guess: `web/src/Panel.tsx`, `web/src/send/`, `/trust` in `server/src/control/`, and
+their browser tests. Amends B-19 SD8 for these surfaces. Depends on B-24.
