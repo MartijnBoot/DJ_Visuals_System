@@ -2,11 +2,12 @@
 // are applied at the start of the next frame, before the engine draws, and acknowledged once per
 // frame. A controlled frame clock runs a frame's callbacks in registration order, as the browser
 // does (the same clock as `frame-feed.test.ts`).
-import type { Control } from "@djv/shared";
+import type { Control, Staged } from "@djv/shared";
 import type { AudioFeatures, Dials, Engine } from "@djv/engine";
 import { DEFAULT_DIALS, ZERO_FEATURES } from "@djv/engine";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startFrameFeed } from "../frame-feed.ts";
+import type { StagedLook } from "../scenes/staged.ts";
 import { createApplier, type ApplierDeps } from "./apply.ts";
 
 let queue: { id: number; cb: FrameRequestCallback }[] = [];
@@ -30,7 +31,32 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-function rig(started = true) {
+const LIVE = {
+  name: "Warm",
+  palette: ["#000000", "#ffffff"],
+  dials: { recognisability: 0.9, reactivity: 0.2 },
+  effects: [{ type: "zoom" as const, amount: 0.5 }],
+};
+
+/** B-07: a staged look whose every method is a spy; `exists` says whether one is staged. */
+function fakeStaged(exists: { current: boolean }) {
+  const look = { id: "w1" } as Staged;
+  return {
+    fromLive: vi.fn(() => void (exists.current = true)),
+    pick: vi.fn(async () => {}),
+    setDials: vi.fn(),
+    setColour: vi.fn(),
+    resetColour: vi.fn(),
+    setStrength: vi.fn(),
+    setFeed: vi.fn(),
+    setTransition: vi.fn(),
+    clear: vi.fn(() => void (exists.current = false)),
+    state: () => (exists.current ? look : null),
+    definition: vi.fn(() => null),
+  } satisfies StagedLook;
+}
+
+function rig(started = true, staging = false) {
   let dials: Dials = { ...DEFAULT_DIALS };
   const drawn: Dials[] = [];
   const events: string[] = [];
@@ -60,6 +86,22 @@ function rig(started = true) {
     pick: vi.fn(() => new Promise<void>((r) => (release = r))),
     refresh: vi.fn(),
     started: () => started,
+    staged: fakeStaged({ current: staging }),
+    snapshot: () => ({
+      id: "w1",
+      name: "Warm",
+      stored: LIVE,
+      palette: ["#111111", "#222222"],
+      amounts: [0.7],
+    }),
+    feedOnScreen: () => ({ kind: "local", deviceId: "cam-1", label: "Front" }),
+    feedOf: (deviceId) =>
+      deviceId === "cam-2"
+        ? { kind: "local", deviceId: "cam-2", label: "Side" }
+        : deviceId === "remote:d9"
+          ? { kind: "remote", hint: "Chrome on Android" }
+          : null,
+    transition: () => ({ kind: "wipe", duration: 3, keepColour: true }),
   };
   const applier = createApplier(deps);
   const acks: unknown[][] = [];
@@ -226,6 +268,178 @@ describe("the effect control (B-18 SD7, AC11, AC12; plan PD6)", () => {
     runFrame(16);
     expect(r.deps.setStrength).toHaveBeenCalledWith("gone", 11, 1);
     expect(r.acks).toEqual([[{ deviceId: "d1", seq: 9 }]]);
+  });
+});
+
+// B-07 T5 (SD3, SD4, AC1-AC4, AC7, AC8; plan PD1, PD7): a control's target decides which look it
+// edits; Stage and Unstage make and discard the staged look.
+type FakeStaged = ReturnType<typeof fakeStaged>;
+const stagedOf = (deps: ApplierDeps) => deps.staged as FakeStaged;
+const stagedSpies = (s: FakeStaged) => [
+  s.setDials,
+  s.setColour,
+  s.resetColour,
+  s.setFeed,
+  s.setTransition,
+  s.setStrength,
+  s.pick,
+];
+const liveCalls = (deps: ApplierDeps) =>
+  [
+    deps.setDials,
+    deps.setColour,
+    deps.resetColour,
+    deps.setCamera,
+    deps.setTransition,
+    deps.setStrength,
+    deps.pick,
+  ].map((fn) => vi.mocked(fn).mock.calls.length);
+const seqs = (acks: unknown[][]) =>
+  acks
+    .flat()
+    .map((a) => (a as { seq: number }).seq)
+    .sort((a, b) => a - b);
+
+describe("routing by target (B-07 AC2, AC3, AC4)", () => {
+  const seven = (target?: "live" | "staged"): Control[] => {
+    const t = target === undefined ? {} : { target };
+    return [
+      { type: "dials", seq: 1, reactivity: 0.3, ...t },
+      { type: "colour", seq: 2, slot: 0, value: "#00ff00", ...t },
+      { type: "resetColour", seq: 3, slot: 1, ...t },
+      { type: "camera", seq: 4, deviceId: "cam-2", ...t },
+      { type: "transition", seq: 5, kind: "dip", duration: 4, keepColour: true, ...t },
+      { type: "effect", seq: 6, profile: "w1", index: 0, value: 0.2, ...t },
+      { type: "pick", seq: 7, id: "c1", ...t },
+    ];
+  };
+
+  it("each of the seven with target staged reaches the staged look, never the live side (AC2)", async () => {
+    const r = rig(true, true);
+    for (const control of seven("staged")) r.applier.receive("d1", control);
+    runFrame(16);
+    await Promise.resolve();
+    await Promise.resolve();
+    const s = stagedOf(r.deps);
+    expect(s.setDials).toHaveBeenCalledWith({ reactivity: 0.3 });
+    expect(s.setColour).toHaveBeenCalledWith(0, "#00ff00");
+    expect(s.resetColour).toHaveBeenCalledWith(1);
+    expect(s.setFeed).toHaveBeenCalledWith({ kind: "local", deviceId: "cam-2", label: "Side" });
+    expect(s.setTransition).toHaveBeenCalledWith({ kind: "dip", duration: 4 }); // no Keep colour
+    expect(s.setStrength).toHaveBeenCalledWith("w1", 0, 0.2);
+    expect(s.pick).toHaveBeenCalledWith("c1");
+    expect(liveCalls(r.deps)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    runFrame(32);
+    // Six in their frame, the pick at its settle (PD7).
+    expect(r.acks[0]).toHaveLength(6);
+    expect(seqs(r.acks)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("a staged camera names a sender by its hint, and an unknown id changes nothing (PD7)", () => {
+    const r = rig(false, true); // before Start: a staged camera opens nothing, so it still lands
+    r.applier.receive("d1", { type: "camera", seq: 1, deviceId: "remote:d9", target: "staged" });
+    r.applier.receive("d1", { type: "camera", seq: 2, deviceId: "nope", target: "staged" });
+    runFrame(16);
+    const s = stagedOf(r.deps);
+    expect(s.setFeed).toHaveBeenCalledTimes(1);
+    expect(s.setFeed).toHaveBeenCalledWith({ kind: "remote", hint: "Chrome on Android" });
+    expect(r.deps.setCamera).not.toHaveBeenCalled();
+    expect(seqs(r.acks)).toEqual([1, 2]);
+  });
+
+  it.each([undefined, "live"] as const)(
+    "target %s reaches the live side exactly as before (AC3)",
+    (target) => {
+      const r = rig(true, true);
+      for (const control of seven(target)) r.applier.receive("d1", control);
+      runFrame(16);
+      expect(r.deps.setDials).toHaveBeenCalledWith({ ...DEFAULT_DIALS, reactivity: 0.3 });
+      expect(r.deps.setColour).toHaveBeenCalledWith(0, "#00ff00");
+      expect(r.deps.resetColour).toHaveBeenCalledWith(1);
+      expect(r.deps.setCamera).toHaveBeenCalledWith("cam-2");
+      expect(r.deps.setTransition).toHaveBeenCalledWith({
+        kind: "dip",
+        duration: 4,
+        keepColour: true,
+      });
+      expect(r.deps.setStrength).toHaveBeenCalledWith("w1", 0, 0.2);
+      expect(r.deps.pick).toHaveBeenCalledWith("c1");
+      for (const fn of stagedSpies(stagedOf(r.deps))) expect(fn).not.toHaveBeenCalled();
+    },
+  );
+
+  it("with no staged look, a staged control is dropped and acknowledged (AC4)", () => {
+    const r = rig(true, false);
+    for (const control of seven("staged")) r.applier.receive("d1", control);
+    runFrame(16);
+    for (const fn of stagedSpies(stagedOf(r.deps))) expect(fn).not.toHaveBeenCalled();
+    expect(liveCalls(r.deps)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    expect(seqs(r.acks)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+});
+
+describe("stage and unstage (B-07 AC1, AC5, AC7, AC8)", () => {
+  it("stage from live copies the live look, the camera on screen and the transition, and calls nothing live (AC1)", () => {
+    const r = rig();
+    r.applier.receive("d1", dials(1, { recognisability: 0.4 }));
+    r.applier.receive("d1", { type: "stage", seq: 2, from: "live" });
+    runFrame(16);
+    expect(stagedOf(r.deps).fromLive).toHaveBeenCalledWith(
+      { id: "w1", name: "Warm", stored: LIVE, palette: ["#111111", "#222222"], amounts: [0.7] },
+      { ...DEFAULT_DIALS, recognisability: 0.4 },
+      { kind: "local", deviceId: "cam-1", label: "Front" },
+      { kind: "wipe", duration: 3 },
+    );
+    expect(liveCalls(r.deps)).toEqual([1, 0, 0, 0, 0, 0, 0]); // only the dials control before it
+    expect(seqs(r.acks)).toEqual([1, 2]);
+  });
+
+  it("stage a profile makes a staged look and picks it there, acknowledged at its settle (AC5)", async () => {
+    const r = rig();
+    r.applier.receive("d1", { type: "stage", seq: 3, from: { profile: "c1" } });
+    runFrame(16);
+    const s = stagedOf(r.deps);
+    expect(s.fromLive).toHaveBeenCalledTimes(1);
+    expect(s.pick).toHaveBeenCalledWith("c1");
+    expect(r.deps.pick).not.toHaveBeenCalled();
+    expect(r.acks).toEqual([]);
+    await Promise.resolve();
+    await Promise.resolve();
+    runFrame(32);
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 3 }]]);
+  });
+
+  it("stage a scene is acknowledged and changes nothing yet", () => {
+    const r = rig();
+    r.applier.receive("d1", { type: "stage", seq: 4, from: { scene: "s1" } });
+    runFrame(16);
+    expect(stagedOf(r.deps).fromLive).not.toHaveBeenCalled();
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 4 }]]);
+  });
+
+  it("unstage clears the staged look and touches nothing live (AC7)", () => {
+    const r = rig(true, true);
+    r.applier.receive("d1", { type: "unstage", seq: 5 });
+    runFrame(16);
+    expect(stagedOf(r.deps).clear).toHaveBeenCalledTimes(1);
+    expect(liveCalls(r.deps)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 5 }]]);
+  });
+
+  it("no staging control lists or picks a profile on the live side (AC8)", () => {
+    const r = rig(true, true);
+    r.applier.receive("d1", { type: "stage", seq: 1, from: "live" });
+    r.applier.receive("d1", {
+      type: "colour",
+      seq: 2,
+      slot: 0,
+      value: "#00ff00",
+      target: "staged",
+    });
+    r.applier.receive("d1", { type: "unstage", seq: 3 });
+    runFrame(16);
+    expect(r.deps.refresh).not.toHaveBeenCalled();
+    expect(r.deps.pick).not.toHaveBeenCalled();
   });
 });
 

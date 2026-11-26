@@ -15,6 +15,7 @@ import {
   type ControlStatus,
   type ScreenMessage,
   type ScreenState,
+  type Staged,
   type ToScreen,
   type TransitionChoice,
 } from "@djv/shared";
@@ -79,6 +80,8 @@ export interface ScreenFacts {
   started: boolean;
   /** B-09 SD5: the current transition choice. */
   transition: TransitionChoice;
+  /** B-07 PD2: the staged look as controllers show it; null or absent while there is none. */
+  staged?: Staged | null;
   /** B-06: the remote cameras, a picked remote camera's id, the main audio. */
   remote?: {
     cameras: ScreenState["cameras"];
@@ -101,6 +104,7 @@ export function toScreenState({
   started,
   transition,
   remote,
+  staged = null,
 }: ScreenFacts) {
   const local = cameras.map(({ deviceId, label }) => ({ deviceId, label, remote: false }));
   const state: ScreenState = {
@@ -130,6 +134,7 @@ export function toScreenState({
       dj,
       vj,
     })),
+    staged,
   };
   return state;
 }

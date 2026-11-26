@@ -80,8 +80,50 @@ export interface ActiveProfile {
   setStrength(profile: string, index: number, value: number): void;
   /** The engine's guard acted (B-03 SD8): its reason shows until the next successful pick. */
   guard(event: GuardEvent): void;
+  /** B-07 PD5: the live look as it is now, for Stage from live; nothing is fetched. */
+  snapshot(): LiveSnapshot;
   state(): ActiveState;
   subscribe(listener: () => void): () => void;
+}
+
+/** B-07: a look as the screen page holds it — its stored profile and the live edits on it. */
+export interface LiveSnapshot {
+  /** The profile's id, or `scene:<id>` for a scene's copy (B-07 SD17). */
+  id: string;
+  name: string;
+  /** The profile's own fields only: what a scene's copy is built from (SD1). */
+  stored: Profile;
+  palette: string[];
+  /** Each effect's strength on screen, by its place in the stack. */
+  amounts: number[];
+}
+
+/** A profile's own fields, without a stored row's id, revision or times (B-07 PD8). */
+export function definitionOf({ name, palette, dials, effects, primary }: Profile): Profile {
+  return { name, palette, dials, effects, ...(primary === undefined ? {} : { primary }) };
+}
+
+/** B-18 PD5: one entry per effect ticked DJ or VJ, named as the builder names it. */
+export function faderEntries(profile: Profile, amountAt: (index: number) => number): EffectEntry[] {
+  return profile.effects.flatMap((effect, index) => {
+    const dj = effect.dj === true;
+    const vj = effect.vj === true;
+    if (!dj && !vj) return [];
+    const name = (effect.type === "custom" ? effect.label.trim() : effect.type).slice(0, 40);
+    return [{ index, name, stored: effect.amount, value: amountAt(index), dj, vj }];
+  });
+}
+
+/** Why a profile could not be fetched: the words the panel and every controller show. */
+export function fetchReason(kind: string): string {
+  return (
+    signInReason(kind) ??
+    (kind === "unreachable"
+      ? REASONS.unreachable
+      : kind === "missing"
+        ? REASONS.missing
+        : REASONS.unusable)
+  );
 }
 
 const REASONS = {
@@ -174,16 +216,9 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     effects: faderEffects(),
   });
 
-  /** B-18 PD5: one entry per effect ticked DJ or VJ, named as the builder names it. */
-  const faderEffects = (): EffectEntry[] =>
-    activeProfile.effects.flatMap((effect, index) => {
-      const dj = effect.dj === true;
-      const vj = effect.vj === true;
-      if (!dj && !vj) return [];
-      const name = (effect.type === "custom" ? effect.label.trim() : effect.type).slice(0, 40);
-      const value = liveAmounts.get(index) ?? effect.amount;
-      return [{ index, name, stored: effect.amount, value, dj, vj }];
-    });
+  const amountAt = (index: number) =>
+    liveAmounts.get(index) ?? activeProfile.effects[index]?.amount ?? 0;
+  const faderEffects = (): EffectEntry[] => faderEntries(activeProfile, amountAt);
 
   /**
    * Switches to `profile` in the engine by `choice`, then its dials; `false` when the engine
@@ -249,13 +284,7 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     const result = await deps.api.get(id);
     if (mine !== token) return;
     if (result.kind !== "ok") {
-      reason =
-        signInReason(result.kind) ??
-        (result.kind === "unreachable"
-          ? REASONS.unreachable
-          : result.kind === "missing"
-            ? REASONS.missing
-            : REASONS.unusable);
+      reason = fetchReason(result.kind);
       emit();
       return;
     }
@@ -324,6 +353,13 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
       guardReason = guardReasonOf(event);
       emit();
     },
+    snapshot: () => ({
+      id: active.id,
+      name: active.name,
+      stored: definitionOf(activeProfile),
+      palette: [...live],
+      amounts: activeProfile.effects.map((_, i) => amountAt(i)),
+    }),
     state,
     subscribe(listener) {
       listeners.add(listener);

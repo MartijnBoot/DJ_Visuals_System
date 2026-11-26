@@ -49,6 +49,7 @@ import { Overlay } from "./Overlay.tsx";
 import { Panel } from "./Panel.tsx";
 import { sharedToEngine } from "./profile-compat.ts";
 import { createActiveProfile } from "./profiles/active.ts";
+import { createStagedLook } from "./scenes/staged.ts";
 import { getProfile, listProfiles } from "./profiles/api.ts";
 import { loadProfileId, saveProfileId } from "./profiles/remembered.ts";
 import { loadTransition, saveTransition } from "./profiles/transition.ts";
@@ -167,6 +168,11 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
   useEffect(() => active.subscribe(() => setProfiles(active.state())), [active]);
 
   const [control] = useState(() => {
+    // B-07 (SD2): the staged look, beside the live one; a change marks the next frame's state.
+    const staged = createStagedLook({
+      api: { get: (id) => getProfile(id) },
+      onChange: () => link.markDirty(),
+    });
     const applier = createApplier({
       dials: () => facts.current.dials,
       setDials: (next) => applyDials(next),
@@ -179,6 +185,12 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       pick: (id) => active.pick(id),
       refresh: () => void active.open(),
       started: () => startedRef.current,
+      staged,
+      snapshot: () => active.snapshot(),
+      // B-07 PD6: the feed is matched and stored by `scenes/feed.ts` (T6); until then, none.
+      feedOnScreen: () => null,
+      feedOf: () => null,
+      transition: () => facts.current.transition,
     });
     // B-06: the senders' labels, for log lines (never a device's own label, SD25).
     const labels = new Map<string, string>();
@@ -197,6 +209,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
         toScreenState({
           ...facts.current,
           profiles: active.state(),
+          staged: staged.state(),
           started: startedRef.current,
           ...(sourcesRef.current ? { remote: sourcesRef.current.facts(performance.now()) } : {}),
         }),

@@ -303,7 +303,28 @@ describe("toScreenState (SD5, SD8, AC26)", () => {
       mainAudio: null,
       transition: { kind: "wipe", duration: 4, keepColour: true },
       effects: [],
+      staged: null,
     });
+  });
+
+  // B-07 PD2, PD3: the staged look as controllers show it.
+  it("carries the staged look", async () => {
+    const staged = {
+      id: "w1",
+      name: "Warm",
+      palette: ["#000000", "#ff0000"],
+      storedPalette: ["#000000", "#ffffff"],
+      primary: 1,
+      dials: { recognisability: 0.1, reactivity: 0.2 },
+      effects: [],
+      feed: { kind: "remote" as const, label: "Chrome on Android" },
+      transition: { kind: "cut" as const, duration: 1 },
+      fromScene: null,
+      settled: false,
+      reason: null,
+    };
+    const built = toScreenState({ ...(await facts("ok")), staged });
+    expect(screenStateSchema.parse(built).staged).toEqual(staged);
   });
 
   // B-18 SD7, PD5: the active profile's flagged effects, live and stored.

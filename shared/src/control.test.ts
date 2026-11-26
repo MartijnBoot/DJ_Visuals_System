@@ -345,3 +345,63 @@ describe("typeOf (SD20)", () => {
     expect(typeOf("{}")).toBe("unparseable");
   });
 });
+
+// B-07 T5 (SD3, SD4, AC4, PD1-PD3): which look a control edits, stage and unstage, the staged
+// look in the state.
+describe("staging (B-07 SD4, PD1, PD3)", () => {
+  const device = (message: unknown) => deviceMessageSchema.safeParse(message).success;
+  const staged = {
+    id: "w1",
+    name: "Warm",
+    palette: ["#000000", "#ffffff"],
+    storedPalette: ["#000000", "#ffffff"],
+    primary: 1,
+    dials: { recognisability: 0.4, reactivity: 0.6 },
+    effects: [flaggedEntry],
+    feed: { kind: "local", label: "Front camera" },
+    transition: { kind: "crossfade", duration: 2 },
+    fromScene: null,
+    settled: true,
+    reason: null,
+  };
+
+  it("takes target live or staged on each of the seven, and refuses any other", () => {
+    for (const control of [
+      { type: "pick", seq: 1, id: "w1" },
+      { type: "dials", seq: 2, recognisability: 0.5 },
+      { type: "colour", seq: 3, slot: 0, value: "#ff8800" },
+      { type: "resetColour", seq: 4, slot: 1 },
+      { type: "camera", seq: 5, deviceId: "cam-2" },
+      { type: "transition", seq: 6, kind: "wipe" },
+      { type: "effect", seq: 7, profile: "w1", index: 0, value: 1 },
+    ]) {
+      expect(device({ ...control, target: "staged" }), control.type).toBe(true);
+      expect(device({ ...control, target: "live" }), control.type).toBe(true);
+      expect(device({ ...control, target: "sideways" }), control.type).toBe(false);
+    }
+    expect(device({ type: "refresh", seq: 1, target: "staged" })).toBe(false);
+    expect(device({ type: "mainAudio", seq: 1, source: "local", target: "staged" })).toBe(false);
+  });
+
+  it("takes stage from live, a profile or a scene, and unstage", () => {
+    for (const from of ["live", { profile: "w1" }, { scene: "s1" }]) {
+      expect(device({ type: "stage", seq: 1, from })).toBe(true);
+    }
+    for (const from of ["dead", { profile: "" }, { scene: "s1", profile: "w1" }, {}]) {
+      expect(device({ type: "stage", seq: 1, from })).toBe(false);
+    }
+    expect(device({ type: "unstage", seq: 2 })).toBe(true);
+    expect(typeOf(JSON.stringify({ type: "stage", seq: 1, from: 3 }))).toBe("stage");
+  });
+
+  it("takes the state with a staged look, with null, and without the field", () => {
+    const parse = (s: unknown) => toDeviceSchema.safeParse({ type: "state", state: s }).success;
+    expect(parse({ ...state, staged })).toBe(true);
+    expect(parse({ ...state, staged: null })).toBe(true);
+    expect(parse(state)).toBe(true);
+    expect(parse({ ...state, staged: { ...staged, feed: { kind: "none", label: "" } } })).toBe(
+      false,
+    );
+    expect(parse({ ...state, staged: { ...staged, definition: {} } })).toBe(false);
+  });
+});

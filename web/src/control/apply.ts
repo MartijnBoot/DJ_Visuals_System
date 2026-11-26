@@ -8,8 +8,12 @@
 // camera (`remote:<deviceId>`), which goes to the same choice; `mainAudio` sets the main-audio
 // choice (SD22). B-09 (T1): `transition` changes the current transition choice (SD19), applied and
 // acknowledged like the dials. B-18 (T2): `effect` sets one effect's live strength, likewise.
-import type { AppliedEntry, Control, TransitionChoice } from "@djv/shared";
+// B-07 (T5, SD3, SD4, PD1, PD7): a control with `target: "staged"` edits the staged look instead
+// (`scenes/staged.ts`), and is dropped and acknowledged while none exists; `stage` and `unstage`
+// make and discard it. Without a target, or with `"live"`, every control does what it did.
+import type { AppliedEntry, Control, Feed, TransitionChoice } from "@djv/shared";
 import type { Dials } from "@djv/engine";
+import type { LiveSnapshot, StagedLook } from "../scenes/staged.ts";
 
 export interface ApplierDeps {
   /** The dials the engine holds now. */
@@ -32,6 +36,16 @@ export interface ApplierDeps {
   refresh(): void;
   /** Start has happened: before it no camera is open, so a camera control is a no-op (SD23). */
   started(): boolean;
+  /** B-07: the staged look. */
+  staged: StagedLook;
+  /** B-07 AC1: the live look now, for Stage from live. */
+  snapshot(): LiveSnapshot;
+  /** B-07 PD6: the camera on screen as a feed; null when none is. */
+  feedOnScreen(): Feed | null;
+  /** B-07 PD7: a camera id (local, or `remote:<deviceId>`) as a feed; null when it names none. */
+  feedOf(deviceId: string): Feed | null;
+  /** B-09 SD5: the current transition choice, which Stage from live copies (AC1). */
+  transition(): TransitionChoice;
 }
 
 export interface Applier {
@@ -44,8 +58,63 @@ export function createApplier(deps: ApplierDeps): Applier {
   let queue: { deviceId: string; control: Control }[] = [];
   let settled: AppliedEntry[] = [];
 
+  /** Stage from live (AC1): the live look, the camera on screen, the transition's kind and duration. */
+  const stageLive = () => {
+    const { kind, duration } = deps.transition();
+    deps.staged.fromLive(deps.snapshot(), deps.dials(), deps.feedOnScreen(), { kind, duration });
+  };
+
+  /** A control with `target: "staged"`: `true` when its acknowledgement waits (a pick). */
+  const toStaged = (control: Control, settle: () => void): boolean => {
+    const staged = deps.staged;
+    if (staged.state() === null) return false; // AC4: dropped, acknowledged
+    switch (control.type) {
+      case "dials": {
+        const { recognisability, reactivity } = control;
+        staged.setDials({
+          ...(recognisability !== undefined ? { recognisability } : {}),
+          ...(reactivity !== undefined ? { reactivity } : {}),
+        });
+        return false;
+      }
+      case "colour":
+        staged.setColour(control.slot, control.value);
+        return false;
+      case "resetColour":
+        staged.resetColour(control.slot);
+        return false;
+      case "camera": {
+        // PD7: only the feed Go will switch to; nothing is opened or resumed (AC18).
+        const feed = deps.feedOf(control.deviceId);
+        if (feed) staged.setFeed(feed);
+        return false;
+      }
+      case "transition": {
+        const { kind, duration } = control; // a Keep colour is ignored (SD1)
+        staged.setTransition({
+          ...(kind !== undefined ? { kind } : {}),
+          ...(duration !== undefined ? { duration } : {}),
+        });
+        return false;
+      }
+      case "effect":
+        staged.setStrength(control.profile, control.index, control.value);
+        return false;
+      case "pick":
+        staged.pick(control.id).then(settle, settle);
+        return true;
+      default:
+        return false;
+    }
+  };
+
   const apply = (deviceId: string, control: Control, acks: AppliedEntry[]) => {
     const ack = { deviceId, seq: control.seq };
+    const settle = () => void settled.push(ack);
+    if ("target" in control && control.target === "staged") {
+      if (!toStaged(control, settle)) acks.push(ack);
+      return;
+    }
     switch (control.type) {
       case "dials": {
         const current = deps.dials();
@@ -84,11 +153,24 @@ export function createApplier(deps: ApplierDeps): Applier {
         // value clears and it shows the screen's.
         deps.setStrength(control.profile, control.index, control.value);
         break;
-      case "pick": {
-        const settle = () => void settled.push(ack);
+      case "pick":
         deps.pick(control.id).then(settle, settle);
         return; // acknowledged at the swap
+      case "stage": {
+        const from = control.from;
+        if (from === "live") stageLive();
+        else if ("profile" in from) {
+          // A profile is staged on a copy of the live look, with no scene tie (PD4).
+          stageLive();
+          deps.staged.pick(from.profile).then(settle, settle);
+          return; // acknowledged at its settle, as a pick
+        }
+        // `{ scene }`: acknowledged, staged from T7 on.
+        break;
       }
+      case "unstage":
+        deps.staged.clear();
+        break;
       default:
         // B-09 PD15: a control type with no case fails the type check here.
         control satisfies never;

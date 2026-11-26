@@ -91,18 +91,24 @@ export type TransitionChoice = z.infer<typeof transitionChoiceSchema>;
 
 // ---- Controls: what a controller asks the screen page to do. Each carries `seq`. ----
 
+/** B-07 SD4, PD1: which look a control edits; absent is the live look, as before B-07. */
+export const CONTROL_TARGETS = ["live", "staged"] as const;
+export type ControlTarget = (typeof CONTROL_TARGETS)[number];
+const target = z.enum(CONTROL_TARGETS).optional();
+
 export const controlSchema = z.discriminatedUnion("type", [
-  message("pick", { seq, id }),
+  message("pick", { seq, id, target }),
   message("dials", {
     seq,
     recognisability: unit.optional(),
     reactivity: unit.optional(),
+    target,
   }).refine((m) => m.recognisability !== undefined || m.reactivity !== undefined, {
     message: "names at least one dial",
   }),
-  message("colour", { seq, slot, value: colour }),
-  message("resetColour", { seq, slot }),
-  message("camera", { seq, deviceId: z.string().min(1).max(500) }),
+  message("colour", { seq, slot, value: colour, target }),
+  message("resetColour", { seq, slot, target }),
+  message("camera", { seq, deviceId: z.string().min(1).max(500), target }),
   message("refresh", { seq }),
   /** B-06 SD22: the main-audio choice. */
   message("mainAudio", { seq, source: z.enum(["remote", "local"]) }),
@@ -112,11 +118,23 @@ export const controlSchema = z.discriminatedUnion("type", [
     kind: transitionKind.optional(),
     duration: transitionDuration.optional(),
     keepColour: z.boolean().optional(),
+    target,
   }).refine((m) => m.kind !== undefined || m.duration !== undefined || m.keepColour !== undefined, {
     message: "names at least one of kind, duration and keepColour",
   }),
   /** B-18 SD7: one effect's live strength, by its place in the named profile's stack. */
-  message("effect", { seq, profile: id, index: effectIndex, value: unit }),
+  message("effect", { seq, profile: id, index: effectIndex, value: unit, target }),
+  /** B-07 SD3, PD1: a new staged look from the live one, a profile or a saved scene. */
+  message("stage", {
+    seq,
+    from: z.union([
+      z.literal("live"),
+      z.strictObject({ profile: id }),
+      z.strictObject({ scene: id }),
+    ]),
+  }),
+  /** B-07 AC7: the staged look is discarded. */
+  message("unstage", { seq }),
 ]);
 export type Control = z.infer<typeof controlSchema>;
 export type ControlType = Control["type"];
@@ -160,6 +178,32 @@ export const effectEntrySchema = z.strictObject({
 });
 export type EffectEntry = z.infer<typeof effectEntrySchema>;
 
+/**
+ * B-07 PD3: the staged look as every controller shows it; its definition stays on the screen
+ * page (SD18). `id` is the source profile's id, or `scene:<id>` for a scene's copy.
+ */
+export const stagedSchema = z.strictObject({
+  id,
+  name: z.string().max(200),
+  palette: z.array(colour).min(LIMITS.paletteMin).max(LIMITS.paletteMax),
+  storedPalette: z.array(colour).min(LIMITS.paletteMin).max(LIMITS.paletteMax),
+  primary: slot,
+  dials: z.strictObject({ recognisability: unit, reactivity: unit }),
+  effects: z.array(effectEntrySchema).max(LIMITS.effects),
+  /** The feed Go will switch to (SD6): a local camera's label or a sender's hint. */
+  feed: z
+    .strictObject({ kind: z.enum(["local", "remote"]), label: z.string().max(500) })
+    .nullable(),
+  transition: z.strictObject({ kind: transitionKind, duration: transitionDuration }),
+  /** SD11: the scene the look came from, until it is staged from something else. */
+  fromScene: z.strictObject({ id, name: z.string().max(200) }).nullable(),
+  /** False while a staged pick loads: Save waits for it (spec, Edge cases). */
+  settled: z.boolean(),
+  /** A staged pick's failure, or why a save, rename or delete was refused. */
+  reason: z.string().max(500).nullable(),
+});
+export type Staged = z.infer<typeof stagedSchema>;
+
 export const screenStateSchema = z.strictObject({
   profiles: z.array(z.strictObject({ id, name: z.string().max(200) })).max(1000),
   activeId: id,
@@ -199,6 +243,8 @@ export const screenStateSchema = z.strictObject({
   transition: transitionChoiceSchema,
   /** B-18 SD7, PD1, PD5: the active profile's effects ticked DJ or VJ, in stack order. */
   effects: z.array(effectEntrySchema).max(LIMITS.effects),
+  /** B-07 PD2: the staged look, null while there is none; optional for the older fixtures. */
+  staged: stagedSchema.nullable().optional(),
 });
 export type ScreenState = z.infer<typeof screenStateSchema>;
 

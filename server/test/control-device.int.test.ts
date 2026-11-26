@@ -519,6 +519,20 @@ describe("ending pairings (AC6, AC13, AC14, AC17)", () => {
     expect(status.devices).toHaveLength(2);
     expect(b.client.ws.readyState).toBe(b.client.ws.OPEN);
   });
+
+  // B-07 T5 (SD4, AC4): a target that is neither live nor staged fails the schema.
+  it("drops a pick with target sideways with one warn naming pick, and the socket stays open (B-07 AC4)", async () => {
+    screen.send({ type: "state", state });
+    const a = await approved();
+    a.client.send({ type: "pick", seq: 1, id: "builtin", target: "sideways" });
+    const dropped = () => lines.filter((l) => l.msg === "control message dropped");
+    await until(() => dropped().length === 1);
+    expect(dropped()[0]).toMatchObject({ socket: "device", type: "pick" });
+    a.client.send({ type: "pick", seq: 2, id: "builtin", target: "staged" });
+    const relayed = await screen.find((m) => m.type === "control");
+    expect(relayed).toMatchObject({ control: { seq: 2, target: "staged" } });
+    expect(a.client.ws.readyState).toBe(a.client.ws.OPEN);
+  });
 });
 
 describe("logging (AC7, AC35, SD27)", () => {

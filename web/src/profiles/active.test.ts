@@ -733,3 +733,41 @@ describe("picks with the transition choice (B-09)", () => {
     expect(lastOptions(setProfile).transition).toMatchObject({ kind: "crossfade" });
   });
 });
+
+// B-07 T5 (PD5, AC1): the live look as Stage from live copies it; nothing is fetched or changed.
+describe("snapshot (B-07 AC1)", () => {
+  const own: Profile = {
+    name: "Own",
+    palette: ["#000000", "#ffffff", "#ff0000"],
+    dials: { recognisability: 0.5, reactivity: 0.5 },
+    effects: [
+      { type: "zoom", amount: 0.2, dj: true },
+      { type: "smear", amount: 0.4 },
+    ],
+  };
+
+  it("is the live look: its own profile fields, the live palette and every effect's strength", async () => {
+    const { active, api, setProfile } = setup({
+      get: { kind: "ok", profile: { ...stored("o1", "Own"), ...own } },
+    });
+    await active.pick("o1");
+    active.setColour(0, "#123456");
+    active.setStrength("o1", 1, 0.9);
+    const calls = [api.get.mock.calls.length, setProfile.mock.calls.length];
+    expect(active.snapshot()).toEqual({
+      id: "o1",
+      name: "Own",
+      stored: own, // a stored row's id, revision and times are not part of the copy
+      palette: ["#123456", "#ffffff", "#ff0000"],
+      amounts: [0.2, 0.9],
+    });
+    expect([api.get.mock.calls.length, setProfile.mock.calls.length]).toEqual(calls);
+  });
+
+  it("is the built-in before any pick", () => {
+    const { active } = setup();
+    const snap = active.snapshot();
+    expect(snap).toMatchObject({ id: BUILTIN_ID, name: "Built-in" });
+    expect(snap.amounts).toEqual(snap.stored.effects.map((e) => e.amount));
+  });
+});
