@@ -479,6 +479,44 @@ describe("stage and unstage (B-07 AC1, AC5, AC7, AC8)", () => {
 
 // B-07 T6 (SD3, SD6, SD16, AC10-AC12, AC15-AC17; plan PD5, PD6): Go switches a matched feed
 // first, then hands the staged look to `adopt`, and stages a copy of the new live look after.
+describe("the panel's own controls (B-07 T10, SD10)", () => {
+  const settle = async () => {
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+  };
+
+  it("applies a Go and a stage from the panel at the next frame through the same path, and acknowledges no device", async () => {
+    const r = rig(true, true);
+    r.deps.scenes.ask = vi.fn(async () => ({
+      type: "scenes.result" as const,
+      requestId: 1,
+      ok: true,
+      scene: {
+        id: "s1",
+        name: "Warm crowd",
+        definition: buildScene(STAGED_DEF),
+        createdAt: "t",
+        updatedAt: "t",
+      },
+    }));
+    r.applier.local({ type: "go", seq: 0 });
+    expect(r.deps.adopt).not.toHaveBeenCalled(); // queued, not applied on receipt
+    runFrame(16);
+    expect(r.deps.adopt).toHaveBeenCalledTimes(1);
+    expect(r.deps.setCamera).toHaveBeenCalledWith("cam-9");
+    r.applier.local({ type: "stage", seq: 0, from: { scene: "s1" } });
+    runFrame(32);
+    await settle();
+    runFrame(48);
+    expect(r.deps.scenes.ask).toHaveBeenCalledWith({ type: "scenes.get", id: "s1" });
+    expect(r.deps.staged.fromScene).toHaveBeenCalledWith(
+      buildScene(STAGED_DEF),
+      "s1",
+      "Warm crowd",
+    );
+    expect(r.acks).toEqual([]);
+  });
+});
+
 describe("go (B-07 AC10-AC12, AC15-AC17)", () => {
   const settle = async () => {
     for (let i = 0; i < 4; i++) await Promise.resolve();

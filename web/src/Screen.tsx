@@ -16,7 +16,9 @@
 // Transitions (B-09): the current choice is loaded from `djv.transition` at mount and is part of
 // the state every controller mirrors; a `transition` control merges into it and saves it. Each
 // pick reads it then (`profiles/active.ts`), and each frame tells the engine whether the audio
-// that feeds the looks is ok, for Beat cut (`remote/sources.ts`).
+// that feeds the looks is ok, for Beat cut (`remote/sources.ts`). Scenes (B-07): the panel's scene
+// row stages and goes through the applier, as a controller does, and asks the server over the
+// screen socket for the rest (rename, delete, export, import).
 import { createFeatureSource, ZERO_FEATURES } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
 import {
@@ -27,7 +29,7 @@ import {
   type LatencyReading,
   type RenderScale,
 } from "@djv/engine";
-import type { SceneEntry, TransitionChoice } from "@djv/shared";
+import type { SceneEntry, Staged, TransitionChoice } from "@djv/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createLatencyWindow } from "../../engine/src/latency.ts";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "./capture/devices.ts";
@@ -38,7 +40,7 @@ import { createVideo, hasFrame, videoReady } from "./capture/video.ts";
 import { createApplier } from "./control/apply.ts";
 import { openSocket } from "./control/device-link.ts";
 import { hostedSession } from "./auth/session.ts";
-import { createScreenLink, toScreenState } from "./control/screen-link.ts";
+import { createScreenLink, toScreenState, type SceneAsk } from "./control/screen-link.ts";
 import type { AudioSource } from "./remote/main-audio.ts";
 import { createPeers } from "./remote/peers.ts";
 import { createSources, type Sources } from "./remote/sources.ts";
@@ -179,11 +181,20 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
   const reasonOf = (state: ReturnType<typeof active.state>) =>
     state.reason ?? (feedNote.current ? FEED_NOTE : null);
 
+  // B-07 (SD10): what the panel's scene row shows — the list and the staged look.
+  const [sceneView, setSceneView] = useState<{ list: SceneEntry[] | null; staged: Staged | null }>({
+    list: null,
+    staged: null,
+  });
+
   const [control] = useState(() => {
     // B-07 (SD2): the staged look, beside the live one; a change marks the next frame's state.
     const staged = createStagedLook({
       api: { get: (id) => getProfile(id) },
-      onChange: () => link.markDirty(),
+      onChange: () => {
+        link.markDirty();
+        setSceneView((view) => ({ ...view, staged: staged.state() }));
+      },
     });
     const applier = createApplier({
       dials: () => facts.current.dials,
@@ -280,8 +291,18 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       onScenes: (list) => {
         sceneList = list;
         link.markDirty();
+        setSceneView((view) => ({ ...view, list }));
       },
     });
+    /** B-07 (SD10): the panel's scene requests; a rename keeps the staged look tied (as `apply`). */
+    const askScenes = async (request: SceneAsk) => {
+      const result = await link.scenes(request);
+      const scene = request.type === "scenes.rename" && result?.ok ? result.scene : undefined;
+      if (scene && staged.state()?.fromScene?.id === scene.id) {
+        staged.tie({ id: scene.id, name: scene.name });
+      }
+      return result;
+    };
     /** Senders whose peer has been connected since their first offer (PD5). */
     const reached = new Set<string>();
     /**
@@ -318,6 +339,11 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       senderState,
       changeTransition,
       setFeedNote,
+      scenes: {
+        stage: (id: string) => applier.local({ type: "stage", seq: 0, from: { scene: id } }),
+        go: () => applier.local({ type: "go", seq: 0 }),
+        ask: askScenes,
+      },
     };
   });
   // B-12 SD1, AC21: hosted use has no External control and no remote input, so the screen link
@@ -557,6 +583,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
           onControl={(action) => void control.link.send(action)}
           {...(hosted ? { hosted: { signedOut, onSignInAgain: () => void hosted.signIn() } } : {})}
           cloud={cloud}
+          {...(hosted ? {} : { scenes: { ...sceneView, ...control.scenes } })}
         />
       )}
     </>

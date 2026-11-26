@@ -13,6 +13,8 @@
 // make and discard it. Without a target, or with `"live"`, every control does what it did.
 // B-07 (T7, SD9, SD18, PD8, PD9): Save, Update, Rename and Delete build on the screen page and
 // ask the server over the screen socket; a refusal's words go into the staged look's reason.
+// B-07 (T10, SD10): the panel's Stage and Go are applied the same way, at the next frame, through
+// `local`, and acknowledge no device.
 import type {
   AppliedEntry,
   Control,
@@ -85,17 +87,20 @@ const UNAVAILABLE = "Scenes unavailable";
 const WAIT = "Wait for the look to load";
 const NOT_TIED = "Update only the scene this look came from";
 
-const refusalOf = (result: SceneResult | null): string =>
+/** A scene request's refusal in the controller's words; the panel shows the same. */
+export const refusalOf = (result: SceneResult | null): string =>
   result?.error ? SCENE_REFUSALS[result.error.reason] : UNAVAILABLE;
 
 export interface Applier {
   receive(deviceId: string, control: Control): void;
+  /** The screen page's own control (the panel's Stage and Go): applied alike, acknowledged to none. */
+  local(control: Control): void;
   /** Applies everything received; returns this frame's acknowledgements. */
   drain(): AppliedEntry[];
 }
 
 export function createApplier(deps: ApplierDeps): Applier {
-  let queue: { deviceId: string; control: Control }[] = [];
+  let queue: { deviceId: string | null; control: Control }[] = [];
   let settled: AppliedEntry[] = [];
 
   /** Stage from live (AC1): the live look, the camera on screen, the transition's kind and duration. */
@@ -222,11 +227,11 @@ export function createApplier(deps: ApplierDeps): Applier {
     }
   };
 
-  const apply = (deviceId: string, control: Control, acks: AppliedEntry[]) => {
-    const ack = { deviceId, seq: control.seq };
-    const settle = () => void settled.push(ack);
+  const apply = (deviceId: string | null, control: Control, acks: AppliedEntry[]) => {
+    const ack = deviceId === null ? null : { deviceId, seq: control.seq };
+    const settle = () => void (ack && settled.push(ack));
     if ("target" in control && control.target === "staged") {
-      if (!toStaged(control, settle)) acks.push(ack);
+      if (!toStaged(control, settle) && ack) acks.push(ack);
       return;
     }
     switch (control.type) {
@@ -313,12 +318,15 @@ export function createApplier(deps: ApplierDeps): Applier {
         // B-09 PD15: a control type with no case fails the type check here.
         control satisfies never;
     }
-    acks.push(ack);
+    if (ack) acks.push(ack);
   };
 
   return {
     receive(deviceId, control) {
       queue.push({ deviceId, control });
+    },
+    local(control) {
+      queue.push({ deviceId: null, control });
     },
     drain() {
       const acks = settled;
