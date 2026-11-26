@@ -165,7 +165,6 @@ test("320×568, DJ: the disc and Recognisability together send throughout and th
     await touch(cdp, "touchMove", [disc(i / moves), dial(i / moves)]);
     await phone.waitForTimeout(20);
   }
-  const shown = (await phone.getByTestId("wheel-value").textContent())!;
   await touch(cdp, "touchEnd", []);
   await phone.waitForTimeout(300);
 
@@ -183,7 +182,9 @@ test("320×568, DJ: the disc and Recognisability together send throughout and th
   expect(budgetProblems(frames)).toEqual([]);
   const lastColour = colours.at(-1)!.message.value as string;
   const lastDial = dials.at(-1)!.message.recognisability as number;
-  expect(lastColour).toBe(shown);
+  // The wheel's own value, read once React has rendered the last move: reading it straight after
+  // the final touchMove raced the render and saw the move before (CI run 45496093447).
+  await expect(phone.getByTestId("wheel-value")).toHaveText(lastColour);
   await expect(phone.getByTestId("wheel-current")).toHaveAttribute("data-colour", lastColour);
   await expect.poll(() => panelValue(page, "recognisability")).toBe(lastDial);
   await expect(fader).toHaveAttribute("aria-valuenow", String(lastDial));
