@@ -48,6 +48,20 @@ export interface StagedLook {
     transition: SceneTransition,
     fromScene?: { id: string; name: string } | null,
   ): void;
+  /** Moves on with every change to the staged look; Go reads it when pressed (PD21). */
+  revision(): number;
+  /**
+   * After a Go lands (AC11): the copy of the new live look, unless the staged look changed since
+   * `revision` (SD11: that change wins). A staged pick still loading lands in the copy (PD21).
+   */
+  afterGo(
+    revision: number,
+    snapshot: LiveSnapshot,
+    dials: Profile["dials"],
+    feed: Feed | null,
+    transition: SceneTransition,
+    fromScene: { id: string; name: string } | null,
+  ): void;
   /** A staged pick (AC5): that profile with its starting dials and stored palette; keeps the rest. */
   pick(id: string): Promise<void>;
   setDials(change: Partial<Profile["dials"]>): void;
@@ -80,8 +94,13 @@ export function createStagedLook(deps: StagedDeps): StagedLook {
   let look: Look | null = null;
   /** The token of the staged pick in flight; a newer pick or a new look moves it on. */
   let token = 0;
+  /** Every change moves it on, so a Go can tell whether the look changed while it ran. */
+  let revision = 0;
 
-  const changed = () => deps.onChange();
+  const changed = () => {
+    revision++;
+    deps.onChange();
+  };
   /** Runs `edit` on the look when there is one, then tells the page. */
   const edit = (fn: (current: Look) => void) => {
     if (!look) return;
@@ -102,22 +121,40 @@ export function createStagedLook(deps: StagedDeps): StagedLook {
     look.reason = null;
   };
 
+  const copyOf = (
+    snapshot: LiveSnapshot,
+    dials: Profile["dials"],
+    feed: Feed | null,
+    transition: SceneTransition,
+    fromScene: { id: string; name: string } | null,
+    settled: boolean,
+  ): Look => ({
+    id: snapshot.id,
+    name: snapshot.name,
+    stored: snapshot.stored,
+    palette: [...snapshot.palette],
+    amounts: [...snapshot.amounts],
+    dials: { ...dials },
+    feed,
+    transition: { kind: transition.kind, duration: transition.duration },
+    fromScene,
+    settled,
+    reason: null,
+  });
+
   return {
     fromLive(snapshot, dials, feed, transition, fromScene = null) {
       token++; // a pick in flight belongs to the look it was made on
-      look = {
-        id: snapshot.id,
-        name: snapshot.name,
-        stored: snapshot.stored,
-        palette: [...snapshot.palette],
-        amounts: [...snapshot.amounts],
-        dials: { ...dials },
-        feed,
-        transition: { kind: transition.kind, duration: transition.duration },
-        fromScene,
-        settled: true,
-        reason: null,
-      };
+      look = copyOf(snapshot, dials, feed, transition, fromScene, true);
+      changed();
+    },
+
+    revision: () => revision,
+
+    afterGo(at, snapshot, dials, feed, transition, fromScene) {
+      if (!look || at !== revision) return;
+      // The token stays: a pick still loading belongs to this copy and lands in it (PD21).
+      look = copyOf(snapshot, dials, feed, transition, fromScene, look.settled);
       changed();
     },
 

@@ -163,6 +163,7 @@ export function createApplier(deps: ApplierDeps): Applier {
     const staged = deps.staged.definition();
     if (!staged) return false; // AC12: nothing to do, acknowledged
     const fromScene = deps.staged.state()?.fromScene ?? null;
+    const revision = deps.staged.revision(); // SD11: a staged change while Go runs wins
     deps.setFeedNote(false);
     if (staged.feed) {
       const id = deps.matchFeed(staged.feed);
@@ -176,8 +177,8 @@ export function createApplier(deps: ApplierDeps): Applier {
         { kind: transition.kind, duration: transition.duration, keepColour: false },
       )
       .then((result) => {
-        if (result !== "done" || deps.staged.state() === null) return;
-        deps.staged.fromLive(deps.snapshot(), dials, feed, transition, fromScene);
+        if (result !== "done") return;
+        deps.staged.afterGo(revision, deps.snapshot(), dials, feed, transition, fromScene);
       })
       .then(settle, settle);
     return true;

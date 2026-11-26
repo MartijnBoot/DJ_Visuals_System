@@ -100,6 +100,37 @@ describe("Stage from live (AC1)", () => {
   });
 });
 
+describe("after a Go lands (AC11, SD11, PD21)", () => {
+  const scene: LiveSnapshot = {
+    id: "scene:s1",
+    name: "Crowd",
+    stored: cool,
+    palette: cool.palette,
+    amounts: [0.6],
+  };
+  const tie = { id: "s1", name: "Crowd" };
+
+  it("becomes the copy of the new live look when nothing changed since Go", () => {
+    const { staged } = setup();
+    staged.fromLive(live, warm.dials, feed, transition);
+    const at = staged.revision();
+    staged.afterGo(at, scene, cool.dials, null, transition, tie);
+    expect(staged.state()).toMatchObject({ id: "scene:s1", fromScene: tie, settled: true });
+  });
+
+  it("is kept as it is when it changed since Go, and is never brought back once unstaged", () => {
+    const { staged } = setup();
+    staged.fromLive(live, warm.dials, feed, transition);
+    const at = staged.revision();
+    staged.setDials({ reactivity: 0.05 });
+    staged.afterGo(at, scene, cool.dials, null, transition, tie);
+    expect(staged.state()).toMatchObject({ id: "w1", dials: { reactivity: 0.05 } });
+    staged.clear();
+    staged.afterGo(staged.revision(), scene, cool.dials, null, transition, tie);
+    expect(staged.state()).toBeNull();
+  });
+});
+
 describe("edits change only the staged look (AC2, PD7)", () => {
   it("dials, colour, reset, strength, feed and transition", () => {
     const { staged } = setup();

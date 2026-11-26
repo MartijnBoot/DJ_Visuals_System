@@ -2,13 +2,14 @@
 // are applied at the start of the next frame, before the engine draws, and acknowledged once per
 // frame. A controlled frame clock runs a frame's callbacks in registration order, as the browser
 // does (the same clock as `frame-feed.test.ts`).
-import type { Control, SceneEntry, SceneResult, Staged } from "@djv/shared";
+import type { Control, Profile, SceneEntry, SceneResult, Staged } from "@djv/shared";
 import type { AudioFeatures, Dials, Engine } from "@djv/engine";
 import { DEFAULT_DIALS, ZERO_FEATURES } from "@djv/engine";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startFrameFeed } from "../frame-feed.ts";
 import { buildScene } from "../scenes/build.ts";
-import type { StagedDefinition, StagedLook } from "../scenes/staged.ts";
+import type { ProfileResult } from "../profiles/api.ts";
+import { createStagedLook, type StagedDefinition, type StagedLook } from "../scenes/staged.ts";
 import { createApplier, type ApplierDeps } from "./apply.ts";
 
 let queue: { id: number; cb: FrameRequestCallback }[] = [];
@@ -60,6 +61,8 @@ function fakeStaged(exists: { current: boolean }) {
   } as Staged;
   const fake = {
     fromLive: vi.fn(() => void (exists.current = true)),
+    revision: () => 5,
+    afterGo: vi.fn(),
     pick: vi.fn(async () => {}),
     setDials: vi.fn(),
     setColour: vi.fn(),
@@ -565,7 +568,8 @@ describe("go (B-07 AC10-AC12, AC15-AC17)", () => {
     r.applier.receive("d1", { type: "go", seq: 3 });
     runFrame(16);
     await settle();
-    expect(stagedOf(r.deps).fromLive).toHaveBeenCalledWith(
+    expect(stagedOf(r.deps).afterGo).toHaveBeenCalledWith(
+      5, // the revision when Go was pressed
       r.deps.snapshot(),
       STAGED_DEF.dials,
       STAGED_DEF.feed,
@@ -581,7 +585,7 @@ describe("go (B-07 AC10-AC12, AC15-AC17)", () => {
       r.applier.receive("d1", { type: "go", seq: 4 });
       runFrame(16);
       await settle();
-      expect(stagedOf(r.deps).fromLive).not.toHaveBeenCalled();
+      expect(stagedOf(r.deps).afterGo).not.toHaveBeenCalled();
       runFrame(32);
       expect(r.acks).toEqual([[{ deviceId: "d1", seq: 4 }]]);
     }
@@ -615,6 +619,78 @@ describe("go (B-07 AC10-AC12, AC15-AC17)", () => {
     expect(r.deps.setCamera).not.toHaveBeenCalled();
     expect(r.deps.setFeedNote).toHaveBeenLastCalledWith(false);
     expect(r.deps.adopt).toHaveBeenCalledTimes(1);
+  });
+
+  describe("a staged change while the Go is pending (PD21, SD11 last change wins)", () => {
+    /** A rig whose staged look is the real one and whose adopt and fetch wait to be released. */
+    function pending() {
+      const r = rig(true, false);
+      let land: (result: "done") => void = () => {};
+      vi.mocked(r.deps.adopt).mockImplementation(() => new Promise((resolve) => (land = resolve)));
+      let fetched: (result: ProfileResult) => void = () => {};
+      const staged = createStagedLook({
+        api: { get: () => new Promise((resolve) => (fetched = resolve)) },
+        onChange: () => {},
+      });
+      r.deps.staged = staged;
+      staged.fromLive(r.deps.snapshot(), DEFAULT_DIALS, null, { kind: "cut", duration: 0 });
+      const picked: Profile = { ...LIVE, name: "Cool", palette: ["#0000ff", "#ffffff"] };
+      return {
+        ...r,
+        staged,
+        land: () => land("done"),
+        fetch: () =>
+          fetched({
+            kind: "ok",
+            profile: {
+              ...picked,
+              id: "c1",
+              revision: 1,
+              createdAt: "2026-11-26T10:00:00.000Z",
+              updatedAt: "2026-11-26T10:00:00.000Z",
+            },
+          }),
+      };
+    }
+    const flush = async () => {
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+    };
+
+    it("a staged pick that lands before the swap is kept", async () => {
+      const p = pending();
+      p.applier.receive("d1", { type: "go", seq: 1 });
+      p.applier.receive("d1", { type: "pick", seq: 2, id: "c1", target: "staged" });
+      runFrame(16);
+      p.fetch();
+      await flush();
+      p.land();
+      await flush();
+      expect(p.staged.state()).toMatchObject({ id: "c1", name: "Cool", settled: true });
+    });
+
+    it("a staged pick still loading at the swap lands in the new staged copy", async () => {
+      const p = pending();
+      p.applier.receive("d1", { type: "pick", seq: 1, id: "c1", target: "staged" });
+      p.applier.receive("d1", { type: "go", seq: 2 });
+      runFrame(16);
+      p.land();
+      await flush();
+      expect(p.staged.state()?.settled).toBe(false); // Save still waits for the pick
+      p.fetch();
+      await flush();
+      expect(p.staged.state()).toMatchObject({ id: "c1", name: "Cool", settled: true });
+    });
+
+    it("a staged edit made while the Go is pending is kept", async () => {
+      const p = pending();
+      p.applier.receive("d1", { type: "go", seq: 1 });
+      runFrame(16);
+      p.applier.receive("d1", { type: "dials", seq: 2, reactivity: 0.05, target: "staged" });
+      runFrame(32);
+      p.land();
+      await flush();
+      expect(p.staged.state()?.dials.reactivity).toBe(0.05);
+    });
   });
 
   it("Go twice runs two transitions (SD16)", () => {
