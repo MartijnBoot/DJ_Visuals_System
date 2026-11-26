@@ -481,7 +481,11 @@ export function createHub({
       }
       const { deviceId, label, sends } = result.device;
       const previous = links.get(deviceId);
-      if (previous && previous.socket !== socket) previous.socket.terminate();
+      if (previous && previous.socket !== socket) {
+        // AC32: the old link is closed, so its stream ends; its late close finds a new socket.
+        if (previewHolder === deviceId) clearHolder(false);
+        previous.socket.terminate();
+      }
       const link: Link = { socket, approved: true, label, sends };
       links.set(deviceId, link);
       note(label, sends, sends.length > 0 ? "connected" : "reconnected");

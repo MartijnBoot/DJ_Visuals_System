@@ -307,6 +307,20 @@ describe("the preview holder (B-07 T11, SD13, SD15, PD15)", () => {
     expect(toScreen("previewAnswer")).toEqual([]);
   });
 
+  it("the holder resuming on a new socket before the old one's close clears it (AC32)", async () => {
+    const a = await controller("192.168.1.59");
+    watch(a.deviceId);
+    const approved = (a.socket.sent as ToDevice[]).find((m) => m.type === "approved");
+    const key = approved?.type === "approved" ? approved.key : "";
+    const next = new FakeSocket();
+    expect(hub.resume(asSocket(next), "192.168.1.59", key)).toBe(a.deviceId);
+    hub.closed(a.deviceId, asSocket(a.socket)); // the old socket's close arrives late
+    expect(toScreen("preview").at(-1)).toEqual({ type: "preview", deviceId: null });
+    expect(holderOf(next)).toEqual({ type: "preview", holder: false });
+    hub.preview(a.deviceId, { type: "previewAnswer", sdp: "v=0" });
+    expect(toScreen("previewAnswer")).toEqual([]);
+  });
+
   it("the screen closing or being superseded clears it and tells the holder", async () => {
     const a = await controller("192.168.1.56");
     watch(a.deviceId);
