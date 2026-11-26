@@ -1,5 +1,6 @@
 // The screen page in a real browser, against `pnpm start` (spec SD9): AC10, AC11, AC12, AC13.
 import { expect, test, type Page } from "@playwright/test";
+import { SOFTWARE_GL_ARGS } from "./fixtures/launch.ts";
 
 const HEALTH = "**/api/health";
 
@@ -103,4 +104,30 @@ test("without WebGL2 the page shows one line in place of the canvas", async ({ p
   await page.goto("/");
   await expect(page.getByTestId("screen")).toHaveCount(0);
   await expect(page.getByTestId("engine-error")).toHaveText(/WebGL2 is not available/);
+});
+
+// D-22: a browser's first peer connection blocks its main thread for about 2 s; every later one
+// takes a few ms. The screen pays it before it renders, so the preview's sender at Stage (B-07)
+// and a remote sender's peer (B-06) never freeze a frame. A browser of its own: the gate's shared
+// one has usually made a peer connection in an earlier test already.
+test("the screen has made the browser's first peer connection before it draws (D-22)", async ({
+  playwright,
+  baseURL,
+}) => {
+  const browser = await playwright.chromium.launch({ args: [...SOFTWARE_GL_ARGS] });
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${baseURL}/`);
+    await expect(page.getByTestId("screen")).toBeVisible();
+    const ms = await page.evaluate(() => {
+      const t = performance.now();
+      new RTCPeerConnection({ iceServers: [] }).close();
+      return performance.now() - t;
+    });
+    expect(ms, "a peer connection made now still pays the browser's first-time cost").toBeLessThan(
+      200,
+    );
+  } finally {
+    await browser.close();
+  }
 });
