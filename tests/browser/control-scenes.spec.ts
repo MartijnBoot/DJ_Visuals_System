@@ -233,3 +233,169 @@ test("the keyboard reaches every key; the staged tile is marked by more than col
   }
   for (const id of [...wanted, "scene-tile"]) expect(reached, id).toContain(id);
 });
+
+// ---- B-07 T13 (SD13, SD15, AC29, AC33; plan PD16): the preview's frame and lines. A raw screen —
+// a page on the screen's origin that runs no app code and speaks the screen socket itself — sends
+// the state, so each `preview` value can be shown exactly. ----
+
+const STAGED = {
+  id: "builtin",
+  name: "Built-in",
+  palette: ["#000000", "#ffffff"],
+  storedPalette: ["#000000", "#ffffff"],
+  primary: 1,
+  dials: { recognisability: 0.5, reactivity: 0.5 },
+  effects: [],
+  feed: null,
+  transition: { kind: "cut", duration: 2 },
+  fromScene: null,
+  settled: true,
+  reason: null,
+};
+
+const STATE = {
+  profiles: [{ id: "builtin", name: "Built-in" }],
+  activeId: "builtin",
+  palette: ["#000000", "#ffffff"],
+  storedPalette: ["#000000", "#ffffff"],
+  primary: 1,
+  dials: { recognisability: 0.5, reactivity: 0.5 },
+  cameras: [],
+  cameraId: null,
+  camera: "idle",
+  audio: "idle",
+  started: false,
+  reason: null,
+  mainAudio: null,
+  transition: { kind: "cut", duration: 2, keepColour: false },
+  effects: [],
+  staged: STAGED,
+  scenes: [],
+  preview: "off",
+};
+
+type RawWindow = {
+  __screen: { ws: WebSocket; messages: { type: string; [k: string]: unknown }[] };
+};
+
+/** A raw screen with External control on, one paired VJ controller, and a way to set the state. */
+async function rawScreen(page: Page, browser: Browser, clock = false) {
+  await page.goto(`${server.origin}/api/health`);
+  await page.evaluate(
+    (url) =>
+      new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(url);
+        const state = { ws, messages: [] as unknown[] };
+        (window as unknown as RawWindow).__screen = state as RawWindow["__screen"];
+        ws.onmessage = (e) => state.messages.push(JSON.parse(String(e.data)));
+        ws.onopen = () => resolve();
+        ws.onerror = () => reject(new Error("screen socket failed"));
+      }),
+    `ws://127.0.0.1:${server.port}/api/control/screen`,
+  );
+  const sendRaw = (message: unknown) =>
+    page.evaluate(
+      (m) => (window as unknown as RawWindow).__screen.ws.send(JSON.stringify(m)),
+      message,
+    );
+  const statusWhere = async (pred: string) =>
+    (
+      await page.waitForFunction(
+        (p) =>
+          (window as unknown as RawWindow).__screen.messages
+            .filter((m) => m.type === "status")
+            .map((m) => m.status as { code: string | null; pending: { deviceId: string }[] })
+            .find((s) => (p === "code" ? s.code !== null : s.pending.length > 0)),
+        pred,
+      )
+    ).jsonValue() as Promise<{ code: string; pending: { deviceId: string }[] }>;
+  await sendRaw({ type: "enable" });
+  const { code } = await statusWhere("code");
+  const context = await browser.newContext({ viewport: PHONE, ...LAN_CONTEXT });
+  contexts.push(context);
+  await keepSockets(context);
+  await recordSends(context);
+  const phone = await context.newPage();
+  if (clock) await phone.clock.install();
+  await phone.goto(`${server.lanOrigin}/control#code=${code}`);
+  const { pending } = await statusWhere("pending");
+  await sendRaw({ type: "accept", deviceId: pending[0]!.deviceId });
+  const setState = (changes: Record<string, unknown>) =>
+    sendRaw({ type: "state", state: { ...STATE, ...changes } });
+  await setState({});
+  await expect(phone.getByTestId("profile-tile").first()).toBeEnabled();
+  await phone.getByTestId("mode-vj").click();
+  await expect(phone.getByTestId("stage-live")).toBeEnabled();
+  const screenGot = (type: string) =>
+    page.evaluate(
+      (t) => (window as unknown as RawWindow).__screen.messages.filter((m) => m.type === t),
+      type,
+    );
+  return { phone, setState, screenGot };
+}
+
+const line = (phone: Page) => phone.getByTestId("preview-line");
+const showHere = (phone: Page) => phone.getByTestId("preview-show-here");
+
+test("each preview value shows its line: another controller's stream, nobody's, paused (AC29, PD16)", async ({
+  page,
+  browser,
+}) => {
+  const { phone, setState, screenGot } = await rawScreen(page, browser);
+  // Someone else holds it (the screen says on or paused, and this controller is not the holder).
+  await setState({ preview: "on" });
+  await expect(line(phone)).toHaveText("Preview is on another controller");
+  await expect(showHere(phone)).toBeEnabled();
+  await setState({ preview: "paused" });
+  await expect(line(phone)).toHaveText("Preview is on another controller");
+  // Nobody holds it: only the key, no line.
+  await setState({ preview: "off" });
+  await expect(line(phone)).toHaveCount(0);
+  await expect(showHere(phone)).toBeVisible();
+  await expect(phone.getByTestId("preview-video")).toHaveCount(0);
+
+  // "Show preview here" asks for the stream; the server makes this controller the holder.
+  await showHere(phone).click();
+  await expect
+    .poll(async () => (await screenGot("preview")).at(-1))
+    .toMatchObject({
+      deviceId: expect.any(String),
+    });
+  await expect(showHere(phone)).toHaveCount(0);
+  await expect(phone.getByTestId("preview-video")).toBeVisible();
+  await expect(phone.getByTestId("preview-video")).toHaveAttribute(
+    "aria-label",
+    "Preview of the staged look",
+  );
+  // The brief's frame at 320×568: 16:9, capped at 112 px tall, about 199×112 (PD18 f, g).
+  const frame = (await phone.getByTestId("preview-video").boundingBox())!;
+  expect(Math.round(frame.height)).toBe(112);
+  expect(Math.abs(frame.width - 199)).toBeLessThanOrEqual(1);
+  await setState({ preview: "paused" });
+  await expect(line(phone)).toHaveText("Preview paused — busy");
+  await setState({ preview: "on" });
+  await expect(line(phone)).toHaveCount(0);
+  expect((await sentOf(phone, "previewStream")).map((m) => m.watching)).toEqual([true]);
+
+  // Unstage stops watching.
+  await phone.getByTestId("scene-unstage").click();
+  await expect
+    .poll(async () => (await sentOf(phone, "previewStream")).map((m) => m.watching))
+    .toEqual([true, false]);
+});
+
+test("Preview unavailable 10 s after watching began with no offer, and Go still sends (AC33)", async ({
+  page,
+  browser,
+}) => {
+  const { phone, setState } = await rawScreen(page, browser, true);
+  await setState({ preview: "off" });
+  await showHere(phone).click();
+  await expect(phone.getByTestId("preview-video")).toBeVisible();
+  await phone.clock.fastForward(9_000);
+  await expect(line(phone)).toHaveCount(0);
+  await phone.clock.fastForward(1_100);
+  await expect(line(phone)).toHaveText("Preview unavailable");
+  await phone.getByTestId("scene-go").click();
+  await expect.poll(async () => (await sentOf(phone, "go")).length).toBe(1);
+});

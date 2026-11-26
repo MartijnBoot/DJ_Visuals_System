@@ -597,6 +597,27 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-key);
 }
+/* The preview frame (PD18 f): 16:9 at the section's width, a 1px --line edge, no radius, --bg
+   until the first picture; capped at 112px tall on a viewport under 600px tall or wide. */
+.djv-control .djv-preview {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
+@media (max-width: 599px), (max-height: 599px) {
+  .djv-control .djv-preview {
+    width: auto;
+    height: 112px;
+    margin: 0 auto;
+  }
+}
+
 .djv-control .djv-editing .djv-legend {
   margin-right: var(--space-1);
 }

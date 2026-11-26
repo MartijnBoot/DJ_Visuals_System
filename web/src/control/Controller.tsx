@@ -270,6 +270,8 @@ export function Controller() {
                 editing={edits}
                 onEditing={setEditing}
                 send={(message) => tap(() => link.send(message))}
+                link={link}
+                holder={view.previewHolder}
               />
             )}
 

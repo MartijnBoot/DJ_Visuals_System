@@ -5,9 +5,15 @@
 // from a listed scene — Rename and Delete for that scene, Delete asking first in the dialog frame,
 // and the feed line. Every key sends nothing while locked; the switch is the page's own and stays
 // live. The look is the brief's (`docs/design/controller-style.md`, The Scenes section).
+// B-07 (T13, SD13, SD15, PD14, PD16): the preview frame. This controller watches from its own
+// Stage (from live or a tile) and from "Show preview here", and stops on Unstage, on leaving VJ
+// mode (the section goes) and while the page is hidden; the server says whether it holds the
+// stream. The frame's lines: "Preview paused — busy", "Preview is on another controller", and
+// "Preview unavailable" 10 s after watching began with no connection.
 import type { ScreenState } from "@djv/shared";
 import { useEffect, useRef, useState } from "react";
-import type { ControlInput } from "./device-link.ts";
+import type { ControlInput, DeviceLink } from "./device-link.ts";
+import { createPreviewPeer } from "./preview-peer.ts";
 import { feedLine, nameProblem, saveChoices, type Editing } from "./scenes-view.ts";
 
 export interface ScenesProps {
@@ -18,6 +24,136 @@ export interface ScenesProps {
   onEditing(editing: Editing): void;
   /** A tap through the page's send budget. */
   send(message: ControlInput): void;
+  /** B-07 PD14: the preview's messages travel on the link's socket, beside the controls. */
+  link: Pick<DeviceLink, "preview" | "onPreview">;
+  /** B-07 PD15: whether this controller holds the preview stream. */
+  holder: boolean;
+}
+
+/** PD14: a preview not connected this long after watching began is unavailable (AC33). */
+export const PREVIEW_UNAVAILABLE_MS = 10_000;
+
+/**
+ * B-07 PD16: whether this controller watches, the peer that receives, and what the frame shows.
+ * Watching is asked of the server; it answers by making this controller the holder or not.
+ */
+function usePreview(link: ScenesProps["link"], holder: boolean) {
+  const [wanted, setWanted] = useState(false);
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+  const [peer] = useState(() =>
+    createPreviewPeer({
+      send: (message) => void link.preview(message),
+      onStream: setStream,
+      onChange: () => setConnected(peer.connected()),
+    }),
+  );
+
+  useEffect(() => {
+    link.onPreview((message) => {
+      if (message.type === "previewOffer") return void peer.offer(message.sdp);
+      const { candidate, sdpMid, sdpMLineIndex } = message;
+      void peer.candidate({ candidate, sdpMid, sdpMLineIndex });
+    });
+    return () => {
+      link.onPreview(null);
+      peer.close();
+    };
+  }, [link, peer]);
+
+  // Another controller took the stream over, or it ended: this one stops watching.
+  const held = useRef(false);
+  useEffect(() => {
+    if (held.current && !holder) setWanted(false);
+    held.current = holder;
+    if (!holder) peer.close();
+  }, [holder, peer]);
+
+  // Tell the server while visible; a hidden page stops watching and asks again when shown.
+  useEffect(() => {
+    if (!wanted) return;
+    const tell = () => void link.preview({ type: "previewStream", watching: !document.hidden });
+    tell();
+    document.addEventListener("visibilitychange", tell);
+    return () => {
+      document.removeEventListener("visibilitychange", tell);
+      link.preview({ type: "previewStream", watching: false });
+    };
+  }, [wanted, link]);
+
+  useEffect(() => {
+    setUnavailable(false);
+    if (!wanted || connected) return;
+    const timer = window.setTimeout(() => setUnavailable(true), PREVIEW_UNAVAILABLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [wanted, connected]);
+
+  return { wanted, stream, unavailable: wanted && !connected && unavailable, watch: setWanted };
+}
+
+/** The frame: the picture while this controller holds the stream, else its line and key. */
+function PreviewFrame({
+  state,
+  holder,
+  locked,
+  preview,
+}: {
+  state: ScreenState;
+  holder: boolean;
+  locked: boolean;
+  preview: ReturnType<typeof usePreview>;
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (video.current) video.current.srcObject = preview.stream;
+  }, [preview.stream, holder, preview.wanted]);
+  if (!state.staged) return null;
+  const showing = holder || preview.wanted;
+  const elsewhere = !showing && (state.preview === "on" || state.preview === "paused");
+  const text = showing
+    ? preview.unavailable
+      ? "Preview unavailable"
+      : holder && state.preview === "paused"
+        ? "Preview paused — busy"
+        : null
+    : elsewhere
+      ? "Preview is on another controller"
+      : null;
+  return (
+    <>
+      {showing && (
+        <video
+          ref={video}
+          data-testid="preview-video"
+          className="djv-preview"
+          aria-label="Preview of the staged look"
+          muted
+          autoPlay
+          playsInline
+          tabIndex={-1}
+        />
+      )}
+      {text && (
+        <div data-testid="preview-line" className="djv-note">
+          {text}
+        </div>
+      )}
+      {!showing && (
+        <div className="djv-row">
+          <button
+            type="button"
+            data-testid="preview-show-here"
+            disabled={locked}
+            className="djv-key"
+            onClick={() => preview.watch(true)}
+          >
+            Show preview here
+          </button>
+        </div>
+      )}
+    </>
+  );
 }
 
 const TESTID: Record<string, string> = {
@@ -25,8 +161,14 @@ const TESTID: Record<string, string> = {
   "Save as new": "scene-save-new",
 };
 
-export function Scenes({ state, locked, editing, onEditing, send }: ScenesProps) {
+export function Scenes({ state, locked, editing, onEditing, send, link, holder }: ScenesProps) {
   const staged = state.staged ?? null;
+  const preview = usePreview(link, holder);
+  /** PD16: this controller's own Stage starts watching; its Unstage stops. */
+  const stage = (message: ControlInput) => {
+    send(message);
+    if (!locked) preview.watch(true);
+  };
   const scenes = state.scenes;
   const [name, setName] = useState("");
   const [confirming, setConfirming] = useState(false);
@@ -48,7 +190,9 @@ export function Scenes({ state, locked, editing, onEditing, send }: ScenesProps)
   return (
     <section aria-label="Scenes" data-testid="scenes" className="djv-section">
       <h2 className="djv-legend">Scenes</h2>
-      <div data-testid="preview-place" className="djv-preview-place" />
+      <div data-testid="preview-place" className="djv-preview-place">
+        <PreviewFrame state={state} holder={holder} locked={locked} preview={preview} />
+      </div>
 
       {staged && (
         <>
@@ -81,7 +225,7 @@ export function Scenes({ state, locked, editing, onEditing, send }: ScenesProps)
           data-testid="stage-live"
           disabled={locked}
           className="djv-key"
-          onClick={() => send({ type: "stage", from: "live" })}
+          onClick={() => stage({ type: "stage", from: "live" })}
         >
           Stage from live
         </button>
@@ -99,7 +243,10 @@ export function Scenes({ state, locked, editing, onEditing, send }: ScenesProps)
           data-testid="scene-unstage"
           disabled={locked || !staged}
           className="djv-key"
-          onClick={() => send({ type: "unstage" })}
+          onClick={() => {
+            send({ type: "unstage" });
+            preview.watch(false);
+          }}
         >
           Unstage
         </button>
@@ -135,7 +282,7 @@ export function Scenes({ state, locked, editing, onEditing, send }: ScenesProps)
               aria-pressed={staged?.fromScene?.id === s.id}
               disabled={locked}
               className="djv-key djv-tile"
-              onClick={() => send({ type: "stage", from: { scene: s.id } })}
+              onClick={() => stage({ type: "stage", from: { scene: s.id } })}
             >
               {s.name}
             </button>

@@ -252,6 +252,42 @@ describe("controls (AC27)", () => {
   });
 });
 
+describe("the preview (B-07 T13, PD14, PD15)", () => {
+  const candidate = { candidate: "candidate:1", sdpMid: "0", sdpMLineIndex: 0 };
+
+  it("reads whether it holds the stream, and hands the screen's offer and candidates on", () => {
+    live();
+    const setup: unknown[] = [];
+    link.onPreview((message) => void setup.push(message));
+    expect(link.view().previewHolder).toBe(false);
+    latest().deliver({ type: "preview", holder: true });
+    expect(link.view().previewHolder).toBe(true);
+    latest().deliver({ type: "previewOffer", sdp: "v=0" });
+    latest().deliver({ type: "previewCandidate", ...candidate });
+    expect(setup).toEqual([
+      { type: "previewOffer", sdp: "v=0" },
+      { type: "previewCandidate", ...candidate },
+    ]);
+    latest().deliver({ type: "preview", holder: false });
+    expect(link.view().previewHolder).toBe(false);
+  });
+
+  it("sends previewStream, answer and candidates on the socket with no seq, and nothing while locked", () => {
+    live();
+    expect(link.preview({ type: "previewStream", watching: true })).toBe(true);
+    expect(link.preview({ type: "previewAnswer", sdp: "v=0" })).toBe(true);
+    expect(link.preview({ type: "previewCandidate", ...candidate })).toBe(true);
+    expect(latest().sent.slice(1)).toEqual([
+      { type: "previewStream", watching: true },
+      { type: "previewAnswer", sdp: "v=0" },
+      { type: "previewCandidate", ...candidate },
+    ]);
+    latest().drop();
+    expect(link.preview({ type: "previewStream", watching: true })).toBe(false);
+    expect(link.view().previewHolder).toBe(false);
+  });
+});
+
 describe("reconnecting (SD12, AC11, AC27, AC28)", () => {
   it("reconnects at 0.5 s doubling to 5 s while the socket is down", () => {
     live();
