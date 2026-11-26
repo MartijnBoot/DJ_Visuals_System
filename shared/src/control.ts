@@ -4,6 +4,8 @@
 // receives. Field names are the plan's; colours are `#rrggbb` as in the profile.
 import { z } from "zod";
 import { LIMITS } from "./profile.ts";
+import { SCENE_LIMITS, sceneEntrySchema, sceneIssueSchema, storedSceneSchema } from "./scenes.ts";
+import { transitionDuration, transitionKind } from "./transition.ts";
 
 /** A device socket's message size limit (SD20). */
 export const MAX_DEVICE_MESSAGE = 4096;
@@ -47,6 +49,11 @@ const code = z
   .string()
   .length(CODE_LENGTH)
   .regex(new RegExp(`^[${CODE_ALPHABET}]+$`), "not a pairing code");
+/** B-07 PD9: pairs a screen socket's scene request with its reply. */
+const requestId = z.number().int().nonnegative();
+/** Checked by the server (`sceneNameSchema`, 1 to 60 trimmed), so a refusal can say why. */
+const sceneName = z.string().max(200);
+
 /** 128 bits as base64url: 22 characters. */
 const key = z.string().regex(/^[A-Za-z0-9_-]{22}$/, "not a session key");
 
@@ -71,12 +78,8 @@ const candidateShape = {
 const message = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
   z.strictObject({ type: z.literal(type), ...shape });
 
-/** B-09 SD1, SD19: how a pick switches. */
-export const TRANSITION_KINDS = ["cut", "crossfade", "dissolve", "wipe", "beatCut", "dip"] as const;
-export const transitionKind = z.enum(TRANSITION_KINDS);
-export type TransitionKind = z.infer<typeof transitionKind>;
-/** B-09 SD6: the duration in seconds. */
-export const transitionDuration = z.number().min(0.5).max(8);
+export { TRANSITION_KINDS, transitionDuration, transitionKind } from "./transition.ts";
+export type { TransitionKind } from "./transition.ts";
 
 /** B-09 SD5, SD9: the current transition, in the screen state and in `djv.transition`. */
 export const transitionChoiceSchema = z.strictObject({
@@ -256,8 +259,41 @@ export const screenMessageSchema = z.discriminatedUnion("type", [
   message("answer", { deviceId, sdp }),
   message("candidate", { deviceId, ...candidateShape }),
   message("stream", { deviceId, kind: sendKind, active: z.boolean() }),
+  // B-07 PD9: scenes, request and reply. A name and a definition are checked by the server, which
+  // answers why it refused; a message that fails here is dropped with a warn and gets no reply.
+  message("scenes.list", { requestId }),
+  message("scenes.get", { requestId, id }),
+  message("scenes.save", {
+    requestId,
+    name: sceneName,
+    definition: z.unknown(),
+    /** Replace this scene's content, keeping its id and name (SD9). */
+    updateId: id.optional(),
+  }),
+  message("scenes.rename", { requestId, id, name: sceneName }),
+  message("scenes.delete", { requestId, id }),
+  /** One part of an import; stored at the last part, all or nothing (PD9). */
+  message("scenes.import", {
+    requestId,
+    importId: z.number().int().nonnegative(),
+    part: z.number().int().nonnegative(),
+    parts: z.number().int().min(1).max(SCENE_LIMITS.scenes),
+    scenes: z.array(z.unknown()).min(1).max(SCENE_LIMITS.scenes),
+  }),
 ]);
 export type ScreenMessage = z.infer<typeof screenMessageSchema>;
+export type SceneRequest = Extract<ScreenMessage, { type: `scenes.${string}` }>;
+
+/** B-07 PD9: why the server stored nothing. */
+export const SCENE_ERRORS = [
+  "name_taken",
+  "missing",
+  "too_large",
+  "full",
+  "invalid",
+  "unusable",
+] as const;
+export type SceneError = (typeof SCENE_ERRORS)[number];
 
 // ---- Server → screen page. ----
 
@@ -290,8 +326,22 @@ export const toScreenSchema = z.discriminatedUnion("type", [
   message("superseded", {}),
   message("offer", { deviceId, sdp }),
   message("candidate", { deviceId, ...candidateShape }),
+  /** B-07 PD9: the answer to one `scenes.*` request; a change carries the new list. */
+  message("scenes.result", {
+    requestId,
+    ok: z.boolean(),
+    list: z.array(sceneEntrySchema).max(SCENE_LIMITS.scenes).optional(),
+    scene: storedSceneSchema.optional(),
+    error: z
+      .strictObject({
+        reason: z.enum(SCENE_ERRORS),
+        issues: z.array(sceneIssueSchema).max(100).optional(),
+      })
+      .optional(),
+  }),
 ]);
 export type ToScreen = z.infer<typeof toScreenSchema>;
+export type SceneResult = Extract<ToScreen, { type: "scenes.result" }>;
 
 const KNOWN_TYPES: ReadonlySet<string> = new Set([
   ...deviceMessageSchema.options.map((o) => o.shape.type.value),

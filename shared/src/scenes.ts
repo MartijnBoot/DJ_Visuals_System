@@ -3,8 +3,8 @@
 // bundle file scenes export to. Validated by the server on write, read and import, and by the
 // screen page on what it receives.
 import { z } from "zod";
-import { transitionDuration, transitionKind } from "./control.ts";
 import { LIMITS, profileSchema, toProfileFile } from "./profile.ts";
+import { transitionDuration, transitionKind } from "./transition.ts";
 
 /** SD18, PD23: at most 200 rows, and a definition's JSON at most 128 KiB of UTF-8. */
 export const SCENE_LIMITS = { scenes: 200, definitionBytes: 131072 } as const;
@@ -81,6 +81,21 @@ export function toSceneFile(
     })),
   };
 }
+
+/** A scene as a list names it: no definition reaches the state (SD18). */
+export const sceneEntrySchema = z.strictObject({
+  id: z.string().min(1).max(200),
+  name: z.string().max(LIMITS.nameLength),
+});
+export type SceneEntry = z.infer<typeof sceneEntrySchema>;
+
+/** An import's issue: the dotted path from `scenes.<index>`, and the scene's name when readable. */
+export const sceneIssueSchema = z.strictObject({
+  path: z.string().max(500),
+  message: z.string().max(500),
+  scene: z.string().max(200).optional(),
+});
+export type SceneIssue = z.infer<typeof sceneIssueSchema>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

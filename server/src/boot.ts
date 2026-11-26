@@ -21,6 +21,7 @@ import { createLogger, type Logger } from "./log.ts";
 import { migrate } from "./migrate.ts";
 import { registerProfiles } from "./profiles/routes.ts";
 import { createProfileStore, type ProfileStore } from "./profiles/store.ts";
+import { createSceneStore, type SceneStore } from "./scenes/store.ts";
 import { registerSync } from "./sync/routes.ts";
 import { registerCloud } from "./cloud/routes.ts";
 import { createSessionStore } from "./cloud/session-store.ts";
@@ -154,7 +155,9 @@ export async function boot(
   let externalControl: { close(): Promise<void> } | null = null;
   if (config.APP_MODE === "hosted") routeUpgrades(app.server, []);
   else {
-    externalControl = startExternalControl(app, config, paths, log, (running) =>
+    // B-07 PD10: scenes are the local install's alone; a hosted server never builds the store.
+    const scenes = createSceneStore(db, log, () => new Date(clock()));
+    externalControl = startExternalControl(app, config, paths, log, scenes, (running) =>
       cloud?.scheduler.setRunning(running),
     );
   }
@@ -281,6 +284,7 @@ function startExternalControl(
   config: Config,
   paths: BootPaths,
   log: Logger,
+  scenes: SceneStore,
   onRunning: (running: boolean) => void,
 ): { close(): Promise<void> } {
   // External control (B-04): the screen socket on this listener, the device socket on each LAN
@@ -299,6 +303,7 @@ function startExternalControl(
   const deviceSockets = socketServer(64 * 1024);
   const hub: Hub = createHub({
     onRunning,
+    scenes,
     log,
     controlPort: config.CONTROL_PORT,
     now,

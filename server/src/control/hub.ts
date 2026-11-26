@@ -10,6 +10,7 @@ import {
   screenMessageSchema,
   type Control,
   type ControlStatus,
+  type SceneRequest,
   type ScreenMessage,
   type ScreenState,
   type SendKind,
@@ -18,10 +19,12 @@ import {
 } from "@djv/shared";
 import type { WebSocket } from "ws";
 import type { Logger } from "../log.ts";
+import type { SceneStore } from "../scenes/store.ts";
 import { receive, screenMaxBytes, send } from "./channel.ts";
 import type { DeviceHub } from "./device.ts";
 import type { Lan } from "./lan.ts";
 import type { Pairing } from "./pairing.ts";
+import { createSceneRequests } from "./scenes.ts";
 
 export interface HubDeps {
   log: Logger;
@@ -34,6 +37,8 @@ export interface HubDeps {
    * screen attaching (not running until it says so) or the target's close. Sync pauses on it.
    */
   onRunning?(running: boolean): void;
+  /** B-07 PD10: the local install's scene store; the target screen's `scenes.*` go to it. */
+  scenes?: SceneStore;
 }
 
 export interface Hub extends DeviceHub {
@@ -59,7 +64,16 @@ const REFUSED = 4001;
 /** `WebSocket.OPEN`. */
 const OPEN = 1;
 
-export function createHub({ log, controlPort, now, pairing, lan, onRunning }: HubDeps): Hub {
+export function createHub({
+  log,
+  controlPort,
+  now,
+  pairing,
+  lan,
+  onRunning,
+  scenes: sceneStore,
+}: HubDeps): Hub {
+  const scenes = sceneStore ? createSceneRequests(sceneStore, log) : null;
   const screens = new Set<WebSocket>();
   let target: WebSocket | null = null;
   let cached: ScreenState | null = null;
@@ -309,6 +323,9 @@ export function createHub({ log, controlPort, now, pairing, lan, onRunning }: Hu
     }
   };
 
+  const isSceneRequest = (message: ScreenMessage): message is SceneRequest =>
+    message.type.startsWith("scenes.");
+
   const run = (action: () => unknown) => {
     actions = actions
       .then(action)
@@ -326,6 +343,7 @@ export function createHub({ log, controlPort, now, pairing, lan, onRunning }: Hu
         toApproved({ type: "screen", connected: false });
       }
       target = socket;
+      scenes?.discard(); // an import belongs to the screen that started it (PD9)
       setCached(null); // a new page sends its own state; the old one is no longer true (SD13)
       log.info("screen connected");
       toSenders({ type: "screen", connected: true }); // they offer to it (B-06 SD18)
@@ -337,13 +355,20 @@ export function createHub({ log, controlPort, now, pairing, lan, onRunning }: Hu
         log,
         socket: "screen",
         onMessage: (message) => {
-          if (socket === target) run(() => onScreen(message));
+          if (socket !== target) return;
+          // B-07 PD9: answered at once to the screen that asked, never queued behind an action.
+          if (isSceneRequest(message)) {
+            if (scenes) send(socket, scenes.answer(message));
+            return;
+          }
+          run(() => onScreen(message));
         },
       });
       socket.on("close", () => {
         screens.delete(socket);
         if (socket !== target) return;
         target = null;
+        scenes?.discard();
         setCached(null);
         log.info("screen disconnected");
         toApproved({ type: "screen", connected: false });
@@ -436,6 +461,7 @@ export function createHub({ log, controlPort, now, pairing, lan, onRunning }: Hu
       links.clear();
       if (expiry) clearTimeout(expiry);
       expiry = null;
+      scenes?.discard();
       await actions;
       pairing.disable();
       await lan.disable();
