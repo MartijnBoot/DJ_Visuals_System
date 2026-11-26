@@ -28,7 +28,7 @@ import { receive, screenMaxBytes, send } from "./channel.ts";
 import type { DeviceHub } from "./device.ts";
 import type { Lan } from "./lan.ts";
 import type { Pairing } from "./pairing.ts";
-import { createSceneRequests } from "./scenes.ts";
+import { createSceneRequests, type SceneRequests } from "./scenes.ts";
 
 export interface HubDeps {
   log: Logger;
@@ -382,6 +382,20 @@ export function createHub({
   const isSceneRequest = (message: ScreenMessage): message is SceneRequest =>
     message.type.startsWith("scenes.");
 
+  /**
+   * A store error (a busy or read-only database) must not escape the socket's listener, which
+   * would end the process mid-set: the screen hears "unavailable" and the log names the type
+   * only, since an error's text may quote a scene (SD20).
+   */
+  const answerScene = (requests: SceneRequests, message: SceneRequest): ToScreen => {
+    try {
+      return requests.answer(message);
+    } catch {
+      log.error({ type: message.type }, "scene request failed");
+      return { type: "scenes.result", requestId: message.requestId, ok: false };
+    }
+  };
+
   const run = (action: () => unknown) => {
     actions = actions
       .then(action)
@@ -415,7 +429,7 @@ export function createHub({
           if (socket !== target) return;
           // B-07 PD9: answered at once to the screen that asked, never queued behind an action.
           if (isSceneRequest(message)) {
-            if (scenes) send(socket, scenes.answer(message));
+            if (scenes) send(socket, answerScene(scenes, message));
             return;
           }
           run(() => onScreen(message));

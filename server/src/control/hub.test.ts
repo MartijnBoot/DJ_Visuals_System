@@ -6,6 +6,7 @@ import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
 import type { Logger } from "../log.ts";
+import type { SceneStore } from "../scenes/store.ts";
 import { createHub, type Hub } from "./hub.ts";
 import type { Lan } from "./lan.ts";
 import { createPairing } from "./pairing.ts";
@@ -204,6 +205,32 @@ describe("senders (B-06 T7, SD6, SD15, SD25, PD5)", () => {
       ]),
     ).toBeNull();
     expect(socket.sent).toEqual([{ type: "refused", reason: "audio_taken" }]);
+  });
+});
+
+describe("scene requests (B-07 PD9)", () => {
+  it("a store that throws is answered as unavailable and logged by type only, not thrown", async () => {
+    const error = vi.fn();
+    const failing = new Proxy({} as SceneStore, {
+      get: () => () => {
+        throw new Error("SQLITE_BUSY: database is locked (Alley)");
+      },
+    });
+    const local = createHub({
+      log: { ...log, error } as unknown as Logger,
+      controlPort: 8001,
+      now: () => Date.now(),
+      pairing: createPairing({ now: () => Date.now(), random: (size) => new Uint8Array(size) }),
+      lan,
+      scenes: failing,
+    });
+    const socket = new FakeSocket();
+    local.attachScreen(asSocket(socket));
+    expect(() => socket.receive({ type: "scenes.list", requestId: 7 })).not.toThrow();
+    expect(socket.sent).toContainEqual({ type: "scenes.result", requestId: 7, ok: false });
+    expect(error).toHaveBeenCalledWith({ type: "scenes.list" }, "scene request failed");
+    expect(JSON.stringify(error.mock.calls)).not.toContain("Alley");
+    await local.close();
   });
 });
 
