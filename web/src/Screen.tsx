@@ -49,6 +49,7 @@ import { Overlay } from "./Overlay.tsx";
 import { Panel } from "./Panel.tsx";
 import { sharedToEngine } from "./profile-compat.ts";
 import { createActiveProfile } from "./profiles/active.ts";
+import { feedOf, matchFeed, type OnScreen, type VideoSender } from "./scenes/feed.ts";
 import { createStagedLook } from "./scenes/staged.ts";
 import { getProfile, listProfiles } from "./profiles/api.ts";
 import { loadProfileId, saveProfileId } from "./profiles/remembered.ts";
@@ -56,6 +57,11 @@ import { loadTransition, saveTransition } from "./profiles/transition.ts";
 import { createWakeLock } from "./wake-lock.ts";
 
 const IDLE: SessionState = { camera: "idle", audio: "idle", video: null, contextState: "none" };
+
+/** B-07 AC16: the note when Go finds no camera for a scene's feed. */
+const FEED_NOTE = "Feed unavailable — kept the current camera";
+/** B-06 SD21: a sender's camera id. */
+const REMOTE_ID = "remote:";
 
 /** What the panel shows of the remote sources (B-06 AC14, SD22). */
 interface PanelRemote {
@@ -166,6 +172,12 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
   );
   const [profiles, setProfiles] = useState(() => active.state());
   useEffect(() => active.subscribe(() => setProfiles(active.state())), [active]);
+  // B-07 AC16, PD6: the feed note, held until the next Go or pick, shown through the profile
+  // reason line when the look has no reason of its own (the panel and every controller).
+  const feedNote = useRef(false);
+  const [noted, setNoted] = useState(false);
+  const reasonOf = (state: ReturnType<typeof active.state>) =>
+    state.reason ?? (feedNote.current ? FEED_NOTE : null);
 
   const [control] = useState(() => {
     // B-07 (SD2): the staged look, beside the live one; a change marks the next frame's state.
@@ -182,16 +194,49 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       setMainAudio: (source) => sourcesRef.current?.setMainAudio(source),
       setTransition: (change) => changeTransition(change),
       setStrength: (profile, index, value) => active.setStrength(profile, index, value),
-      pick: (id) => active.pick(id),
+      pick: (id) => {
+        setFeedNote(false);
+        return active.pick(id);
+      },
       refresh: () => void active.open(),
       started: () => startedRef.current,
       staged,
       snapshot: () => active.snapshot(),
-      // B-07 PD6: the feed is matched and stored by `scenes/feed.ts` (T6); until then, none.
-      feedOnScreen: () => null,
-      feedOf: () => null,
+      feedOnScreen: () => feedOf(onScreen(), facts.current.cameras, videoSenders()),
+      feedOf: (id) =>
+        feedOf(
+          id.startsWith(REMOTE_ID)
+            ? { kind: "remote", deviceId: id.slice(REMOTE_ID.length) }
+            : { kind: "local", deviceId: id },
+          facts.current.cameras,
+          videoSenders(),
+        ),
       transition: () => facts.current.transition,
+      matchFeed: (feed) => matchFeed(feed, facts.current.cameras, videoSenders()),
+      setFeedNote: (on) => setFeedNote(on),
+      adopt: (look, choice) => active.adopt(look, choice),
     });
+    /** B-07 PD6: the camera on screen — what the sources draw, else the session's open camera. */
+    const onScreen = (): OnScreen | null => {
+      const drawn = sourcesRef.current?.analysing(performance.now()).video ?? null;
+      if (drawn) return { kind: "remote", deviceId: drawn };
+      const capture = sessionRef.current?.state();
+      return capture?.camera === "ok" && capture.cameraId
+        ? { kind: "local", deviceId: capture.cameraId }
+        : null;
+    };
+    /** The senders whose video is connected now, with their hints (B-04 SD26). */
+    const videoSenders = (): VideoSender[] =>
+      (sourcesRef.current?.facts(performance.now()).cameras ?? []).flatMap(({ deviceId }) => {
+        const sender = senders.find((s) => `${REMOTE_ID}${s.deviceId}` === deviceId);
+        return sender ? [{ deviceId: sender.deviceId, hint: sender.hint }] : [];
+      });
+    const setFeedNote = (on: boolean) => {
+      if (feedNote.current === on) return;
+      feedNote.current = on;
+      setNoted(on);
+      link.markDirty();
+    };
     // B-06: the senders' labels, for log lines (never a device's own label, SD25).
     const labels = new Map<string, string>();
     let senders: Parameters<Sources["setSenders"]>[0] = [];
@@ -208,7 +253,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       buildState: () =>
         toScreenState({
           ...facts.current,
-          profiles: active.state(),
+          profiles: { ...active.state(), reason: reasonOf(active.state()) },
           staged: staged.state(),
           started: startedRef.current,
           ...(sourcesRef.current ? { remote: sourcesRef.current.facts(performance.now()) } : {}),
@@ -257,7 +302,15 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       setTransition(next);
       link.markDirty();
     };
-    return { applier, link, peers, senders: () => senders, senderState, changeTransition };
+    return {
+      applier,
+      link,
+      peers,
+      senders: () => senders,
+      senderState,
+      changeTransition,
+      setFeedNote,
+    };
   });
   // B-12 SD1, AC21: hosted use has no External control and no remote input, so the screen link
   // never starts and `/api/control/screen` is never asked for.
@@ -485,8 +538,11 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
           cap={cap}
           onCap={setCap}
           read={read}
-          profiles={profiles}
-          onProfile={(id) => void active.pick(id)}
+          profiles={noted ? { ...profiles, reason: reasonOf(profiles) } : profiles}
+          onProfile={(id) => {
+            control.setFeedNote(false);
+            void active.pick(id);
+          }}
           transition={transition}
           onTransition={control.changeTransition}
           control={controlView}

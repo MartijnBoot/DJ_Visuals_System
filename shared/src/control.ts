@@ -135,6 +135,8 @@ export const controlSchema = z.discriminatedUnion("type", [
   }),
   /** B-07 AC7: the staged look is discarded. */
   message("unstage", { seq }),
+  /** B-07 SD3, AC10: the staged look goes live by its own transition. */
+  message("go", { seq }),
 ]);
 export type Control = z.infer<typeof controlSchema>;
 export type ControlType = Control["type"];

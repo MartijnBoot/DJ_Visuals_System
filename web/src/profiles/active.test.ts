@@ -771,3 +771,127 @@ describe("snapshot (B-07 AC1)", () => {
     expect(snap.amounts).toEqual(snap.stored.effects.map((e) => e.amount));
   });
 });
+
+// B-07 T6 (SD3, SD16, SD17, AC10, AC12, AC13, AC14; plan PD5): Go makes a staged look live by the
+// pick's own path, with the staged look's transition and exactly the staged values.
+describe("adopt (B-07 PD5)", () => {
+  const scene: Profile = {
+    name: "Warm", // the source profile's name, kept in the copy (PD8)
+    palette: ["#101010", "#a0a0a0", "#ff00ff"],
+    dials: { recognisability: 0.1, reactivity: 0.1 },
+    effects: [
+      { type: "zoom", amount: 0.4, vj: true },
+      { type: "smear", amount: 0.2 },
+    ],
+  };
+  const look = (
+    id: string,
+    over: Partial<Parameters<ReturnType<typeof setup>["active"]["adopt"]>[0]> = {},
+  ) => ({
+    id,
+    name: "Warm crowd",
+    stored: scene,
+    palette: ["#ff0000", "#a0a0a0", "#ff00ff"],
+    amounts: [0.9, 0.2],
+    dials: { recognisability: 0.7, reactivity: 0.3 },
+    ...over,
+  });
+  const crossfade = { kind: "crossfade" as const, duration: 4, keepColour: false };
+  const wired = () => ({
+    current: { kind: "wipe", duration: 1, keepColour: true } as TransitionChoice,
+  });
+
+  it("passes the given palette, amounts and dials as a pick with the given transition, never the choice (AC10)", async () => {
+    const value = wired().current;
+    let reads = 0;
+    const choice = {
+      get current() {
+        reads++;
+        return value;
+      },
+    };
+    const { active, setProfile, setDials } = setup({ choice });
+    await active.open();
+    reads = 0;
+    expect(await active.adopt(look("scene:s1"), crossfade)).toBe("done");
+    const [profile, options] = setProfile.mock.calls.at(-1)!;
+    expect(profile).toMatchObject({
+      palette: ["#ff0000", "#a0a0a0", "#ff00ff"],
+      dials: { recognisability: 0.7, reactivity: 0.3 },
+      effects: [
+        { type: "zoom", amount: 0.9, vj: true },
+        { type: "smear", amount: 0.2 },
+      ],
+    });
+    expect(options).toMatchObject({
+      pick: true,
+      transition: { kind: "crossfade", durationMs: 4000 },
+    });
+    expect(setDials).toHaveBeenLastCalledWith({ recognisability: 0.7, reactivity: 0.3 });
+    expect(reads).toBe(0);
+    expect(value).toEqual({ kind: "wipe", duration: 1, keepColour: true });
+    expect(active.state()).toMatchObject({
+      palette: ["#ff0000", "#a0a0a0", "#ff00ff"],
+      effects: [{ index: 0, stored: 0.4, value: 0.9 }],
+    });
+  });
+
+  it("a Cut passes no transition, as a pick does", async () => {
+    const { active, setProfile } = setup();
+    await active.adopt(look("w1"), { kind: "cut", duration: 2, keepColour: false });
+    expect(setProfile.mock.calls.at(-1)![1]).toEqual({ pick: true });
+  });
+
+  it("a scene id is the active id, unlisted and not remembered; a profile id is remembered (AC13, AC14)", async () => {
+    const { active, save, memory } = setup({ remembered: "w1" });
+    await active.open();
+    expect(memory.id).toBe("w1");
+    save.mockClear();
+    await active.adopt(look("scene:s1"), crossfade);
+    expect(active.state().activeId).toBe("scene:s1");
+    expect(active.state().activeName).toBe("Warm crowd");
+    expect(active.state().entries.map((e) => e.id)).not.toContain("scene:s1");
+    expect(save).not.toHaveBeenCalled();
+    expect(memory.id).toBe("w1");
+    await active.adopt(look("c1"), crossfade);
+    expect(save).toHaveBeenCalledWith("c1");
+  });
+
+  it("after a scene's adopt a reset goes to the scene's palette (AC13)", async () => {
+    const { active } = setup();
+    await active.adopt(look("scene:s1"), crossfade);
+    expect(active.state().storedPalette).toEqual(scene.palette);
+    active.resetColour(0);
+    expect(active.state().palette).toEqual(scene.palette);
+  });
+
+  it("an adopt during a pick supersedes it, and a pick supersedes an adopt (AC12, SD16)", async () => {
+    const { active, setProfile } = setup();
+    await active.open();
+    let release!: () => void;
+    setProfile.mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+    const picking = active.pick("w1");
+    await vi.waitFor(() => expect(setProfile).toHaveBeenCalledTimes(1));
+    expect(await active.adopt(look("scene:s1"), crossfade)).toBe("done");
+    release();
+    await picking;
+    expect(active.state().activeId).toBe("scene:s1");
+
+    let releaseAdopt!: () => void;
+    setProfile.mockImplementationOnce(() => new Promise<void>((r) => (releaseAdopt = r)));
+    const adopting = active.adopt(look("scene:s2"), crossfade);
+    await vi.waitFor(() => expect(setProfile).toHaveBeenCalledTimes(3));
+    await active.pick("c1");
+    releaseAdopt();
+    expect(await adopting).toBe("superseded");
+    expect(active.state().activeId).toBe("c1");
+  });
+
+  it("a failed engine call keeps the look and gives the reason (B-09 SD17)", async () => {
+    const { active, setProfile } = setup();
+    setProfile.mockRejectedValueOnce(new Error("did not link"));
+    expect(await active.adopt(look("scene:s1"), crossfade)).toBe("failed");
+    expect(active.state()).toMatchObject({ activeId: BUILTIN_ID });
+    expect(active.state().reason).toMatch(/could not be prepared/);
+  });
+});

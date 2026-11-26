@@ -17,7 +17,7 @@ import type { AudioChoice } from "./capture/remembered.ts";
 import type { SessionState } from "./capture/session.ts";
 import { ExternalControl, type SenderEntry, type SenderState } from "./control/ExternalControl.tsx";
 import type { PanelAction, ScreenLinkView } from "./control/screen-link.ts";
-import type { ActiveState } from "./profiles/active.ts";
+import { SCENE_PREFIX, type ActiveState } from "./profiles/active.ts";
 import { durationAt, formatDuration, positionOf } from "./profiles/transition.ts";
 import type { AudioSource } from "./remote/main-audio.ts";
 import { CloudRow } from "./cloud/CloudRow.tsx";
@@ -75,6 +75,7 @@ export interface PanelProps {
 
 export function Panel(props: PanelProps) {
   const { started, capture, dials, read, mainAudio } = props;
+  const fromScene = props.profiles.activeId.startsWith(SCENE_PREFIX);
   const [features, setFeatures] = useState(() => read(performance.now()));
 
   // The meters follow the features once per animation frame, so a test reading them sees
@@ -154,9 +155,11 @@ export function Panel(props: PanelProps) {
             data-testid="profile-picker"
             disabled={!props.profiles.loaded}
             style={FIT}
-            value={props.profiles.selectedId}
+            value={fromScene ? "" : props.profiles.selectedId}
             onChange={(e) => props.onProfile(e.target.value)}
           >
+            {/* B-07 PD5: a scene's look is no profile, so the picker selects none. */}
+            {fromScene && <option value="" disabled hidden />}
             {props.profiles.entries.map((entry) => (
               <option key={entry.id} value={entry.id}>
                 {entry.name}

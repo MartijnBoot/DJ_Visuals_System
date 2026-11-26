@@ -82,6 +82,11 @@ export interface ActiveProfile {
   guard(event: GuardEvent): void;
   /** B-07 PD5: the live look as it is now, for Stage from live; nothing is fetched. */
   snapshot(): LiveSnapshot;
+  /**
+   * B-07 PD5: Go. Makes `look` live by the pick's own path (token, supersede, failure reason)
+   * with `choice` as given, never the page's current choice; `done`, `failed` or `superseded`.
+   */
+  adopt(look: Look, choice: TransitionChoice): Promise<"done" | "failed" | "superseded">;
   state(): ActiveState;
   subscribe(listener: () => void): () => void;
 }
@@ -96,6 +101,14 @@ export interface LiveSnapshot {
   palette: string[];
   /** Each effect's strength on screen, by its place in the stack. */
   amounts: number[];
+}
+
+/** B-07 SD17: a live look built from a scene reports `scene:<id>` as its active id. */
+export const SCENE_PREFIX = "scene:";
+
+/** B-07 PD5: a staged look as Go hands it over: a snapshot with its own dials. */
+export interface Look extends LiveSnapshot {
+  dials: Profile["dials"];
 }
 
 /** A profile's own fields, without a stored row's id, revision or times (B-07 PD8). */
@@ -199,7 +212,9 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
     }
     const list: Entry[] = [{ id: BUILTIN_ID, name: builtin.name }, ...stored];
     // A profile deleted elsewhere keeps rendering, so the picker keeps showing it (SD9).
-    if (active.id !== BUILTIN_ID && !stored.some((e) => e.id === active.id)) list.push(active);
+    // A scene's look is no profile: no tile carries its name (B-07 PD5).
+    const listed = active.id === BUILTIN_ID || active.id.startsWith(SCENE_PREFIX);
+    if (!listed && !stored.some((e) => e.id === active.id)) list.push(active);
     return list;
   };
 
@@ -221,45 +236,69 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
   const faderEffects = (): EffectEntry[] => faderEntries(activeProfile, amountAt);
 
   /**
-   * Switches to `profile` in the engine by `choice`, then its dials; `false` when the engine
-   * refuses. No colour changes while a pick is pending, so the primary read here is the one on
-   * screen when the transition starts (SD4, SD12).
+   * Switches to `profile` in the engine by `choice`, then its dials; `failed` when the engine
+   * refuses, `superseded` when a newer pick or adopt took over. No colour changes while a pick is
+   * pending, so the primary read here is the one on screen when the transition starts (SD4,
+   * SD12). B-07 PD5: `given` is a staged look's own name, palette, strengths and dials, which the
+   * incoming look draws from its first frame; a `scene:` id is never remembered (SD17).
    */
   const apply = async (
     id: string,
     profile: Profile,
     mine: number,
     choice: TransitionChoice,
-  ): Promise<boolean> => {
+    given?: Pick<Look, "name" | "palette" | "amounts" | "dials">,
+  ): Promise<"done" | "failed" | "superseded"> => {
     const onScreen = live[derivePrimary(activeProfile)] ?? "#000000";
     const slot = derivePrimary(profile);
-    const palette = profile.palette.map((c, i) => (choice.keepColour && i === slot ? onScreen : c));
+    const palette =
+      given?.palette ??
+      profile.palette.map((c, i) => (choice.keepColour && i === slot ? onScreen : c));
+    const dials = given?.dials ?? profile.dials;
+    const staged = given
+      ? {
+          dials,
+          effects: profile.effects.map((e, i) => ({ ...e, amount: given.amounts[i] ?? e.amount })),
+        }
+      : {};
     // A Cut is the engine's call as before B-09: no transition is Cut (PD4).
     const options: SetProfileOptions =
       choice.kind === "cut"
         ? { pick: true }
         : { pick: true, transition: engineTransition(choice, onScreen, Math.random()) };
     try {
-      await deps.setProfile({ ...profile, palette }, options);
+      await deps.setProfile({ ...profile, palette, ...staged }, options);
     } catch (error) {
       if (mine === token) {
         reason = engineReason(error);
         emit();
       }
-      return false;
+      return "failed";
     }
-    if (mine !== token) return true; // a newer pick took over: it decides what is shown
-    deps.setDials(profile.dials);
-    deps.storage.save(id);
+    if (mine !== token) return "superseded"; // a newer pick took over: it decides what is shown
+    deps.setDials(dials);
+    if (!id.startsWith(SCENE_PREFIX)) deps.storage.save(id);
     deps.log(id);
-    active = { id, name: profile.name };
+    active = { id, name: given?.name ?? profile.name };
     activeProfile = profile;
-    live = palette; // the stored palette, or with the carried primary (SD4)
-    liveAmounts = new Map(); // every effect back at its stored strength (B-18 SD6)
+    live = [...palette]; // the stored palette, the carried primary (SD4) or the staged one
+    // Every effect back at its stored strength (B-18 SD6), or at the staged ones (B-07 PD5).
+    liveAmounts = new Map(given ? given.amounts.map((a, i) => [i, a] as const) : []);
     reason = null;
     guardReason = null;
     emit();
-    return true;
+    return "done";
+  };
+
+  /** B-07 PD5: Go. The pick's path with a given look and transition, under the pick's token. */
+  const adopt = async (look: Look, choice: TransitionChoice) => {
+    const mine = ++token;
+    picking = mine;
+    try {
+      return await apply(look.id, look.stored, mine, choice, look);
+    } finally {
+      if (picking === mine) picking = 0;
+    }
   };
 
   /** A person's pick uses the choice current at the pick (SD5). */
@@ -360,6 +399,7 @@ export function createActiveProfile(deps: ActiveDeps): ActiveProfile {
       palette: [...live],
       amounts: activeProfile.effects.map((_, i) => amountAt(i)),
     }),
+    adopt,
     state,
     subscribe(listener) {
       listeners.add(listener);

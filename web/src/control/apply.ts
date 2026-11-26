@@ -13,6 +13,7 @@
 // make and discard it. Without a target, or with `"live"`, every control does what it did.
 import type { AppliedEntry, Control, Feed, TransitionChoice } from "@djv/shared";
 import type { Dials } from "@djv/engine";
+import type { Look } from "../profiles/active.ts";
 import type { LiveSnapshot, StagedLook } from "../scenes/staged.ts";
 
 export interface ApplierDeps {
@@ -46,6 +47,12 @@ export interface ApplierDeps {
   feedOf(deviceId: string): Feed | null;
   /** B-09 SD5: the current transition choice, which Stage from live copies (AC1). */
   transition(): TransitionChoice;
+  /** B-07 PD6: the camera id Go switches to for a feed, or null when nothing matches. */
+  matchFeed(feed: Feed): string | null;
+  /** B-07 AC16: "Feed unavailable — kept the current camera", until the next Go or pick. */
+  setFeedNote(on: boolean): void;
+  /** B-07 PD5: Go through the pick's own path (`active.adopt`). */
+  adopt(look: Look, choice: TransitionChoice): Promise<"done" | "failed" | "superseded">;
 }
 
 export interface Applier {
@@ -62,6 +69,36 @@ export function createApplier(deps: ApplierDeps): Applier {
   const stageLive = () => {
     const { kind, duration } = deps.transition();
     deps.staged.fromLive(deps.snapshot(), deps.dials(), deps.feedOnScreen(), { kind, duration });
+  };
+
+  /**
+   * Go (SD3, SD6, PD5, PD6): a matched feed is switched first, as a camera tap switches it (only
+   * after Start, SD23); no match keeps the camera and sets the note. Then the staged look goes
+   * live by its own transition, and once it has, the staged look is a copy of the new live one,
+   * still tied to its scene (AC11). A failed or superseded Go leaves the staged look as it is.
+   */
+  const go = (settle: () => void): boolean => {
+    const staged = deps.staged.definition();
+    if (!staged) return false; // AC12: nothing to do, acknowledged
+    const fromScene = deps.staged.state()?.fromScene ?? null;
+    deps.setFeedNote(false);
+    if (staged.feed) {
+      const id = deps.matchFeed(staged.feed);
+      if (id === null) deps.setFeedNote(true);
+      else if (deps.started()) deps.setCamera(id);
+    }
+    const { id, name, stored, palette, amounts, dials, feed, transition } = staged;
+    deps
+      .adopt(
+        { id, name, stored, palette, amounts, dials },
+        { kind: transition.kind, duration: transition.duration, keepColour: false },
+      )
+      .then((result) => {
+        if (result !== "done" || deps.staged.state() === null) return;
+        deps.staged.fromLive(deps.snapshot(), dials, feed, transition, fromScene);
+      })
+      .then(settle, settle);
+    return true;
   };
 
   /** A control with `target: "staged"`: `true` when its acknowledgement waits (a pick). */
@@ -170,6 +207,9 @@ export function createApplier(deps: ApplierDeps): Applier {
       }
       case "unstage":
         deps.staged.clear();
+        break;
+      case "go":
+        if (go(settle)) return; // acknowledged at its settle, as a pick
         break;
       default:
         // B-09 PD15: a control type with no case fails the type check here.

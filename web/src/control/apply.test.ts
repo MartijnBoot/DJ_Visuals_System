@@ -7,7 +7,7 @@ import type { AudioFeatures, Dials, Engine } from "@djv/engine";
 import { DEFAULT_DIALS, ZERO_FEATURES } from "@djv/engine";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startFrameFeed } from "../frame-feed.ts";
-import type { StagedLook } from "../scenes/staged.ts";
+import type { StagedDefinition, StagedLook } from "../scenes/staged.ts";
 import { createApplier, type ApplierDeps } from "./apply.ts";
 
 let queue: { id: number; cb: FrameRequestCallback }[] = [];
@@ -39,8 +39,20 @@ const LIVE = {
 };
 
 /** B-07: a staged look whose every method is a spy; `exists` says whether one is staged. */
+/** B-07 T6: what the fake staged look hands Go. */
+const STAGED_DEF: StagedDefinition = {
+  id: "scene:s1",
+  name: "Warm crowd",
+  stored: LIVE,
+  palette: ["#ff0000", "#ffffff"],
+  amounts: [0.9],
+  dials: { recognisability: 0.6, reactivity: 0.4 },
+  feed: { kind: "local" as const, deviceId: "cam-9", label: "Booth" },
+  transition: { kind: "crossfade" as const, duration: 4 },
+};
+
 function fakeStaged(exists: { current: boolean }) {
-  const look = { id: "w1" } as Staged;
+  const look = { id: "w1", fromScene: { id: "s1", name: "Warm crowd" } } as Staged;
   return {
     fromLive: vi.fn(() => void (exists.current = true)),
     pick: vi.fn(async () => {}),
@@ -52,7 +64,7 @@ function fakeStaged(exists: { current: boolean }) {
     setTransition: vi.fn(),
     clear: vi.fn(() => void (exists.current = false)),
     state: () => (exists.current ? look : null),
-    definition: vi.fn(() => null),
+    definition: vi.fn(() => (exists.current ? STAGED_DEF : null)),
   } satisfies StagedLook;
 }
 
@@ -79,7 +91,7 @@ function rig(started = true, staging = false) {
     }),
     setColour: vi.fn(),
     resetColour: vi.fn(),
-    setCamera: vi.fn(),
+    setCamera: vi.fn(() => void events.push("setCamera")),
     setMainAudio: vi.fn(),
     setTransition: vi.fn(() => void events.push("setTransition")),
     setStrength: vi.fn(() => void events.push("setStrength")),
@@ -102,6 +114,12 @@ function rig(started = true, staging = false) {
           ? { kind: "remote", hint: "Chrome on Android" }
           : null,
     transition: () => ({ kind: "wipe", duration: 3, keepColour: true }),
+    matchFeed: vi.fn((feed) => (feed.kind === "local" && feed.label === "Booth" ? "cam-9" : null)),
+    setFeedNote: vi.fn(),
+    adopt: vi.fn(async () => {
+      events.push("adopt");
+      return "done" as const;
+    }),
   };
   const applier = createApplier(deps);
   const acks: unknown[][] = [];
@@ -440,6 +458,117 @@ describe("stage and unstage (B-07 AC1, AC5, AC7, AC8)", () => {
     runFrame(16);
     expect(r.deps.refresh).not.toHaveBeenCalled();
     expect(r.deps.pick).not.toHaveBeenCalled();
+  });
+});
+
+// B-07 T6 (SD3, SD6, SD16, AC10-AC12, AC15-AC17; plan PD5, PD6): Go switches a matched feed
+// first, then hands the staged look to `adopt`, and stages a copy of the new live look after.
+describe("go (B-07 AC10-AC12, AC15-AC17)", () => {
+  const settle = async () => {
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+  };
+
+  it("with no staged look does nothing and is acknowledged (AC12)", () => {
+    const r = rig(true, false);
+    r.applier.receive("d1", { type: "go", seq: 1 });
+    runFrame(16);
+    expect(r.deps.adopt).not.toHaveBeenCalled();
+    expect(r.deps.setCamera).not.toHaveBeenCalled();
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 1 }]]);
+  });
+
+  it("switches the matched camera before the adopt, with the staged transition and no Keep colour (AC10, AC15)", async () => {
+    const r = rig(true, true);
+    r.applier.receive("d1", { type: "go", seq: 2 });
+    runFrame(16);
+    expect(r.deps.matchFeed).toHaveBeenCalledWith(STAGED_DEF.feed);
+    expect(r.deps.setCamera).toHaveBeenCalledWith("cam-9");
+    expect(r.events.filter((e) => e === "setCamera" || e === "adopt")).toEqual([
+      "setCamera",
+      "adopt",
+    ]);
+    expect(r.deps.adopt).toHaveBeenCalledWith(
+      {
+        id: "scene:s1",
+        name: "Warm crowd",
+        stored: LIVE,
+        palette: ["#ff0000", "#ffffff"],
+        amounts: [0.9],
+        dials: { recognisability: 0.6, reactivity: 0.4 },
+      },
+      { kind: "crossfade", duration: 4, keepColour: false },
+    );
+    expect(r.deps.setFeedNote).toHaveBeenLastCalledWith(false);
+    expect(r.deps.setTransition).not.toHaveBeenCalled();
+    expect(r.acks).toEqual([]); // acknowledged at its settle, as a pick
+    await settle();
+    runFrame(32);
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 2 }]]);
+  });
+
+  it("after it lands, stages a copy of the new live look, still tied to its scene (AC11)", async () => {
+    const r = rig(true, true);
+    r.applier.receive("d1", { type: "go", seq: 3 });
+    runFrame(16);
+    await settle();
+    expect(stagedOf(r.deps).fromLive).toHaveBeenCalledWith(
+      r.deps.snapshot(),
+      STAGED_DEF.dials,
+      STAGED_DEF.feed,
+      STAGED_DEF.transition,
+      { id: "s1", name: "Warm crowd" },
+    );
+  });
+
+  it("a failed or superseded Go keeps the staged look as it is (B-09 SD17)", async () => {
+    for (const result of ["failed", "superseded"] as const) {
+      const r = rig(true, true);
+      vi.mocked(r.deps.adopt).mockResolvedValueOnce(result);
+      r.applier.receive("d1", { type: "go", seq: 4 });
+      runFrame(16);
+      await settle();
+      expect(stagedOf(r.deps).fromLive).not.toHaveBeenCalled();
+      runFrame(32);
+      expect(r.acks).toEqual([[{ deviceId: "d1", seq: 4 }]]);
+    }
+  });
+
+  it("no match keeps the camera and sets the note; the rest applies (AC16)", async () => {
+    const r = rig(true, true);
+    vi.mocked(r.deps.matchFeed).mockReturnValueOnce(null);
+    r.applier.receive("d1", { type: "go", seq: 5 });
+    runFrame(16);
+    expect(r.deps.setCamera).not.toHaveBeenCalled();
+    expect(r.deps.setFeedNote).toHaveBeenLastCalledWith(true);
+    expect(r.deps.adopt).toHaveBeenCalledTimes(1);
+  });
+
+  it("a scene with no feed leaves the camera alone with no note (AC17)", () => {
+    const r = rig(true, true);
+    vi.mocked(stagedOf(r.deps).definition).mockReturnValueOnce({ ...STAGED_DEF, feed: null });
+    r.applier.receive("d1", { type: "go", seq: 6 });
+    runFrame(16);
+    expect(r.deps.matchFeed).not.toHaveBeenCalled();
+    expect(r.deps.setCamera).not.toHaveBeenCalled();
+    expect(r.deps.setFeedNote).toHaveBeenLastCalledWith(false);
+    expect(r.deps.adopt).toHaveBeenCalledTimes(1);
+  });
+
+  it("before Start a matched camera is not switched, as a camera control is not (SD23)", () => {
+    const r = rig(false, true);
+    r.applier.receive("d1", { type: "go", seq: 7 });
+    runFrame(16);
+    expect(r.deps.setCamera).not.toHaveBeenCalled();
+    expect(r.deps.setFeedNote).toHaveBeenLastCalledWith(false);
+    expect(r.deps.adopt).toHaveBeenCalledTimes(1);
+  });
+
+  it("Go twice runs two transitions (SD16)", () => {
+    const r = rig(true, true);
+    r.applier.receive("d1", { type: "go", seq: 8 });
+    r.applier.receive("d2", { type: "go", seq: 9 });
+    runFrame(16);
+    expect(r.deps.adopt).toHaveBeenCalledTimes(2);
   });
 });
 
