@@ -384,6 +384,52 @@ test("each preview value shows its line: another controller's stream, nobody's, 
     .toEqual([true, false]);
 });
 
+/** Hides or shows the page as a phone's lock or app switch does, and tells the page. */
+const setHidden = (phone: Page, hidden: boolean) =>
+  phone.evaluate((h) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => h });
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => (h ? "hidden" : "visible"),
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, hidden);
+
+test("a hidden page stops watching and asks again when shown, unless another took it (PD16)", async ({
+  page,
+  browser,
+}) => {
+  const { phone, setState, screenGot } = await rawScreen(page, browser);
+  const watching = async () => (await sentOf(phone, "previewStream")).map((m) => m.watching);
+  await setState({ preview: "off" });
+  await showHere(phone).click();
+  await expect(phone.getByTestId("preview-video")).toBeVisible();
+
+  await setHidden(phone, true);
+  await expect.poll(watching).toEqual([true, false]);
+  await expect
+    .poll(async () => (await screenGot("preview")).at(-1))
+    .toEqual({
+      type: "preview",
+      deviceId: null,
+    });
+  await setHidden(phone, false);
+  await expect.poll(watching).toEqual([true, false, true]);
+  await expect(phone.getByTestId("preview-video")).toBeVisible();
+  await expect
+    .poll(async () => (await screenGot("preview")).at(-1))
+    .toMatchObject({ deviceId: expect.any(String) });
+
+  // Hidden while another controller takes the stream: shown again, this one does not take it back.
+  await setHidden(phone, true);
+  await expect.poll(watching).toEqual([true, false, true, false]);
+  await setState({ preview: "on" });
+  await setHidden(phone, false);
+  await expect(line(phone)).toHaveText("Preview is on another controller");
+  await expect(showHere(phone)).toBeEnabled();
+  expect(await watching()).toEqual([true, false, true, false]);
+});
+
 test("Preview unavailable 10 s after watching began with no offer, and Go still sends (AC33)", async ({
   page,
   browser,

@@ -37,7 +37,7 @@ export const PREVIEW_UNAVAILABLE_MS = 10_000;
  * B-07 PD16: whether this controller watches, the peer that receives, and what the frame shows.
  * Watching is asked of the server; it answers by making this controller the holder or not.
  */
-function usePreview(link: ScenesProps["link"], holder: boolean) {
+function usePreview(link: ScenesProps["link"], holder: boolean, preview: ScreenState["preview"]) {
   const [wanted, setWanted] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [connected, setConnected] = useState(false);
@@ -62,23 +62,36 @@ function usePreview(link: ScenesProps["link"], holder: boolean) {
     };
   }, [link, peer]);
 
-  // Another controller took the stream over, or it ended: this one stops watching.
+  // Another controller took the stream over, or it ended: this one stops watching. The end this
+  // page asked for itself while hidden is not one: it asks again when shown.
   const held = useRef(false);
+  const hiddenStop = useRef(false);
   useEffect(() => {
-    if (held.current && !holder) setWanted(false);
+    if (held.current && !holder && !hiddenStop.current) setWanted(false);
     held.current = holder;
     if (!holder) peer.close();
   }, [holder, peer]);
 
-  // Tell the server while visible; a hidden page stops watching and asks again when shown.
+  // Whether another controller holds the stream now, read when the page is shown again.
+  const elsewhere = useRef(false);
+  elsewhere.current = !holder && (preview === "on" || preview === "paused");
+
+  // Tell the server while visible; a hidden page stops watching and asks again when shown, unless
+  // another controller took the stream meanwhile — showing the page takes nothing over.
   useEffect(() => {
     if (!wanted) return;
-    const tell = () => void link.preview({ type: "previewStream", watching: !document.hidden });
+    const tell = () => {
+      // Its stop went out when hidden; the cleanup sends none again.
+      if (!document.hidden && hiddenStop.current && elsewhere.current) return setWanted(false);
+      hiddenStop.current = document.hidden;
+      link.preview({ type: "previewStream", watching: !document.hidden });
+    };
     tell();
     document.addEventListener("visibilitychange", tell);
     return () => {
       document.removeEventListener("visibilitychange", tell);
-      link.preview({ type: "previewStream", watching: false });
+      if (!hiddenStop.current) link.preview({ type: "previewStream", watching: false });
+      hiddenStop.current = false;
     };
   }, [wanted, link]);
 
@@ -163,7 +176,7 @@ const TESTID: Record<string, string> = {
 
 export function Scenes({ state, locked, editing, onEditing, send, link, holder }: ScenesProps) {
   const staged = state.staged ?? null;
-  const preview = usePreview(link, holder);
+  const preview = usePreview(link, holder, state.preview);
   /** PD16: this controller's own Stage starts watching; its Unstage stops. */
   const stage = (message: ControlInput) => {
     send(message);
