@@ -222,6 +222,37 @@ test("export, delete all, import gives the same names and the same pixels at Go;
     .toEqual(["Blue scene", "Blue scene (2)", "Red scene", "Red scene (2)"]);
 });
 
+test("a Go whose feed matches nothing keeps the camera and says so on the panel and every controller (AC16)", async ({
+  page,
+}) => {
+  const r = await rig(page);
+  await saveScene(r, r.red, "Red scene");
+  const downloading = page.waitForEvent("download");
+  await page.getByTestId("panel-scene-export").click();
+  const file = JSON.parse(readFileSync((await (await downloading).path())!, "utf8")) as {
+    scenes: Record<string, unknown>[];
+  };
+  const elsewhere = {
+    formatVersion: 1,
+    scenes: [{ ...file.scenes[0]!, name: "Elsewhere", feed: { kind: "remote", hint: "Nobody" } }],
+  };
+  await page.getByTestId("panel-scene-import").setInputFiles({
+    name: "elsewhere.djv-scenes.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(elsewhere)),
+  });
+  await expect.poll(() => names(page)).toContain("Elsewhere");
+
+  await picker(page).selectOption({ label: "Elsewhere" });
+  await page.getByTestId("panel-scene-stage").click();
+  await stateWhere(r.device, (s) => s.staged?.fromScene?.name === "Elsewhere");
+  await page.getByTestId("panel-scene-go").click();
+  await showing(page, RED_RGB); // the rest of the scene applies
+  const note = "Feed unavailable — kept the current camera";
+  await expect(page.getByTestId("profile-reason")).toHaveText(note);
+  await stateWhere(r.device, (s) => s.reason === note);
+});
+
 test("a file with one bad scene stores nothing and names the scene and the field (AC25)", async ({
   page,
 }) => {
