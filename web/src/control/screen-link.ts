@@ -164,6 +164,7 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
     if (message.type === "control") return deps.onControl(message.deviceId, message.control);
     if (message.type === "superseded") return update({ superseded: true });
     if (message.type === "offer" || message.type === "candidate") return deps.onSetup?.(message);
+    if (message.type === "scenes.result") return; // B-07: the page asks nothing yet (T7)
     const fresh = message.status.devices.filter((d) => !seen.has(d.deviceId));
     for (const d of fresh) seen.add(d.deviceId);
     update({ status: message.status });
