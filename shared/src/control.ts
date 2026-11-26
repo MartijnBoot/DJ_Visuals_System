@@ -76,7 +76,7 @@ export const TRANSITION_KINDS = ["cut", "crossfade", "dissolve", "wipe", "beatCu
 export const transitionKind = z.enum(TRANSITION_KINDS);
 export type TransitionKind = z.infer<typeof transitionKind>;
 /** B-09 SD6: the duration in seconds. */
-const transitionDuration = z.number().min(0.5).max(8);
+export const transitionDuration = z.number().min(0.5).max(8);
 
 /** B-09 SD5, SD9: the current transition, in the screen state and in `djv.transition`. */
 export const transitionChoiceSchema = z.strictObject({
