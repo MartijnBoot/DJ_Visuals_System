@@ -181,4 +181,12 @@ describe("a size limit per message type (B-06 T8, SD16, AC11)", () => {
     expect(deviceMaxBytes("hello")).toBe(MAX_DEVICE_MESSAGE);
     expect(deviceMaxBytes("unparseable")).toBe(MAX_DEVICE_MESSAGE);
   });
+
+  it("holds the preview's setup to 16 KB on both sockets, and its request to 4 KB (B-07 T11)", () => {
+    for (const type of ["previewOffer", "previewAnswer", "previewCandidate"]) {
+      expect(screenMaxBytes(type)).toBe(MAX_SETUP_MESSAGE);
+      expect(deviceMaxBytes(type)).toBe(MAX_SETUP_MESSAGE);
+    }
+    expect(deviceMaxBytes("previewStream")).toBe(MAX_DEVICE_MESSAGE);
+  });
 });

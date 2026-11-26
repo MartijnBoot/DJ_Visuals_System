@@ -168,6 +168,11 @@ export const deviceMessageSchema = z.discriminatedUnion("type", [
   message("reject", { deviceId }),
   message("offer", { sdp }),
   message("candidate", candidateShape),
+  // B-07 PD1, PD15: the preview, a controller only. It asks to watch (or stops), and answers the
+  // screen's offer through the server, which relays only the holder's.
+  message("previewStream", { watching: z.boolean() }),
+  message("previewAnswer", { sdp }),
+  message("previewCandidate", candidateShape),
 ]);
 export type DeviceMessage = z.infer<typeof deviceMessageSchema>;
 
@@ -256,6 +261,8 @@ export const screenStateSchema = z.strictObject({
   staged: stagedSchema.nullable().optional(),
   /** B-07 PD2: the saved scenes by name; null when the list could not load ("unavailable"). */
   scenes: z.array(sceneEntrySchema).max(SCENE_LIMITS.scenes).nullable().optional(),
+  /** B-07 PD2, PD12: the preview stream — none held, running, or paused for the output. */
+  preview: z.enum(["off", "on", "paused"]).optional(),
 });
 export type ScreenState = z.infer<typeof screenStateSchema>;
 
@@ -295,6 +302,10 @@ export const toDeviceSchema = z.discriminatedUnion("type", [
   message("candidate", candidateShape),
   /** B-06 SD12: pause (false) or resume (true) the sender's encoding of one kind. */
   message("stream", { kind: sendKind, active: z.boolean() }),
+  /** B-07 PD15: whether this controller holds the preview stream; sent on each change. */
+  message("preview", { holder: z.boolean() }),
+  message("previewOffer", { sdp }),
+  message("previewCandidate", candidateShape),
 ]);
 export type ToDevice = z.infer<typeof toDeviceSchema>;
 
@@ -316,6 +327,9 @@ export const screenMessageSchema = z.discriminatedUnion("type", [
   message("answer", { deviceId, sdp }),
   message("candidate", { deviceId, ...candidateShape }),
   message("stream", { deviceId, kind: sendKind, active: z.boolean() }),
+  /** B-07 PD1: the preview's setup, for the holder only (PD15). */
+  message("previewOffer", { deviceId, sdp }),
+  message("previewCandidate", { deviceId, ...candidateShape }),
   // B-07 PD9: scenes, request and reply. A name and a definition are checked by the server, which
   // answers why it refused; a message that fails here is dropped with a warn and gets no reply.
   message("scenes.list", { requestId }),
@@ -383,6 +397,10 @@ export const toScreenSchema = z.discriminatedUnion("type", [
   message("superseded", {}),
   message("offer", { deviceId, sdp }),
   message("candidate", { deviceId, ...candidateShape }),
+  /** B-07 PD15: the controller holding the preview stream, or null when none does. */
+  message("preview", { deviceId: deviceId.nullable() }),
+  message("previewAnswer", { deviceId, sdp }),
+  message("previewCandidate", { deviceId, ...candidateShape }),
   /** B-07 PD9: the answer to one `scenes.*` request; a change carries the new list. */
   message("scenes.result", {
     requestId,

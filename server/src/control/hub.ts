@@ -6,6 +6,10 @@
 // Logs name a device by its sequence label only, never its hint, key or anything it sent (SD27);
 // a sender's lines also name its role (B-06 SD25) and say "sender" where a controller's say
 // "device". Approved senders are listed apart, with whether their socket is open (B-06 PD5).
+// B-07 (T11, SD13, SD15, PD15): one controller at a time holds the preview stream. The hub keeps
+// which, tells each controller whether it is the one and the screen which it is, relays the
+// screen's setup to the holder only and the holder's setup to the screen only, and clears the
+// holder whenever its socket, its approval or the screen goes away.
 import {
   screenMessageSchema,
   type Control,
@@ -76,6 +80,8 @@ export function createHub({
   const scenes = sceneStore ? createSceneRequests(sceneStore, log) : null;
   const screens = new Set<WebSocket>();
   let target: WebSocket | null = null;
+  /** B-07 PD15: the controller holding the preview stream. */
+  let previewHolder: string | null = null;
   let cached: ScreenState | null = null;
   let running = false;
   /** Every change of the cached state goes through here, so `onRunning` hears each edge. */
@@ -150,10 +156,47 @@ export function createHub({
       ? log.info({ device: label, sends: [...sends] }, `sender ${event}`)
       : log.info({ device: label }, `device ${event}`);
 
+  /**
+   * B-07 PD15: no one holds the preview any more. The screen hears it (it stops the stream), and
+   * the old holder too unless its socket is going away.
+   */
+  const clearHolder = (tellHolder: boolean) => {
+    const old = previewHolder;
+    if (old === null) return;
+    previewHolder = null;
+    log.info({ device: labelOf(old) }, "preview stream ended");
+    const link = links.get(old);
+    if (tellHolder && link) send(link.socket, { type: "preview", holder: false });
+    toTarget({ type: "preview", deviceId: null });
+  };
+
+  /** B-07 PD15: `deviceId` asks to watch (taking over) or to stop. */
+  const watch = (deviceId: string, watching: boolean) => {
+    const link = links.get(deviceId);
+    if (!link) return;
+    if (!watching) {
+      if (previewHolder === deviceId) clearHolder(true);
+      return;
+    }
+    if (previewHolder !== deviceId) {
+      if (previewHolder !== null) {
+        log.info({ device: labelOf(previewHolder) }, "preview stream ended");
+        const old = links.get(previewHolder);
+        if (old) send(old.socket, { type: "preview", holder: false });
+      }
+      previewHolder = deviceId;
+      log.info({ device: link.label }, "preview stream opened");
+    }
+    // A repeated ask is answered again, so the screen may start the stream afresh.
+    send(link.socket, { type: "preview", holder: true });
+    toTarget({ type: "preview", deviceId });
+  };
+
   /** Sends `message` and closes the device's socket. */
   const end = (deviceId: string, message: ToDevice = { type: "ended" }) => {
     const link = links.get(deviceId);
     if (!link) return;
+    if (previewHolder === deviceId) clearHolder(false);
     links.delete(deviceId);
     send(link.socket, message);
     link.socket.close(message.type === "ended" ? ENDED : REFUSED, message.type);
@@ -168,7 +211,7 @@ export function createHub({
    * What a device receives first once approved: a controller the full state, then the requests
    * (SD5); a sender only whether the target screen is there (B-06 SD16), to offer to it.
    */
-  const welcome = (link: Link) => {
+  const welcome = (deviceId: string, link: Link) => {
     if (link.sends.length > 0) {
       send(link.socket, { type: "screen", connected: target !== null });
       return;
@@ -178,6 +221,7 @@ export function createHub({
       cached ? { type: "state", state: cached } : { type: "screen", connected: target !== null },
     );
     send(link.socket, { type: "pending", requests: pairing.pending() });
+    send(link.socket, { type: "preview", holder: previewHolder === deviceId });
   };
 
   const scheduleExpiry = () => {
@@ -216,7 +260,7 @@ export function createHub({
           deviceId,
           sends: result.device.sends,
         });
-        welcome(link);
+        welcome(deviceId, link);
       }
     } else if (result.kind === "refused") {
       log.info({ device: label, reason: result.reason }, "device refused");
@@ -320,6 +364,18 @@ export function createHub({
         const { candidate, sdpMid, sdpMLineIndex } = message;
         return send(link.socket, { type: "candidate", candidate, sdpMid, sdpMLineIndex });
       }
+      case "previewOffer":
+      case "previewCandidate": {
+        // B-07 PD15: to the holder only, without the id. One in flight across a takeover is
+        // normal, so a stray is a debug line, not a warning.
+        const link = message.deviceId === previewHolder ? links.get(message.deviceId) : undefined;
+        if (!link) return log.debug({ type: message.type }, "preview setup dropped");
+        if (message.type === "previewOffer") {
+          return send(link.socket, { type: "previewOffer", sdp: message.sdp });
+        }
+        const { candidate, sdpMid, sdpMLineIndex } = message;
+        return send(link.socket, { type: "previewCandidate", candidate, sdpMid, sdpMLineIndex });
+      }
     }
   };
 
@@ -338,6 +394,7 @@ export function createHub({
       if (target) {
         send(target, { type: "superseded" });
         log.info("screen superseded");
+        clearHolder(true); // the stream was the old page's (PD15)
         // The old page's state is void, and its close may arrive after this (a reload): devices
         // lock now and unlock on the new page's state (SD12, SD13).
         toApproved({ type: "screen", connected: false });
@@ -371,6 +428,7 @@ export function createHub({
         scenes?.discard();
         setCached(null);
         log.info("screen disconnected");
+        clearHolder(true);
         toApproved({ type: "screen", connected: false });
       });
       send(socket, { type: "status", status: status() });
@@ -414,7 +472,7 @@ export function createHub({
       links.set(deviceId, link);
       note(label, sends, sends.length > 0 ? "connected" : "reconnected");
       send(socket, { type: "approved", key, deviceId, sends });
-      welcome(link);
+      welcome(deviceId, link);
       if (sends.length > 0) changed(); // the panel shows it online again (PD5)
       return deviceId;
     },
@@ -436,12 +494,22 @@ export function createHub({
       toTarget({ ...message, deviceId });
     },
 
+    preview(deviceId, message) {
+      if (message.type === "previewStream") return watch(deviceId, message.watching);
+      // The holder's answer and candidates to the screen, with its id; anyone else's dropped.
+      if (deviceId !== previewHolder) {
+        return log.debug({ type: message.type }, "preview setup dropped");
+      }
+      toTarget({ ...message, deviceId });
+    },
+
     accept: (deviceId) => run(() => accept(deviceId)),
     reject: (deviceId) => run(() => reject(deviceId)),
 
     closed(deviceId, socket) {
       const link = links.get(deviceId);
       if (link?.socket !== socket) return;
+      if (previewHolder === deviceId) clearHolder(false); // AC32: the screen stops the stream
       links.delete(deviceId);
       // A request whose page went away leaves the lists; an approval stays for a reconnect.
       if (!link.approved && pairing.reject(deviceId)) {

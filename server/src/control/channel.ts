@@ -4,7 +4,8 @@
 // stays open; the excess beyond the rate is dropped quietly, so a flood cannot flood the log
 // either. An accepted message is logged at `debug`, type only — never a value. B-06 (SD16, AC11,
 // T8): the size limit may depend on the message's type, so a WebRTC setup message may be 16 KB on
-// any socket while every other message keeps its socket's own limit.
+// any socket while every other message keeps its socket's own limit. B-07 (T11): the preview's
+// setup is held to the same 16 KB.
 import { MAX_DEVICE_MESSAGE, MAX_SCREEN_MESSAGE, MAX_SETUP_MESSAGE, typeOf } from "@djv/shared";
 import type { z } from "zod";
 
@@ -68,8 +69,9 @@ export function receive<T>(
   });
 }
 
-const DEVICE_SETUP = new Set(["offer", "answer", "candidate"]);
-const SCREEN_SETUP = new Set(["answer", "candidate", "stream"]);
+const PREVIEW_SETUP = ["previewOffer", "previewAnswer", "previewCandidate"];
+const DEVICE_SETUP = new Set(["offer", "answer", "candidate", ...PREVIEW_SETUP]);
+const SCREEN_SETUP = new Set(["answer", "candidate", "stream", ...PREVIEW_SETUP]);
 
 /** A device socket's limit by type: 16 KB for setup, B-04's 4 KB for the rest (B-06 SD16). */
 export const deviceMaxBytes = (type: string) =>

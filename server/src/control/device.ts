@@ -4,7 +4,8 @@
 // is dropped (AC34); once approved, its controls go to the screen and its `accept`/`reject` act
 // like the panel's. `newCode` and `disconnect` are not in the device union, so they fail
 // validation and are dropped with a warn (AC17). The IP the key is bound to is the socket's own
-// remote address: no header is read for it (`X-Forwarded-For` included, AC12).
+// remote address: no header is read for it (`X-Forwarded-For` included, AC12). B-07 (T11, PD15):
+// a controller may also send the preview's request and setup; a sender still only its own setup.
 import {
   DEVICE_RATE_PER_SECOND,
   deviceMessageSchema,
@@ -36,6 +37,14 @@ export interface DeviceHub {
   sendsOf(deviceId: string): readonly SendKind[] | null;
   /** A sender's offer or candidate, for the target screen (B-06 SD16). */
   setup(deviceId: string, message: Extract<DeviceMessage, { type: "offer" | "candidate" }>): void;
+  /** B-07 PD15: a controller's preview request or setup; the hub keeps the one holder. */
+  preview(
+    deviceId: string,
+    message: Extract<
+      DeviceMessage,
+      { type: "previewStream" | "previewAnswer" | "previewCandidate" }
+    >,
+  ): void;
   control(deviceId: string, control: Control): void;
   accept(deviceId: string): void;
   reject(deviceId: string): void;
@@ -81,7 +90,8 @@ export function attachDevice(
       }
       if (deviceId === null || !hub.isApproved(deviceId, socket)) return; // AC34
       if (message.type === "hello") return;
-      // B-06 SD6, AC9: a sender may send only setup messages, a controller never.
+      // B-06 SD6, AC9: a sender may send only setup messages, a controller never; a controller's
+      // preview messages are not a sender's setup (B-07 AC37).
       const sender = (hub.sendsOf(deviceId) ?? []).length > 0;
       const setup = message.type === "offer" || message.type === "candidate";
       if (sender !== setup) {
@@ -95,6 +105,10 @@ export function attachDevice(
           return hub.accept(message.deviceId);
         case "reject":
           return hub.reject(message.deviceId);
+        case "previewStream":
+        case "previewAnswer":
+        case "previewCandidate":
+          return hub.preview(deviceId, message);
         default:
           return hub.control(deviceId, message);
       }

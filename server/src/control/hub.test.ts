@@ -206,3 +206,122 @@ describe("senders (B-06 T7, SD6, SD15, SD25, PD5)", () => {
     expect(socket.sent).toEqual([{ type: "refused", reason: "audio_taken" }]);
   });
 });
+
+describe("the preview holder (B-07 T11, SD13, SD15, PD15)", () => {
+  /** An approved controller: its socket and id. */
+  async function controller(ip: string) {
+    const c = request(ip);
+    screen.receive({ type: "accept", deviceId: c.deviceId });
+    await vi.advanceTimersByTimeAsync(0);
+    return c;
+  }
+  const watch = (deviceId: string, watching = true) =>
+    hub.preview(deviceId, { type: "previewStream", watching });
+  const toScreen = (type: string) => (screen.sent as ToScreen[]).filter((m) => m.type === type);
+  const holderOf = (socket: FakeSocket) =>
+    (socket.sent as ToDevice[]).filter((m) => m.type === "preview").at(-1);
+
+  it("a controller's previewStream makes it the holder; a second takes over and the first hears it", async () => {
+    const a = await controller("192.168.1.50");
+    const b = await controller("192.168.1.51");
+    watch(a.deviceId);
+    expect(holderOf(a.socket)).toEqual({ type: "preview", holder: true });
+    expect(toScreen("preview").at(-1)).toEqual({ type: "preview", deviceId: a.deviceId });
+    watch(b.deviceId);
+    expect(holderOf(a.socket)).toEqual({ type: "preview", holder: false });
+    expect(holderOf(b.socket)).toEqual({ type: "preview", holder: true });
+    expect(toScreen("preview").at(-1)).toEqual({ type: "preview", deviceId: b.deviceId });
+    expect(info).toHaveBeenCalledWith({ device: "Device 1" }, "preview stream opened");
+    expect(info).toHaveBeenCalledWith({ device: "Device 1" }, "preview stream ended");
+    expect(info).toHaveBeenCalledWith({ device: "Device 2" }, "preview stream opened");
+  });
+
+  it("a welcome tells a controller whether it holds the stream", async () => {
+    const a = await controller("192.168.1.52");
+    expect(holderOf(a.socket)).toEqual({ type: "preview", holder: false });
+  });
+
+  it("watching: false from a non-holder changes nothing; from the holder clears it", async () => {
+    const a = await controller("192.168.1.53");
+    const b = await controller("192.168.1.54");
+    watch(a.deviceId);
+    const before = toScreen("preview").length;
+    watch(b.deviceId, false);
+    expect(toScreen("preview")).toHaveLength(before);
+    watch(a.deviceId, false);
+    expect(toScreen("preview").at(-1)).toEqual({ type: "preview", deviceId: null });
+    expect(holderOf(a.socket)).toEqual({ type: "preview", holder: false });
+  });
+
+  const clears: [string, (c: { socket: FakeSocket; deviceId: string }) => Promise<void>][] = [
+    [
+      "the holder's socket closing",
+      async ({ socket, deviceId }) => {
+        socket.close(1000);
+        hub.closed(deviceId, asSocket(socket));
+      },
+    ],
+    [
+      "the panel's disconnect",
+      async ({ deviceId }) => screen.receive({ type: "disconnect", deviceId }),
+    ],
+    ["switching off", async () => screen.receive({ type: "disable" })],
+    ["a new code", async () => screen.receive({ type: "newCode" })],
+  ];
+  it.each(clears)("%s clears the holder and tells the screen", async (_name, clear) => {
+    const a = await controller("192.168.1.55");
+    watch(a.deviceId);
+    await clear(a);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(toScreen("preview").at(-1)).toEqual({ type: "preview", deviceId: null });
+    expect(info).toHaveBeenCalledWith({ device: "Device 1" }, "preview stream ended");
+    // The relay is closed: the old holder's answer reaches the screen no more.
+    hub.preview(a.deviceId, { type: "previewAnswer", sdp: "v=0" });
+    expect(toScreen("previewAnswer")).toEqual([]);
+  });
+
+  it("the screen closing or being superseded clears it and tells the holder", async () => {
+    const a = await controller("192.168.1.56");
+    watch(a.deviceId);
+    const next = new FakeSocket();
+    hub.attachScreen(asSocket(next));
+    expect(holderOf(a.socket)).toEqual({ type: "preview", holder: false });
+    expect(info).toHaveBeenCalledWith({ device: "Device 1" }, "preview stream ended");
+    watch(a.deviceId);
+    expect((next.sent as ToScreen[]).filter((m) => m.type === "preview").at(-1)).toEqual({
+      type: "preview",
+      deviceId: a.deviceId,
+    });
+    next.close(1000);
+    expect(holderOf(a.socket)).toEqual({ type: "preview", holder: false });
+  });
+
+  it("relays the screen's setup to the holder only, and only the holder's to the screen", async () => {
+    const a = await controller("192.168.1.57");
+    const b = await controller("192.168.1.58");
+    watch(a.deviceId);
+    const candidate = { candidate: "candidate:1", sdpMid: "0", sdpMLineIndex: 0 };
+    screen.receive({ type: "previewOffer", deviceId: a.deviceId, sdp: "v=0 a" });
+    screen.receive({ type: "previewCandidate", deviceId: a.deviceId, ...candidate });
+    screen.receive({ type: "previewOffer", deviceId: b.deviceId, sdp: "v=0 b" });
+    await vi.advanceTimersByTimeAsync(0);
+    const setup = (s: FakeSocket) =>
+      (s.sent as ToDevice[]).filter(
+        (m) => m.type === "previewOffer" || m.type === "previewCandidate",
+      );
+    expect(setup(a.socket)).toEqual([
+      { type: "previewOffer", sdp: "v=0 a" },
+      { type: "previewCandidate", ...candidate },
+    ]);
+    expect(setup(b.socket)).toEqual([]);
+    hub.preview(a.deviceId, { type: "previewAnswer", sdp: "v=0 answer" });
+    hub.preview(a.deviceId, { type: "previewCandidate", ...candidate });
+    hub.preview(b.deviceId, { type: "previewAnswer", sdp: "v=0 stray" });
+    expect(toScreen("previewAnswer")).toEqual([
+      { type: "previewAnswer", deviceId: a.deviceId, sdp: "v=0 answer" },
+    ]);
+    expect(toScreen("previewCandidate")).toEqual([
+      { type: "previewCandidate", deviceId: a.deviceId, ...candidate },
+    ]);
+  });
+});

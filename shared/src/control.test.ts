@@ -405,3 +405,45 @@ describe("staging (B-07 SD4, PD1, PD3)", () => {
     expect(parse({ ...state, staged: { ...staged, definition: {} } })).toBe(false);
   });
 });
+
+describe("the preview (B-07 T11, PD1, PD2, PD15)", () => {
+  const candidate = { candidate: "candidate:1", sdpMid: "0", sdpMLineIndex: 0 };
+
+  it("a controller's request and setup parse; a previewStream needs watching", () => {
+    expect(deviceMessageSchema.safeParse({ type: "previewStream", watching: true }).success).toBe(
+      true,
+    );
+    expect(deviceMessageSchema.safeParse({ type: "previewAnswer", sdp: "v=0" }).success).toBe(true);
+    expect(deviceMessageSchema.safeParse({ type: "previewCandidate", ...candidate }).success).toBe(
+      true,
+    );
+    expect(deviceMessageSchema.safeParse({ type: "previewStream" }).success).toBe(false);
+    expect(deviceMessageSchema.safeParse({ type: "previewOffer", sdp: "v=0" }).success).toBe(false);
+  });
+
+  it("the screen's setup names the holder; the server names it back, or null", () => {
+    expect(
+      screenMessageSchema.safeParse({ type: "previewOffer", deviceId: "d1", sdp: "v=0" }).success,
+    ).toBe(true);
+    expect(screenMessageSchema.safeParse({ type: "previewOffer", sdp: "v=0" }).success).toBe(false);
+    expect(toScreenSchema.safeParse({ type: "preview", deviceId: null }).success).toBe(true);
+    expect(
+      toScreenSchema.safeParse({ type: "previewAnswer", deviceId: "d1", sdp: "v=0" }).success,
+    ).toBe(true);
+    expect(toDeviceSchema.safeParse({ type: "preview", holder: false }).success).toBe(true);
+    expect(toDeviceSchema.safeParse({ type: "previewOffer", sdp: "v=0" }).success).toBe(true);
+  });
+
+  it("the state's preview is off, on or paused, and may be absent", () => {
+    const parse = (value: unknown) =>
+      toDeviceSchema.safeParse({ type: "state", state: { ...state, preview: value } }).success;
+    for (const value of ["off", "on", "paused", undefined]) expect(parse(value)).toBe(true);
+    expect(parse("elsewhere")).toBe(false);
+  });
+
+  it("names every preview type a socket may receive in a drop's warn", () => {
+    for (const type of ["previewStream", "previewAnswer", "previewCandidate", "previewOffer"]) {
+      expect(typeOf(JSON.stringify({ type }))).toBe(type);
+    }
+  });
+});
