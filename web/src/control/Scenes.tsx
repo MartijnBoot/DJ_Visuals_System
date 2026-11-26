@@ -38,11 +38,11 @@ export function Scenes({ state, locked, editing, onEditing, send }: ScenesProps)
   const nameOk = name.trim() !== "" && problem === null;
   const feed = feedLine(state);
 
+  // The confirm exists only while it asks: a closed dialog stays out of the page, as the other
+  // VJ-mode sections keep theirs (B-16's swatch test counts every <dialog>).
   useEffect(() => {
     const d = dialog.current;
-    if (!d) return;
-    if (confirming && !d.open) d.showModal();
-    if (!confirming && d.open) d.close();
+    if (confirming && d && !d.open) d.showModal();
   }, [confirming]);
 
   return (
@@ -199,30 +199,32 @@ export function Scenes({ state, locked, editing, onEditing, send }: ScenesProps)
         </button>
       </div>
 
-      <dialog
-        ref={dialog}
-        aria-label="Delete scene"
-        className="djv-dialog"
-        onClose={() => setConfirming(false)}
-      >
-        <span>Delete {listed?.name}?</span>
-        <div className="djv-row">
-          <button
-            type="button"
-            className="djv-key"
-            disabled={locked || !listed}
-            onClick={() => {
-              if (listed) send({ type: "deleteScene", id: listed.id });
-              setConfirming(false);
-            }}
-          >
-            Delete
-          </button>
-          <button type="button" className="djv-key" onClick={() => setConfirming(false)}>
-            Cancel
-          </button>
-        </div>
-      </dialog>
+      {confirming && (
+        <dialog
+          ref={dialog}
+          aria-label="Delete scene"
+          className="djv-dialog"
+          onClose={() => setConfirming(false)}
+        >
+          <span>Delete {listed?.name}?</span>
+          <div className="djv-row">
+            <button
+              type="button"
+              className="djv-key"
+              disabled={locked || !listed}
+              onClick={() => {
+                if (listed) send({ type: "deleteScene", id: listed.id });
+                setConfirming(false);
+              }}
+            >
+              Delete
+            </button>
+            <button type="button" className="djv-key" onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+          </div>
+        </dialog>
+      )}
     </section>
   );
 }
