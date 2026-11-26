@@ -17,16 +17,27 @@
 // never a dialog; DJ mode aims it at the primary slot, VJ mode at the swatch last tapped.
 // Effect strength (B-18 SD1, SD8, SD10, SD11): the DJ-ticked effect's fader after the two dials in
 // the bank, in both modes; in VJ mode an Effects section under Transition with the VJ-ticked ones.
+// Scenes (B-07 SD4, SD10, PD20): in VJ mode the Scenes section comes first; while a staged look
+// exists its Editing switch decides which look every control below shows and edits
+// (`scenes-view.ts`); DJ mode always edits the live look.
 import type { ScreenState, TransitionKind } from "@djv/shared";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { WaitingBadge } from "./Approvals.tsx";
 import { durationAt, formatDuration, positionOf } from "../profiles/transition.ts";
 import { Fader } from "./Fader.tsx";
 import { FaderBank } from "./FaderBank.tsx";
+import { Scenes } from "./Scenes.tsx";
+import { shownLook, withTarget, type Editing } from "./scenes-view.ts";
 import { VjPanel } from "./VjPanel.tsx";
 import { Wheel } from "./Wheel.tsx";
 import { useArrangement } from "./arrangement.ts";
-import { createDeviceLink, LINK_GROUP, openSocket, type DeviceLink } from "./device-link.ts";
+import {
+  createDeviceLink,
+  LINK_GROUP,
+  openSocket,
+  type ControlInput,
+  type DeviceLink,
+} from "./device-link.ts";
 import { effectFader, placeEffects, type EffectControl } from "./effect-faders.ts";
 import { createSendBudget } from "./send-budget.ts";
 import { keyStore, modeStore, type Mode } from "./remembered.ts";
@@ -105,6 +116,8 @@ export function Controller() {
    * Page memory only: a reload starts at null.
    */
   const [target, setTarget] = useState<{ slot: number; profile: string | null } | null>(null);
+  /** B-07 PD20: the Editing switch, this page's own; never stored. */
+  const [editing, setEditing] = useState<Editing>("staged");
   const view = useSyncExternalStore(
     (fn) => link.subscribe(fn),
     () => link.view(),
@@ -130,7 +143,9 @@ export function Controller() {
   const tap = (send: () => unknown) => budget.tap(() => send() !== null);
   /** One control's newest value (PD5's key): replaces that control's waiting value. */
   const value = (key: string, send: () => unknown) => budget.value(key, () => send() !== null);
-  const sendEffect = (control: EffectControl) => link.send(control);
+  /** B-07 PD20: a control of the seven carries the look the switch reads. */
+  const sendTo = (message: ControlInput) => link.send(withTarget(message, edits));
+  const sendEffect = (control: EffectControl) => sendTo(control);
 
   const choose = (next: Mode) => {
     setMode(next);
@@ -139,8 +154,16 @@ export function Controller() {
   };
 
   const state: ScreenState | null = view.state;
-  const activeId = state?.activeId ?? null;
-  const paletteSize = state?.palette.length ?? 0;
+  const hasStaged = Boolean(state?.staged);
+  // AC9: a staged look appearing sets the switch to Staged.
+  useEffect(() => {
+    if (hasStaged) setEditing("staged");
+  }, [hasStaged]);
+  /** Which look the controls edit: DJ mode and no staged look are always the live one. */
+  const edits: Editing = mode === "vj" && hasStaged ? editing : "live";
+  const shown = state ? shownLook(state, edits) : null;
+  const activeId = shown?.id ?? null;
+  const paletteSize = shown?.palette.length ?? 0;
   // SD3, PD1: a new active profile, whoever picked it, sends the wheel back to the primary slot.
   useEffect(() => setTarget(null), [activeId]);
   // PD14: so does a palette without the target's slot, for good: a palette that grows again later
@@ -149,17 +172,17 @@ export function Controller() {
     if (target && target.slot >= paletteSize) setTarget(null);
   }, [target, paletteSize]);
   /** The wheel's slot (B-16 SD3): DJ mode's is the primary, VJ mode's the target or the primary. */
-  const slot = !state
+  const slot = !shown
     ? null
     : mode === "vj" &&
         target !== null &&
         target.profile === activeId &&
-        target.slot < state.palette.length
+        target.slot < shown.palette.length
       ? target.slot
-      : state.primary;
+      : shown.primary;
   const locked = view.locked;
   /** B-18 SD8: the bank's effect fader and the Effects section's, for this mode. */
-  const placed = placeEffects(state?.effects ?? [], mode);
+  const placed = placeEffects(shown?.effects ?? [], mode);
   const asking = !locked
     ? false
     : [
@@ -238,8 +261,18 @@ export function Controller() {
           ))}
         </div>
 
-        {state && (
+        {state && shown && (
           <>
+            {mode === "vj" && (
+              <Scenes
+                state={state}
+                locked={locked}
+                editing={edits}
+                onEditing={setEditing}
+                send={(message) => tap(() => link.send(message))}
+              />
+            )}
+
             <section aria-label="Profiles" className="djv-section">
               <div className="djv-row">
                 <h2 className="djv-legend">Profile</h2>
@@ -265,13 +298,13 @@ export function Controller() {
                     type="button"
                     data-testid="profile-tile"
                     data-profile-id={p.id}
-                    aria-pressed={p.id === state.activeId}
+                    aria-pressed={p.id === shown.id}
                     disabled={locked}
                     className="djv-key djv-tile"
                     onClick={() => {
                       // SD3, PD1: any pick, the active profile included, aims at the primary.
                       setTarget(null);
-                      tap(() => link.send({ type: "pick", id: p.id }));
+                      tap(() => sendTo({ type: "pick", id: p.id }));
                     }}
                   >
                     {p.name}
@@ -289,10 +322,10 @@ export function Controller() {
                       key={kind}
                       type="button"
                       data-testid={`transition-${kind}`}
-                      aria-pressed={state.transition.kind === kind}
+                      aria-pressed={shown.transition.kind === kind}
                       disabled={locked}
                       className="djv-key djv-tile"
-                      onClick={() => tap(() => link.send({ type: "transition", kind }))}
+                      onClick={() => tap(() => sendTo({ type: "transition", kind }))}
                     >
                       {label}
                     </button>
@@ -301,15 +334,15 @@ export function Controller() {
                 <Fader
                   testId="transition-duration"
                   label="Duration"
-                  value={positionOf(state.transition.duration)}
+                  value={positionOf(shown.transition.duration)}
                   disabled={
-                    locked || state.transition.kind === "cut" || state.transition.kind === "beatCut"
+                    locked || shown.transition.kind === "cut" || shown.transition.kind === "beatCut"
                   }
                   format={(x) => formatDuration(durationAt(x))}
                   gapMs={DURATION_GAP_MS}
                   onSend={(x) =>
                     value("transition:duration", () =>
-                      link.send({ type: "transition", duration: durationAt(x) }),
+                      sendTo({ type: "transition", duration: durationAt(x) }),
                     )
                   }
                 />
@@ -317,8 +350,8 @@ export function Controller() {
                   <button
                     type="button"
                     data-testid="transition-keep-colour"
-                    aria-pressed={state.transition.keepColour}
-                    disabled={locked}
+                    aria-pressed={shown.transition.keepColour}
+                    disabled={locked || edits === "staged"}
                     className="djv-key"
                     onClick={() =>
                       tap(() =>
@@ -336,7 +369,7 @@ export function Controller() {
               <section aria-label="Effects" data-testid="effects" className="djv-section">
                 <h2 className="djv-legend">Effects</h2>
                 {placed.section.map((effect) => {
-                  const fader = effectFader(effect, state.activeId, value, sendEffect);
+                  const fader = effectFader(effect, shown.id, value, sendEffect);
                   return <Fader key={fader.testId} {...fader} disabled={locked} />;
                 })}
               </section>
@@ -356,10 +389,10 @@ export function Controller() {
                     type="button"
                     data-testid="camera-tile"
                     data-camera-id={c.deviceId}
-                    aria-pressed={c.deviceId === state.cameraId}
+                    aria-pressed={c.deviceId === shown.cameraId}
                     disabled={locked || !state.started}
                     className="djv-key djv-tile"
-                    onClick={() => tap(() => link.send({ type: "camera", deviceId: c.deviceId }))}
+                    onClick={() => tap(() => sendTo({ type: "camera", deviceId: c.deviceId }))}
                   >
                     {c.label || `Camera ${i + 1}`}
                     {c.remote && (
@@ -398,12 +431,12 @@ export function Controller() {
 
             {mode === "vj" && (
               <VjPanel
-                state={state}
+                state={{ ...state, palette: shown.palette, primary: shown.primary }}
                 linkText={view.text}
                 locked={locked}
                 pending={view.pending}
                 roundTrip={roundTrip}
-                target={slot ?? state.primary}
+                target={slot ?? shown.primary}
                 onSwatch={(tapped) => setTarget({ slot: tapped, profile: activeId })}
                 onAccept={(deviceId) => tap(() => link.send({ type: "accept", deviceId }))}
                 onReject={(deviceId) => tap(() => link.send({ type: "reject", deviceId }))}
@@ -413,23 +446,23 @@ export function Controller() {
         )}
       </div>
 
-      {state && slot !== null && (
+      {shown && slot !== null && (
         <Wheel
-          key={slot}
+          key={`${edits}:${slot}`}
           slot={slot}
-          primary={slot === state.primary}
-          current={state.palette[slot]!}
-          stored={state.storedPalette[slot] ?? state.palette[slot]!}
+          primary={slot === shown.primary}
+          current={shown.palette[slot]!}
+          stored={shown.storedPalette[slot] ?? shown.palette[slot]!}
           disabled={locked}
           arrangement={arrangement}
           onColour={(hex) =>
-            value(`colour:${slot}`, () => link.send({ type: "colour", slot, value: hex }))
+            value(`colour:${slot}`, () => sendTo({ type: "colour", slot, value: hex }))
           }
-          onReset={() => tap(() => link.send({ type: "resetColour", slot }))}
+          onReset={() => tap(() => sendTo({ type: "resetColour", slot }))}
         />
       )}
 
-      {state && (
+      {shown && (
         <FaderBank
           arrangement={arrangement}
           locked={locked}
@@ -437,11 +470,11 @@ export function Controller() {
             ...DIALS.map(([dial, label]) => ({
               testId: `dial-${dial}`,
               label,
-              value: state.dials[dial],
+              value: shown.dials[dial],
               onSend: (x: number) =>
-                value(`dials:${dial}`, () => link.send({ type: "dials", [dial]: x })),
+                value(`dials:${dial}`, () => sendTo({ type: "dials", [dial]: x })),
             })),
-            ...(placed.bank ? [effectFader(placed.bank, state.activeId, value, sendEffect)] : []),
+            ...(placed.bank ? [effectFader(placed.bank, shown.id, value, sendEffect)] : []),
           ]}
         />
       )}

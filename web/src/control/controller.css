@@ -578,6 +578,28 @@
   border-radius: var(--radius-dialog);
   font: var(--fs-body) / 20px var(--font);
 }
+/* ---- The Scenes section (B-07 PD18): the name field is the code field's frame, without upper
+   case or letter spacing, filling its row; the Editing row's word sits before its two keys. ---- */
+.djv-control .djv-name {
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  /* Alone in its row, it takes the row's width; its own ~20-character size never widens the
+     section (568×320 with three faders leaves 102 px). */
+  width: 0;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--target);
+  padding: 8px 12px;
+  font: 600 var(--fs-body) / 20px var(--font);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-key);
+}
+.djv-control .djv-editing .djv-legend {
+  margin-right: var(--space-1);
+}
 .djv-control .djv-dialog[open] {
   display: grid;
   gap: var(--space-3);

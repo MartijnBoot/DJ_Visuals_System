@@ -422,13 +422,13 @@ this budget. In VJ mode the Effects section (38 + 64·n px tall) scrolls with th
 − 16 (its padding) − 2 (frame) − 20 (pad). The preview is 16:9 at that width, its height capped
 at 112px on a viewport under 600px tall or wide. With two faders in the bank (VJ, no DJ tick):
 
-| Viewport | Scrolling area wide | Content width | Preview | Section height (staged look, three scenes) |
+| Viewport | Scrolling area wide | Content width | Preview | Section (staged look, three scenes; T9, before the preview frame) |
 |---|---|---|---|---|
-| 320×568 | 320 | 282 | 199×112 (capped) | measured by T9 |
-| 320×640 | 320 | 282 | 199×112 (capped) | measured by T9 |
-| 568×320 | 202 | 164 | 164×92 | measured by T9 |
-| 768×1024 | 312 | 274 | 274×154 | measured by T9 |
-| 1024×768 | 568 | 530 | 530×298 | measured by T9 |
+| 320×568 | 320 | 282 | 199×112 (capped) | 304×520 |
+| 320×640 | 320 | 282 | 199×112 (capped) | 304×520 |
+| 568×320 | 202 | 164 | 164×92 | 186×762 |
+| 768×1024 | 312 | 274 | 274×154 | 296×530 |
+| 1024×768 | 568 | 530 | 530×298 | 552×362 |
 
 The section scrolls with the rest; what it must keep is the brief's: no sideways scroll, every
 key at least 48×48, the colour block and the bank still pinned (AC35).
