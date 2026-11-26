@@ -44,6 +44,11 @@ export interface ScaleController {
    * GPU cannot keep up even at 50% (B-03 SD8). 0 above the lowest step or within budget.
    */
   starvedFor(timestamp: number): number;
+  /**
+   * B-07 PD11: whether the last recorded one-second mean was above budget (`ABOVE_BUDGET` ×
+   * the refresh period), at any step; false before the refresh estimate.
+   */
+  overBudget(): boolean;
 }
 
 export function createScaleController(frameStats: FrameStatsRecorder): ScaleController {
@@ -55,6 +60,7 @@ export function createScaleController(frameStats: FrameStatsRecorder): ScaleCont
   let headroomSince: number | null = null;
   let stepUpWait = STEP_UP_AFTER_MS;
   let lastStepUpAt: number | null = null;
+  let above = false;
 
   const estimate = () => {
     const intervals = firstFrames
@@ -90,13 +96,14 @@ export function createScaleController(frameStats: FrameStatsRecorder): ScaleCont
         return;
       }
       const { frameTimeMs } = frameStats.read(timestamp);
+      above = frameTimeMs > ABOVE_BUDGET * budget;
       if (frameTimeMs === 0) return;
       // A step up that has held for the full hold succeeded: the next wait is the plain one.
       if (lastStepUpAt !== null && timestamp - lastStepUpAt >= STEP_UP_AFTER_MS) {
         lastStepUpAt = null;
         stepUpWait = STEP_UP_AFTER_MS;
       }
-      if (frameTimeMs > ABOVE_BUDGET * budget) {
+      if (above) {
         headroomSince = null;
         aboveSince ??= timestamp;
         if (timestamp - aboveSince >= STEP_DOWN_AFTER_MS && index < SCALES.length - 1) {
@@ -123,6 +130,9 @@ export function createScaleController(frameStats: FrameStatsRecorder): ScaleCont
     starvedFor(timestamp) {
       if (index < SCALES.length - 1 || aboveSince === null) return 0;
       return Math.max(0, timestamp - aboveSince);
+    },
+    overBudget() {
+      return above;
     },
   };
 }

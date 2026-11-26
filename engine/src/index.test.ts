@@ -1369,3 +1369,164 @@ describe("transitions: two looks and the Crossfade (B-09)", () => {
     expect(lookIds(frames().at(-1)!)).toEqual([1, 2]); // the crossfade still draws both
   });
 });
+
+describe("a second instance's seams (B-07 PD11)", () => {
+  const zoom: Profile = {
+    ...BUILT_IN_PROFILE,
+    name: "Zoom",
+    effects: [{ type: "zoom", amount: 1 }],
+  };
+  const smear: Profile = {
+    ...BUILT_IN_PROFILE,
+    name: "Smear",
+    effects: [{ type: "smear", amount: 1 }],
+  };
+  const crossfade = (durationMs = 100, kind: TransitionKind = "crossfade"): SetProfileOptions => ({
+    pick: true,
+    transition: { kind, durationMs, dipColour: "#000000", seed: 0.25 },
+  });
+
+  /** A fake canvas whose GL objects are counted alive by identity, and whose listeners are kept. */
+  function tracked(width: number, height: number, options?: Parameters<typeof createEngine>[1]) {
+    const fake = fakeCanvas(width, height);
+    log = fake.calls;
+    const gl = fake.canvas.getContext("webgl2") as unknown as Record<string, unknown>;
+    const alive = {
+      program: new Set<unknown>(),
+      texture: new Set<unknown>(),
+      framebuffer: new Set<unknown>(),
+    };
+    const kinds = { Program: "program", Texture: "texture", Framebuffer: "framebuffer" } as const;
+    const counting = new Proxy(gl, {
+      get(target, prop: string) {
+        const value = target[prop];
+        const made = /^create(Program|Texture|Framebuffer)$/.exec(prop);
+        const gone = /^delete(Program|Texture|Framebuffer)$/.exec(prop);
+        if (typeof value !== "function" || (!made && !gone)) return value;
+        return (...args: unknown[]) => {
+          const result = (value as (...a: unknown[]) => unknown)(...args);
+          if (made) alive[kinds[made[1] as keyof typeof kinds]].add(result);
+          if (gone) alive[kinds[gone[1] as keyof typeof kinds]].delete(args[0]);
+          return result;
+        };
+      },
+    });
+    const listeners = new Set<string>();
+    const canvas = fake.canvas as unknown as Record<string, unknown>;
+    canvas.getContext = () => counting;
+    canvas.addEventListener = (type: string) => listeners.add(type);
+    canvas.removeEventListener = (type: string) => listeners.delete(type);
+    const engine = createEngine(fake.canvas, options);
+    engine.start();
+    return { engine, fake, alive, listeners };
+  }
+
+  it("draws at the given size when the canvas has no layout size (a detached canvas)", () => {
+    const { fake } = tracked(0, 0, { size: { width: 320, height: 180 } });
+    frameAt(0);
+    const frame = frames().at(-1)!;
+    expect(fake.canvas.width).toBe(320);
+    expect(fake.canvas.height).toBe(180);
+    expect(frame.filter((c) => c.name === "viewport").map((c) => c.args)).toEqual([
+      [0, 0, 320, 180],
+      [0, 0, 320, 180],
+    ]);
+    expect(lookDraws(frame)).toBe(1);
+  });
+
+  it("without a size, a canvas with no layout size still draws nothing, as before", () => {
+    tracked(0, 0);
+    frameAt(0);
+    expect(lookDraws(frames().at(-1)!)).toBe(0);
+  });
+
+  it("with maxFps 10 draws frames 16 ms apart once per 100 ms", () => {
+    tracked(320, 180, { maxFps: 10 });
+    const drawnAt: number[] = [];
+    for (let t = 0; t < 1000; t += 16) {
+      frameAt(t);
+      if (lookDraws(frames().at(-1)!) > 0) drawnAt.push(t);
+    }
+    expect(drawnAt).toHaveLength(10);
+    for (let i = 1; i < drawnAt.length; i++) {
+      expect(drawnAt[i]! - drawnAt[i - 1]!).toBeGreaterThanOrEqual(96);
+    }
+  });
+
+  it("dispose() deletes every program, texture and framebuffer, removes its listeners and stops", async () => {
+    const cancel = vi.fn();
+    vi.stubGlobal("cancelAnimationFrame", cancel);
+    const { engine, fake, alive, listeners } = tracked(640, 360);
+    expect([...listeners].sort()).toEqual(["webglcontextlost", "webglcontextrestored"]);
+    frameAt(0);
+    const fading = engine.setProfile(zoom, crossfade(1000));
+    fake.completeLinks();
+    frameAt(16);
+    await fading;
+    frameAt(32); // two looks, each with its targets
+    const linking = engine.setProfile(smear, { pick: true }).catch((error: Error) => error);
+    expect(alive.program.size).toBeGreaterThan(3);
+    expect(alive.framebuffer.size).toBe(4);
+
+    engine.dispose();
+    expect(alive).toEqual({ program: new Set(), texture: new Set(), framebuffer: new Set() });
+    expect(listeners.size).toBe(0);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(await linking).toBeInstanceOf(Error);
+
+    const before = fake.calls.length;
+    engine.dispose();
+    engine.start();
+    expect(fake.calls.length).toBe(before);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("stats().transitioning is true through a Crossfade and false after it and after a Cut", async () => {
+    const { engine, fake } = tracked(640, 360);
+    frameAt(0);
+    expect(engine.stats().transitioning).toBe(false);
+    const fading = engine.setProfile(zoom, crossfade(100));
+    fake.completeLinks();
+    frameAt(16); // the transition's first frame
+    await fading;
+    expect(engine.stats().transitioning).toBe(true);
+    frameAt(66);
+    expect(engine.stats().transitioning).toBe(true);
+    frameAt(116); // progress reaches 1
+    frameAt(132); // the incoming look alone
+    expect(engine.stats().transitioning).toBe(false);
+    const cut = engine.setProfile(smear, { pick: true });
+    fake.completeLinks();
+    frameAt(148);
+    await cut;
+    expect(engine.stats().transitioning).toBe(false);
+  });
+
+  it("stats().transitioning is true through a Beat cut's wait", async () => {
+    const { engine, fake } = tracked(640, 360);
+    engine.setAudioOk(true);
+    engine.setFeatures({ ...ZERO_FEATURES, beat: 0, capturedAt: 1 });
+    frameAt(0);
+    const waiting = engine.setProfile(zoom, crossfade(2000, "beatCut"));
+    fake.completeLinks();
+    frameAt(16); // ready: the wait starts
+    expect(engine.stats().transitioning).toBe(true);
+    frameAt(32);
+    expect(engine.stats().transitioning).toBe(true);
+    engine.setFeatures({ ...ZERO_FEATURES, beat: 1, capturedAt: 2 });
+    frameAt(48); // the cut
+    await waiting;
+    expect(engine.stats().transitioning).toBe(false);
+  });
+
+  it("stats().overBudget follows the scale controller's reading", () => {
+    const { engine } = tracked(640, 360);
+    let t = 0;
+    for (let n = 0; n < 60; n++) frameAt((t += 1000 / 60));
+    expect(engine.stats().overBudget).toBe(false);
+    for (let n = 0; n < 40; n++) frameAt((t += 30));
+    expect(engine.stats().overBudget).toBe(true);
+    for (let n = 0; n < 90; n++) frameAt((t += 1000 / 60));
+    expect(engine.stats().overBudget).toBe(false);
+  });
+});
