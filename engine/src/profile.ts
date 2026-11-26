@@ -30,6 +30,9 @@ interface EffectOf<T extends string> {
   /** Base strength, 0 to 1. */
   amount: number;
   binding?: Binding;
+  /** A fader on the controller in DJ or VJ mode (B-18 SD3). The engine never reads them. */
+  dj?: boolean;
+  vj?: boolean;
 }
 
 type Slotted<T extends string> = EffectOf<T> & { colourSlot: number };
@@ -49,6 +52,9 @@ export interface CustomEffect {
   /** Base strength, 0 to 1. */
   amount: number;
   binding?: Binding;
+  /** A fader on the controller in DJ or VJ mode (B-18 SD3). The engine never reads them. */
+  dj?: boolean;
+  vj?: boolean;
   /** Scaled by recognisability (SD12). */
   abstraction: boolean;
   /** 0 to 4, in the order the code reads them. */

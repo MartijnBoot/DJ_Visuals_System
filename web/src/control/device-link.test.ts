@@ -28,6 +28,7 @@ const state: ScreenState = {
   reason: null,
   mainAudio: null,
   transition: { kind: "cut", duration: 2, keepColour: false },
+  effects: [],
 };
 
 class FakeSocket {

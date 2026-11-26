@@ -546,6 +546,63 @@ test("with two faders the block keeps to 180 px of height at 320×568 and 240 px
   }
 });
 
+// ---- B-18 T5 (spec SD9, AC18): a real profile with a DJ tick puts three faders in the bank; with
+// VJ ticks too, the Effects section sits in the scrolling area in VJ mode. ----
+
+test("with a DJ tick, the three-fader bank keeps its budget at five sizes, DJ and VJ: the bank, the scrolling area, everything pinned in view, no sideways scroll, 48×48 targets (B-18 AC18)", async ({
+  page,
+  browser,
+}) => {
+  const twelve = twelveEffects();
+  const effects = twelve.effects.map((effect, i) =>
+    i === 2 ? { ...effect, dj: true } : i < 7 ? { ...effect, vj: true } : effect,
+  );
+  const ticked = await createProfile(api, {
+    ...twelve,
+    name: "A very long profile name with a DJ fader that wraps",
+    effects,
+  });
+  const phone = await paired(page, browser, PORTRAIT);
+  const tile = phone.page.locator(`[data-testid=profile-tile][data-profile-id="${ticked.id}"]`);
+  await tile.click();
+  await expect(tile).toHaveAttribute("aria-pressed", "true");
+  const bank = phone.page.getByTestId("fader-bank");
+  const scroll = phone.page.getByTestId("control-scroll");
+  const problems: string[] = [];
+  for (const viewport of FIVE) {
+    await phone.page.setViewportSize(viewport);
+    for (const mode of ["dj", "vj"] as const) {
+      await phone.page.getByTestId(`mode-${mode}`).click();
+      await expect(phone.page.getByTestId(`mode-${mode}`)).toHaveAttribute("aria-pressed", "true");
+      const where = `${viewport.width}×${viewport.height} ${mode}`;
+      await expect(bank.getByRole("slider"), where).toHaveCount(3);
+      await expect(phone.page.getByTestId("effects"), where).toHaveCount(mode === "vj" ? 1 : 0);
+      for (const p of await fitProblems(phone.page)) problems.push(`${where}: ${p}`);
+      for (const end of ["start", "end"] as const) {
+        await scroll.evaluate((el, top) => (el.scrollTop = top), end === "start" ? 0 : 1e6);
+        for (const id of ["status-bar", "wheel", "fader-bank"]) {
+          if (!(await inView(phone.page, phone.page.getByTestId(id)))) {
+            problems.push(`${where}: ${id} not in view at the ${end}`);
+          }
+        }
+      }
+      if (viewport === PORTRAIT) {
+        const b = await box(bank);
+        const s = await box(scroll);
+        if (b.height > 216 + 1) problems.push(`${where}: bank ${b.height} tall`);
+        if (s.height < 130) problems.push(`${where}: scrolling area ${s.height} tall`);
+      }
+      if (viewport === LANDSCAPE) {
+        const b = await box(bank);
+        const s = await box(scroll);
+        if (b.width > 198 + 1) problems.push(`${where}: bank ${b.width} wide`);
+        if (s.width < 130) problems.push(`${where}: scrolling area ${s.width} wide`);
+      }
+    }
+  }
+  expect(problems).toEqual([]);
+});
+
 test("in DJ mode the wheel aims at the primary slot and says so: Colour 2 · primary on the built-in (B-16 AC9)", async ({
   page,
   browser,

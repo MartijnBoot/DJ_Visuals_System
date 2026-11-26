@@ -39,6 +39,8 @@ const slot = z
   .nonnegative()
   .lt(LIMITS.paletteMax, `a slot is below ${LIMITS.paletteMax}`);
 const seq = z.number().int().nonnegative();
+/** An effect's place in a profile's stack (B-18 SD7). */
+const effectIndex = z.number().int().nonnegative().lt(LIMITS.effects);
 const id = z.string().min(1).max(200);
 const deviceId = z.string().min(1).max(64);
 const code = z
@@ -110,6 +112,8 @@ export const controlSchema = z.discriminatedUnion("type", [
   }).refine((m) => m.kind !== undefined || m.duration !== undefined || m.keepColour !== undefined, {
     message: "names at least one of kind, duration and keepColour",
   }),
+  /** B-18 SD7: one effect's live strength, by its place in the named profile's stack. */
+  message("effect", { seq, profile: id, index: effectIndex, value: unit }),
 ]);
 export type Control = z.infer<typeof controlSchema>;
 export type ControlType = Control["type"];
@@ -140,6 +144,18 @@ export type DeviceMessage = z.infer<typeof deviceMessageSchema>;
 // ---- The state the screen page sends, relayed to every approved controller (SD5). ----
 
 const sourceState = z.enum(["idle", "ok", "lost", "none"]);
+
+/** B-18 PD5: an effect with a fader, its stored `amount` and the one on screen, 0 to 1. */
+export const effectEntrySchema = z.strictObject({
+  index: effectIndex,
+  /** The built-in type's name or the custom label, trimmed. */
+  name: z.string().max(40),
+  stored: unit,
+  value: unit,
+  dj: z.boolean(),
+  vj: z.boolean(),
+});
+export type EffectEntry = z.infer<typeof effectEntrySchema>;
 
 export const screenStateSchema = z.strictObject({
   profiles: z.array(z.strictObject({ id, name: z.string().max(200) })).max(1000),
@@ -178,6 +194,8 @@ export const screenStateSchema = z.strictObject({
     .nullable(),
   /** B-09 SD19: the current transition. */
   transition: transitionChoiceSchema,
+  /** B-18 SD7, PD1, PD5: the active profile's effects ticked DJ or VJ, in stack order. */
+  effects: z.array(effectEntrySchema).max(LIMITS.effects),
 });
 export type ScreenState = z.infer<typeof screenStateSchema>;
 

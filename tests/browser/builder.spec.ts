@@ -17,6 +17,7 @@ import {
   listStored,
   type Definition,
 } from "./fixtures/profiles.ts";
+import { customEffect } from "./fixtures/custom-profiles.ts";
 import { start } from "./helpers.ts";
 
 test.beforeEach(async ({ request }) => {
@@ -674,7 +675,7 @@ test("delete then import the bundle: it returns with a new id; import again: 'Na
   expect(await names(page)).toEqual(["Built-in", "Alpha", "Alpha (2)"]);
 });
 
-test("a file with one broken field, a version 2 file and a text file each store nothing and say why (AC10)", async ({
+test("a file with one broken field, a version 4 file and a text file each store nothing and say why (AC10)", async ({
   page,
   request,
 }) => {
@@ -692,8 +693,8 @@ test("a file with one broken field, a version 2 file and a text file each store 
 
   await importFile(
     page,
-    "v3.json",
-    JSON.stringify({ ...JSON.parse(bundle.text), formatVersion: 3 }),
+    "v4.json",
+    JSON.stringify({ ...JSON.parse(bundle.text), formatVersion: 4 }),
   );
   await expect(message).toHaveText("unsupported file version");
 
@@ -839,4 +840,132 @@ test("Replace asks before discarding unsaved changes to the open profile (PD11)"
   await expect(page.getByTestId("transfer-message")).toContainText("Replaced: Starry");
   await expect(page.getByTestId("editor-dirty")).toHaveCount(0);
   expect((await listStored(request))[0]!.revision).toBe(2);
+});
+
+// ---- B-18 T4 (spec SD2, SD13, AC5, AC6, AC7, Verification 2): the fader ticks. ----
+
+/** zoom, smear (abstraction), a custom effect with abstraction, one without, then flash. */
+const faders = (name = "Faders"): Definition => ({
+  name,
+  palette: ["#000000", "#ffffff"],
+  dials: { recognisability: 0.5, reactivity: 0.5 },
+  effects: [
+    { type: "zoom", amount: 0.2 },
+    { type: "smear", amount: 0.4 },
+    customEffect("Glow", "return source(uv);", { abstraction: true }),
+    customEffect("Tint", "return source(uv) * vec3(0.5);"),
+    { type: "flash", amount: 0, colourSlot: 1 },
+  ],
+});
+
+const djBox = (page: Page, index: number) => page.getByTestId(`effect-dj-${index}`);
+const vjBox = (page: Page, index: number) => page.getByTestId(`effect-vj-${index}`);
+const REASON = "another effect already has the DJ fader";
+
+test("one DJ tick disables every other DJ box with its reason; unticking enables them (AC6)", async ({
+  page,
+  request,
+}) => {
+  const profile = await createProfile(request, faders());
+  await openProfile(page, profile.id);
+  for (let i = 0; i < 5; i++) {
+    await expect(djBox(page, i)).toBeEnabled();
+    await expect(djBox(page, i)).not.toBeChecked();
+    await expect(page.getByTestId(`effect-dj-reason-${i}`)).toHaveCount(0);
+  }
+  await expect(page.getByRole("checkbox", { name: "Fader in DJ mode" })).toHaveCount(5);
+  await expect(page.getByRole("checkbox", { name: "Fader in VJ mode" })).toHaveCount(5);
+
+  await djBox(page, 2).check(); // a custom effect
+  await expect(djBox(page, 2)).toBeEnabled();
+  for (const i of [0, 1, 3, 4]) {
+    await expect(djBox(page, i)).toBeDisabled();
+    await expect(page.getByTestId(`effect-dj-reason-${i}`)).toHaveText(REASON);
+  }
+  await expect(page.getByTestId("effect-dj-reason-2")).toHaveCount(0);
+  await expect(page.getByTestId("editor-dirty")).toBeVisible();
+
+  await djBox(page, 2).uncheck();
+  for (let i = 0; i < 5; i++) {
+    await expect(djBox(page, i)).toBeEnabled();
+    await expect(page.getByTestId(`effect-dj-reason-${i}`)).toHaveCount(0);
+  }
+  await expect(page.getByTestId("editor-dirty")).toHaveCount(0);
+});
+
+test("ticks are an unsaved change until saved, and survive a reload (AC5)", async ({
+  page,
+  request,
+}) => {
+  const profile = await createProfile(request, faders());
+  await openProfile(page, profile.id);
+  await djBox(page, 0).check();
+  await vjBox(page, 1).check();
+  await vjBox(page, 3).check();
+  await expect(page.getByTestId("editor-dirty")).toBeVisible();
+  expect((await listStored(request))[0]!.effects.some((e) => "dj" in e || "vj" in e)).toBe(false);
+  await page.getByTestId("editor-save").click();
+  await expect(page.getByTestId("editor-dirty")).toHaveCount(0);
+  const saved = (await listStored(request))[0]!;
+  expect(saved.revision).toBe(2);
+  expect(saved.effects.map((e) => [e.dj, e.vj])).toEqual([
+    [true, undefined],
+    [undefined, true],
+    [undefined, undefined],
+    [undefined, true],
+    [undefined, undefined],
+  ]);
+
+  await openProfile(page, profile.id);
+  await expect(djBox(page, 0)).toBeChecked();
+  await expect(vjBox(page, 1)).toBeChecked();
+  await expect(vjBox(page, 3)).toBeChecked();
+  await expect(vjBox(page, 0)).not.toBeChecked();
+  await expect(djBox(page, 1)).toBeDisabled();
+});
+
+test("export is a version 3 file; delete and import it back, the ticks survive (Verification 2)", async ({
+  page,
+  request,
+}) => {
+  const definition = faders();
+  definition.effects[1] = { ...definition.effects[1]!, dj: true };
+  definition.effects[2] = { ...definition.effects[2]!, vj: true };
+  definition.effects[4] = { ...definition.effects[4]!, vj: true };
+  const profile = await createProfile(request, definition);
+  await page.goto("/builder");
+  const one = await downloaded(page, () =>
+    page.getByTestId(`profile-export-${profile.id}`).click(),
+  );
+  expect(one.file.formatVersion).toBe(3);
+
+  page.once("dialog", (d) => void d.accept());
+  await page.getByTestId(`profile-delete-${profile.id}`).click();
+  await expect(rowFor(page, "Faders")).toHaveCount(0);
+  await importFile(page, "faders.json", one.text);
+  await expect(page.getByTestId("transfer-message")).toContainText("Imported: Faders");
+  const back = (await listStored(request))[0]!;
+  expect(back.id).not.toBe(profile.id);
+  expect(back.effects.map((e) => [e.dj, e.vj])).toEqual([
+    [undefined, undefined],
+    [true, undefined],
+    [undefined, true],
+    [undefined, undefined],
+    [undefined, true],
+  ]);
+  await openProfile(page, back.id);
+  await expect(djBox(page, 1)).toBeChecked();
+  await expect(vjBox(page, 2)).toBeChecked();
+});
+
+test("an effect scaled by recognisability says the scaling still applies (AC7)", async ({
+  page,
+  request,
+}) => {
+  const profile = await createProfile(request, faders());
+  await openProfile(page, profile.id);
+  const note = (i: number) => page.getByTestId(`effect-fader-note-${i}`);
+  await expect(note(1)).toHaveText("scaled by recognisability still applies"); // smear
+  await expect(note(2)).toHaveText("scaled by recognisability still applies"); // Glow
+  for (const i of [0, 3, 4]) await expect(note(i)).toHaveCount(0);
 });

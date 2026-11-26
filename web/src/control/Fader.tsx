@@ -4,7 +4,7 @@
 // own pointer holds it and show `value` — the screen's — otherwise: after a release, a cancel, a
 // blur, a lock, a change of axis (the page re-laid out). Locked, it stays focusable with
 // `aria-disabled` and ignores keys and pointers. Horizontal: right is more; vertical: up is more.
-// Nothing animates.
+// Nothing animates. B-18 (PD9): an optional stored value drawn as a tick, under the cap.
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createFaderGesture, readout } from "./fader.ts";
 
@@ -26,6 +26,8 @@ export interface FaderProps {
   onHold?(held: boolean): void;
   /** B-16 PD11: a change lets go of a drag, as a change of axis does (the page re-laid out). */
   layout?: string;
+  /** B-18 PD9: a stored value, 0 to 1, shown as a tick on the track; absent, no tick. */
+  mark?: number;
 }
 
 export function Fader(props: FaderProps) {
@@ -76,11 +78,14 @@ export function Fader(props: FaderProps) {
   const shown = held ?? props.value;
   const level = Math.min(1, Math.max(0, shown));
   const number = props.format ? props.format(shown) : String(readout(shown));
+  const mark = props.mark === undefined ? undefined : Math.min(1, Math.max(0, props.mark));
 
   return (
     <div
       className={vertical ? "djv-fader is-vertical" : "djv-fader"}
-      style={{ "--level": level } as CSSProperties}
+      style={
+        { "--level": level, ...(mark === undefined ? {} : { "--mark": mark }) } as CSSProperties
+      }
     >
       <div
         role="slider"
@@ -129,6 +134,9 @@ export function Fader(props: FaderProps) {
         }}
       >
         <span className="djv-fader-fill" aria-hidden />
+        {mark !== undefined && (
+          <span className="djv-fader-mark" data-testid={`${props.testId}-mark`} aria-hidden />
+        )}
         <span className="djv-fader-cap" aria-hidden />
       </div>
       <span id={labelId} className="djv-fader-label">

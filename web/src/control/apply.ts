@@ -7,7 +7,7 @@
 // i.e. at the swap, in the batch of the frame after. B-06 (T13): a `camera` may name a remote
 // camera (`remote:<deviceId>`), which goes to the same choice; `mainAudio` sets the main-audio
 // choice (SD22). B-09 (T1): `transition` changes the current transition choice (SD19), applied and
-// acknowledged like the dials.
+// acknowledged like the dials. B-18 (T2): `effect` sets one effect's live strength, likewise.
 import type { AppliedEntry, Control, TransitionChoice } from "@djv/shared";
 import type { Dials } from "@djv/engine";
 
@@ -24,6 +24,8 @@ export interface ApplierDeps {
   setMainAudio(source: "remote" | "local"): void;
   /** Merges into the current transition choice, saves it and marks the state (B-09 SD5, SD9). */
   setTransition(change: Partial<TransitionChoice>): void;
+  /** One effect's live strength (B-18 SD7); it drops a stale profile or index itself. */
+  setStrength(profile: string, index: number, value: number): void;
   /** The panel picker's pick: prepared, hard cut, starting dials, remembered (AC18). */
   pick(id: string): Promise<void>;
   /** Lists the profiles again (SD22). */
@@ -77,6 +79,11 @@ export function createApplier(deps: ApplierDeps): Applier {
         });
         break;
       }
+      case "effect":
+        // B-18 PD6: acknowledged whether it lands or is dropped, so the controller's waiting
+        // value clears and it shows the screen's.
+        deps.setStrength(control.profile, control.index, control.value);
+        break;
       case "pick": {
         const settle = () => void settled.push(ack);
         deps.pick(control.id).then(settle, settle);

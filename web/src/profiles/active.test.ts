@@ -401,6 +401,143 @@ describe("live colours (B-04 SD7, AC20, AC21, PD6)", () => {
   });
 });
 
+// B-18 T2 (spec SD6, SD7, AC11, AC12, AC14; plan PD4, PD5): a live strength beside the live
+// palette, never saved, dropped for a pending pick or the wrong profile or index.
+describe("live strengths (B-18)", () => {
+  const flagged: StoredProfile = {
+    ...stored("w1", "Warm"),
+    effects: [
+      { type: "zoom", amount: 0.2, dj: true },
+      { type: "smear", amount: 0.4 },
+      {
+        type: "custom",
+        label: "  Swirl  ",
+        amount: 0.6,
+        abstraction: false,
+        params: [],
+        code: "return source(uv);",
+        vj: true,
+      },
+      { type: "grain", amount: 0, colourSlot: 1, vj: true, dj: false },
+    ],
+  };
+  const flaggedSetup = () => setup({ get: { kind: "ok", profile: flagged } });
+  const amounts = (profile: Profile) => profile.effects.map((e) => e.amount);
+
+  it("lists the flagged effects only, in stack order, with stored and live values", async () => {
+    const { active } = flaggedSetup();
+    expect(active.state().effects).toEqual([]); // the built-in has no flags
+    await active.pick("w1");
+    expect(active.state().effects).toEqual([
+      { index: 0, name: "zoom", stored: 0.2, value: 0.2, dj: true, vj: false },
+      { index: 2, name: "Swirl", stored: 0.6, value: 0.6, dj: false, vj: true },
+      { index: 3, name: "grain", stored: 0, value: 0, dj: false, vj: true },
+    ]);
+  });
+
+  it("hands the engine the same effects with one amount changed, the palette kept, no pick", async () => {
+    const { active, setProfile } = flaggedSetup();
+    await active.pick("w1");
+    setProfile.mockClear();
+    active.setStrength("w1", 2, 0.9);
+    expect(setProfile).toHaveBeenCalledTimes(1);
+    const [sent, options] = setProfile.mock.calls[0]!;
+    expect(options).toBeUndefined();
+    expect(amounts(sent)).toEqual([0.2, 0.4, 0.9, 0]);
+    expect(sent.effects.map((e) => e.type)).toEqual(flagged.effects.map((e) => e.type));
+    expect(sent.effects[2]).toEqual({ ...flagged.effects[2], amount: 0.9 });
+    expect(sent.palette).toEqual(flagged.palette);
+    expect(active.state().effects[1]).toMatchObject({ index: 2, stored: 0.6, value: 0.9 });
+  });
+
+  it("takes an unflagged effect too, by its place in the stack (PD7)", async () => {
+    const { active, setProfile } = flaggedSetup();
+    await active.pick("w1");
+    setProfile.mockClear();
+    active.setStrength("w1", 1, 1);
+    expect(amounts(setProfile.mock.calls[0]![0])).toEqual([0.2, 1, 0.6, 0]);
+  });
+
+  it("keeps a strength through a colour edit, and a colour through a strength edit", async () => {
+    const { active, setProfile } = flaggedSetup();
+    await active.pick("w1");
+    active.setStrength("w1", 0, 1);
+    active.setColour(1, "#123456");
+    let sent = setProfile.mock.calls.at(-1)![0];
+    expect(amounts(sent)).toEqual([1, 0.4, 0.6, 0]);
+    expect(sent.palette).toEqual(["#000000", "#123456"]);
+    active.setStrength("w1", 3, 0.5);
+    sent = setProfile.mock.calls.at(-1)![0];
+    expect(amounts(sent)).toEqual([1, 0.4, 0.6, 0.5]);
+    expect(sent.palette).toEqual(["#000000", "#123456"]);
+  });
+
+  it("a pick, the active profile included, restores every stored strength (AC14)", async () => {
+    const { active, setProfile } = flaggedSetup();
+    await active.pick("w1");
+    active.setStrength("w1", 0, 1);
+    active.setStrength("w1", 2, 0);
+    await active.pick("w1");
+    expect(amounts(setProfile.mock.calls.at(-1)![0])).toEqual([0.2, 0.4, 0.6, 0]);
+    expect(active.state().effects.map((e) => e.value)).toEqual([0.2, 0.6, 0]);
+    setProfile.mockClear();
+    active.setColour(0, "#111111"); // nothing live is left to carry
+    expect(amounts(setProfile.mock.calls[0]![0])).toEqual([0.2, 0.4, 0.6, 0]);
+  });
+
+  it("drops a strength for another profile, or an index with no effect (AC12)", async () => {
+    const { active, setProfile } = flaggedSetup();
+    await active.pick("w1");
+    setProfile.mockClear();
+    const listener = vi.fn();
+    active.subscribe(listener);
+    active.setStrength("c1", 0, 1);
+    active.setStrength(BUILTIN_ID, 0, 1);
+    active.setStrength("w1", 4, 1);
+    active.setStrength("w1", 11, 1);
+    expect(setProfile).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+    expect(active.state().effects.map((e) => e.value)).toEqual([0.2, 0.6, 0]);
+  });
+
+  it("drops a strength while a pick is pending, and takes one after (AC12, SD6)", async () => {
+    let release!: () => void;
+    const { active, setProfile } = flaggedSetup();
+    await active.pick("w1");
+    setProfile.mockImplementationOnce(() => new Promise<void>((r) => (release = r)));
+    const picking = active.pick("w1");
+    await vi.waitFor(() => expect(setProfile).toHaveBeenCalledTimes(2));
+    active.setStrength("w1", 0, 1);
+    expect(setProfile).toHaveBeenCalledTimes(2);
+    release();
+    await picking;
+    expect(active.state().effects[0]!.value).toBe(0.2);
+    active.setStrength("w1", 0, 1);
+    expect(setProfile).toHaveBeenCalledTimes(3);
+    expect(active.state().effects[0]!.value).toBe(1);
+  });
+
+  it("notifies on a strength change", async () => {
+    const { active } = flaggedSetup();
+    await active.pick("w1");
+    const listener = vi.fn();
+    active.subscribe(listener);
+    active.setStrength("w1", 0, 0.7);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("cuts a name to 40 characters", async () => {
+    const long = "x".repeat(39) + "yz";
+    const profile: StoredProfile = {
+      ...flagged,
+      effects: [{ ...(flagged.effects[2] as object), label: long } as Profile["effects"][number]],
+    };
+    const { active } = setup({ get: { kind: "ok", profile } });
+    await active.pick("w1");
+    expect(active.state().effects[0]!.name).toBe(long.slice(0, 40));
+  });
+});
+
 // B-03 T9 (spec AC11, AC12, SD8; plan PD8): the guard's reason, kept apart from the list and
 // pick reasons; a pick retries custom effects the guard turned off.
 describe("the guard's reason (B-03)", () => {

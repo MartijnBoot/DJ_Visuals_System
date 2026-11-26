@@ -10,6 +10,12 @@ Amended by B-16 (SD6), approved by Martijn Boot on 2026-11-24 at `/review` (H1) 
 [phase-b-16-colour-wheel-always-on](../plans/phase-b-16-colour-wheel-always-on.md) (T6): the
 colour wheel's dialog becomes the pinned colour block; no new token.
 
+Amended by B-18 (SD9), approval at `/review` · Spec:
+[phase-b-18-effect-strength-faders](../specs/phase-b-18-effect-strength-faders.md) · Plan:
+[phase-b-18-effect-strength-faders](../plans/phase-b-18-effect-strength-faders.md) (T7): a third
+fader in the bank for the DJ-ticked effect, the Effects section in VJ mode, the stored-value tick,
+the three-fader Budget rows; no new token.
+
 The look of `/control`, and only `/control` (SD8). Every later B-19 task builds against this
 file: the tokens below become custom properties on `.djv-control` in
 `web/src/control/controller.css` under the same names, and `tests/meta/control-look.test.ts`
@@ -105,7 +111,8 @@ One dark theme; `prefers-color-scheme` is ignored (SD11).
   frame, `--radius-panel`, 10px padding. A section's heading today becomes its legend, in
   `--fs-legend` `--text-muted`, like a label printed on the panel: PROFILE, CAMERA, MAIN AUDIO,
   PALETTE, WAITING FOR APPROVAL, and TRANSITION in VJ mode (B-09, approved by the owner at its
-  plan's audit, 2026-11-23). No other heading is added or removed. The mode toggle (DJ, VJ) is a row
+  plan's audit, 2026-11-23), and EFFECTS in VJ mode under it (B-18, below). No other heading is
+  added or removed. The mode toggle (DJ, VJ) is a row
   of two keys above the sections; VJ's status strip sits in a section without a legend, as today.
   The colour block is not in the scrolling area: it is pinned (below).
 - **Keys and tiles.** At rest: `--key`, 1px `--line` edge, `--text`, weight 600, at least
@@ -160,6 +167,20 @@ The focus order is the page's: status bar, scrolling area, block (disc, brightne
   stripes, every other 6px stripe `--hatch` over the disc's colours; the brightness fader takes the
   fader's locked look and Reset the disabled key's. Nothing moves.
 
+### The effect faders (B-18 SD1, SD8, SD10)
+
+An effect's strength is a fader like any other, labelled with the effect's name as the builder
+shows it (the built-in type, or the custom effect's label), with the stored-value tick below.
+
+- **In the bank.** The effect ticked for DJ mode is the bank's third fader, after the two dials,
+  in DJ and VJ mode alike, orientation as the bank's. A profile with no DJ tick keeps the
+  two-fader bank; the fourth place stays free (B-23).
+- **The Effects section** (VJ mode only). A section like the others, legend EFFECTS, right under
+  TRANSITION; one horizontal fader per effect ticked for VJ mode and not for DJ mode, in the
+  profile's stack order, 8px apart (the section's gap), as B-09's Duration fader sits outside the
+  bank. Absent when there is none, and in DJ mode. Height = 2 (frame) + 10 (pad) + 16 (legend) +
+  (8 + 56)·n + 10 (pad) = **38 + 64·n** px: 166px with two.
+
 ### The fader
 
 The slider element is the whole track, `--fader-cross` thick: `--track` with a `--fader-edge`
@@ -182,11 +203,18 @@ The slider element is the whole track, `--fader-cross` thick: `--track` with a `
   never animates (SD9).
 - The label and the readout sit on the track and pass no pointer events; the whole box is the
   touch target.
+- **The stored-value tick** (B-18 SD6, PD9; effect faders only). A 2px bar of `--text` across the
+  travel band at the stored value, placed by the cap's own maths, from the label band (the
+  readout band's side in the vertical fader) to the track's outer edge, ending there in a 6px
+  diamond notch of the same colour. It is drawn under the cap, so the cap covers its middle when
+  the value is the stored one and its two ends and the notch still show: a shape, never a colour
+  alone. It stays put while the value moves; the dials have none.
 
 ### The locked look (SD4, AC18)
 
 While the controls are locked, each track is hatched — 135° stripes of `--track` and `--hatch`,
-6px each — the cap turns `--cap-locked`, the fill `--fill-locked`, and the bank's legend row
+6px each — the cap turns `--cap-locked`, the fill `--fill-locked`, a stored-value tick
+`--cap-locked` in the same shape (B-18), and the bank's legend row
 shows a **"Locked"** tag in place of its "Faders" legend: `--fs-label` in `--on-attention` on
 `--attention`, 6px side padding. So the locked look is the hatching, the dimmed cap and the word,
 not a colour alone. The colour block does the same in its label's place, with the stripes over
@@ -245,6 +273,11 @@ Text pairs need at least 4.5:1, non-text pairs at least 3:1 (SD11). The table is
 | N18 | `--line` | `--panel` | 3 | 3.65 | The disc's edge and the colour block's edge against the block (B-16) |
 | N19 | `--text` | `--panel` | 3 | 15.71 | The wheel's target mark against the Palette section (B-16) |
 | N20 | `--text-muted` | `--panel` | 3 | 7.75 | The colour block's pair swatches' edge against the block (B-16) |
+| N21 | `--text` | `--track` | 3 | 15.07 | The stored-value tick against the track (B-18) |
+| N22 | `--text` | `--panel` | 3 | 15.71 | The tick's notch past the track's edge, on the bank or a section (B-18) |
+| N23 | `--cap-locked` | `--track` | 3 | 4.58 | The tick while locked, against the track (B-18) |
+| N24 | `--cap-locked` | `--hatch` | 3 | 3.82 | The tick while locked, against the hatching (B-18) |
+| N25 | `--cap-locked` | `--panel` | 3 | 4.77 | The locked tick's notch on the bank or a section (B-18) |
 
 The waiting badge is never disabled: the lock disables only Accept and Reject, and the pending list
 lasts until pairing ends (`web/src/control/device-link.ts:122`), so the badge stays focusable
@@ -267,7 +300,9 @@ under the status bar (vertical). With n faders:
 | Viewport | Faders | Bank height | Limit | Travel (slider width) | Needed |
 |---|---|---|---|---|---|
 | 320×568 | 2 | 154 | — | 320 − 16 = 304 (95%) | ≥ 272 (85%) |
+| 320×568 | 3 (B-18) | 216 | ≤ 216 (B-18 SD9) | 304 | ≥ 272 |
 | 320×568 | 4 | 278 | ≤ 284 (half of 568) | 304 | ≥ 272 |
+| 320×640 | 3 (B-18) | 216 | ≤ 320 | 304 | ≥ 272 |
 | 320×640 | 4 | 278 | ≤ 320 | 304 | ≥ 272 |
 
 At 320×568 with two faders the scrolling area keeps 568 − 48 − 154 = 366px; with four,
@@ -281,9 +316,12 @@ the longest text beside the badge. The bar's height never changes the bank.
 | Viewport | Faders | Bank width | Limit | Travel (slider height) | Needed |
 |---|---|---|---|---|---|
 | 568×320 | 2 | 136 | — | 320 − 82 = 238 | ≥ 180 |
+| 568×320 | 3 (B-18) | 198 | ≤ 198 (B-18 SD9) | 238 | ≥ 180 |
 | 568×320 | 4 | 260 | ≤ 284 (half of 568) | 238 | ≥ 180 |
 | 768×1024 | 2 | 136 | — | 1024 − 82 = 942 | ≥ 300 |
+| 768×1024 | 3 (B-18) | 198 | — | 942 | ≥ 300 |
 | 1024×768 | 2 | 136 | — | 768 − 82 = 686 | — |
+| 1024×768 | 3 (B-18) | 198 | — | 686 | — |
 
 At 568×320 the scrolling area keeps 568 − 136 = 432px of width with two faders and 308px with
 four; at 768×1024, 632px.
@@ -312,21 +350,31 @@ the bank leave:
 | Viewport | Arrangement | Disc | Block | Faders | Scrolling area keeps | Needed (AC5) |
 |---|---|---|---|---|---|---|
 | 320×568 | horizontal | 150 | 168 tall (≤ 180) | 2 | 568 − 48 − 168 − 154 = 198 tall | ≥ 180 |
-| 320×568 | horizontal | 150 | 168 tall | 4 | 568 − 48 − 168 − 278 = 74 tall | B-18's |
+| 320×568 | horizontal | 150 | 168 tall | 3 (B-18) | 568 − 48 − 168 − 216 = 136 tall | ≥ 130 (B-18 SD9) |
+| 320×568 | horizontal | 150 | 168 tall | 4 | 568 − 48 − 168 − 278 = 74 tall | — (not shipped) |
 | 320×640 | horizontal | 150 | 168 tall | 2 | 640 − 48 − 168 − 154 = 270 tall | — |
-| 320×640 | horizontal | 150 | 168 tall | 4 | 640 − 48 − 168 − 278 = 146 tall | B-18's |
+| 320×640 | horizontal | 150 | 168 tall | 3 (B-18) | 640 − 48 − 168 − 216 = 208 tall | — |
+| 320×640 | horizontal | 150 | 168 tall | 4 | 640 − 48 − 168 − 278 = 146 tall | — (not shipped) |
 | 568×320 | vertical | 150 | 230 wide (≤ 240) | 2 | 568 − 230 − 136 = 202 wide | ≥ 190 |
-| 568×320 | vertical | 150 | 230 wide | 4 | 568 − 230 − 260 = 78 wide | B-18's |
+| 568×320 | vertical | 150 | 230 wide | 3 (B-18) | 568 − 230 − 198 = 140 wide | ≥ 130 (B-18 SD9) |
+| 568×320 | vertical | 150 | 230 wide | 4 | 568 − 230 − 260 = 78 wide | — (not shipped) |
 | 768×1024 | vertical | 240 | 320 wide | 2 | 768 − 320 − 136 = 312 wide | — |
+| 768×1024 | vertical | 240 | 320 wide | 3 (B-18) | 768 − 320 − 198 = 250 wide | — |
 | 768×1024 | vertical | 240 | 320 wide | 4 | 768 − 320 − 260 = 188 wide | — |
 | 1024×768 | vertical | 240 | 320 wide | 2 | 1024 − 320 − 136 = 568 wide | — |
+| 1024×768 | vertical | 240 | 320 wide | 3 (B-18) | 1024 − 320 − 198 = 506 wide | — |
 | 1024×768 | vertical | 240 | 320 wide | 4 | 1024 − 320 − 260 = 444 wide | — |
 
 The scrolling-area figures under the bank's tables above are B-19's, before the block. In the
 vertical arrangement the column is 8 + `--disc` + 6 + 16 (label) + 6 + 54 (the pair beside Reset)
-+ 8 tall: 248px at 568×320, inside the 272px under the bar, so it never scrolls. With four faders
-the scrolling area is about 74px tall in portrait and 78px wide at 568×320; B-18 amends this
-budget or shows fewer faders there (B-16 SD1, SD2).
++ 8 tall: 248px at 568×320, inside the 272px under the bar, so it never scrolls.
+
+**Three faders (B-18 SD9, amending B-16 AC5).** B-16's AC5 numbers hold for a bank of two. A
+profile with a DJ tick puts three faders in the bank, and the scrolling area then keeps 136px of
+height at 320×568 and 140px of width at 568×320 — at least 130 each (`control-layout.spec.ts`
+measures them on the built page, the same to the pixel). B-18 shows at most three, so the
+four-fader rows are B-19's capacity, not a shipped layout; a fourth fader (B-23) comes back to
+this budget. In VJ mode the Effects section (38 + 64·n px tall) scrolls with the rest.
 
 Every number above is a CSS pixel in the mockups, which use these tokens.
 
@@ -339,5 +387,8 @@ four-fader bank at 320×568 and 568×320 (faders 3 and 4 are placeholders for B-
 a design for them); pairing with the code field; and the status bar in all thirteen link states.
 Since B-16 every frame with a bank shows the pinned colour block — aimed at the primary slot in
 DJ mode, at swatch 3 with the target mark in VJ mode, locked in the locked frames — and the colour
-wheel's dialog frame is gone. Open it on a phone and a tablet from the file; turn the phone to
-landscape to see the 568×320 frames at full size. Each frame scrolls inside itself like the page.
+wheel's dialog frame is gone. Since B-18 three more frames show the effect faders with their
+stored-value ticks: DJ mode with three faders in the bank at 320×568 and at 568×320, and VJ mode
+at 768×1024 with the effect fader in the bank and the Effects section under Transition. Open it on
+a phone and a tablet from the file; turn the phone to landscape to see the 568×320 frames at full
+size. Each frame scrolls inside itself like the page.

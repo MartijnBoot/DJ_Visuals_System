@@ -49,7 +49,13 @@ const unit = z.number().min(0).max(1);
 const colour = z.string().regex(/^#[0-9a-fA-F]{6}$/, "expected a colour as #rrggbb");
 
 const bindingSchema = z.strictObject({ feature: z.enum(FEATURE_NAMES), amount: unit });
-const common = { amount: unit, binding: bindingSchema.optional() };
+/** `dj` and `vj`: a fader for this effect on `/control` in that mode (B-18 SD3); absent is off. */
+const common = {
+  amount: unit,
+  binding: bindingSchema.optional(),
+  dj: z.boolean().optional(),
+  vj: z.boolean().optional(),
+};
 const colourSlot = z.number().int().nonnegative();
 
 const plain = <T extends EffectType>(type: T) =>
@@ -170,12 +176,23 @@ type ProfileShape = z.infer<z.ZodObject<typeof profileFields>>;
  * The cross-field rules: each built-in type at most once (SD12), every slot inside the palette
  * (SD11), and the primary slot inside the palette (B-04 SD10). A custom effect may repeat, with
  * a label unique in the profile (trimmed, case-sensitive) and parameter names unique in the
- * effect (B-03 SD4, PD5).
+ * effect (B-03 SD4, PD5). At most one effect has the DJ fader (B-18 SD2).
  */
 export function checkProfileRules(profile: ProfileShape, ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
   const labels = new Set<string>();
+  let djTaken = false;
   profile.effects.forEach((effect, i) => {
+    if (effect.dj === true) {
+      if (djTaken) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["effects", i, "dj"],
+          message: `effect ${i} is the second with the DJ fader; one effect has it`,
+        });
+      }
+      djTaken = true;
+    }
     if (effect.type === "custom") {
       const label = effect.label.trim();
       if (labels.has(label)) {
@@ -243,10 +260,10 @@ export function derivePrimary(profile: Pick<Profile, "effects" | "primary">): nu
 }
 
 /**
- * The file versions import reads (B-03 SD15, PD13): 1 holds no custom effect, so a B-02 instance
- * reads it; 2 may hold custom effects.
+ * The file versions import reads (B-03 SD15, PD13; B-18 SD3): 1 holds no custom effect, so a
+ * B-02 instance reads it; 2 may hold custom effects; 3 may hold the fader flags.
  */
-export const SUPPORTED_FORMAT_VERSIONS = [1, 2] as const;
+export const SUPPORTED_FORMAT_VERSIONS = [1, 2, 3] as const;
 
 /** Whether import reads this `formatVersion`; any other is "unsupported", checked first. */
 export function isSupportedFormatVersion(version: number): boolean {
@@ -255,6 +272,12 @@ export function isSupportedFormatVersion(version: number): boolean {
 
 const holdsCustom = (profile: Pick<Profile, "effects">) =>
   profile.effects.some((e) => e.type === "custom");
+
+/** Whether any effect has a fader flag set (B-18 SD3): such a file is version 3. */
+export const holdsFlags = (profile: Pick<Profile, "effects">) =>
+  profile.effects.some((e) => e.dj === true || e.vj === true);
+
+const FLAG_KEYS = ["dj", "vj"] as const;
 
 /** The export and import file (SD7): one profile or a bundle, one code path. */
 export const profileFileSchema = z
@@ -270,23 +293,41 @@ export const profileFileSchema = z
         message: "a file with a custom effect is formatVersion 2",
       });
     }
+    // B-18 SD3, plan PD3: before version 3 the flags are stray keys, refused as one is today.
+    if (file.formatVersion === 3) return;
+    file.profiles.forEach((profile, n) => {
+      profile.effects.forEach((effect, m) => {
+        const keys = FLAG_KEYS.filter((key) => key in effect);
+        if (keys.length > 0) {
+          ctx.addIssue({ code: "unrecognized_keys", keys, path: ["profiles", n, "effects", m] });
+        }
+      });
+    });
   });
 
 export type ProfileFile = z.infer<typeof profileFileSchema>;
 
+/** An effect as the file writes it: a flag only when it is on (B-18 SD3, plan PD3). */
+function fileEffect(effect: Effect): Effect {
+  if (effect.dj === undefined && effect.vj === undefined) return effect;
+  const { dj, vj, ...rest } = effect;
+  return { ...rest, ...(dj ? { dj } : {}), ...(vj ? { vj } : {}) } as Effect;
+}
+
 /**
  * The file for some profiles: their definitions only, never an id, revision or timestamp (AC9).
  * `primary` only when set, so a file without it stays what B-02 wrote (B-04 AC39). Version 1
- * unless a profile holds a custom effect (B-03 SD15).
+ * unless a profile holds a custom effect (B-03 SD15), 3 when an effect has a flag on (B-18 SD3).
  */
 export function toProfileFile(profiles: readonly Profile[]): ProfileFile {
+  const formatVersion = profiles.some(holdsFlags) ? 3 : profiles.some(holdsCustom) ? 2 : 1;
   return {
-    formatVersion: profiles.some(holdsCustom) ? 2 : 1,
+    formatVersion,
     profiles: profiles.map(({ name, palette, dials, effects, primary }) => ({
       name,
       palette,
       dials,
-      effects,
+      effects: effects.map(fileEffect),
       ...(primary === undefined ? {} : { primary }),
     })),
   };

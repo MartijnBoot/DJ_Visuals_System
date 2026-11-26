@@ -175,6 +175,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       setCamera: (deviceId) => sourcesRef.current?.setCamera(deviceId),
       setMainAudio: (source) => sourcesRef.current?.setMainAudio(source),
       setTransition: (change) => changeTransition(change),
+      setStrength: (profile, index, value) => active.setStrength(profile, index, value),
       pick: (id) => active.pick(id),
       refresh: () => void active.open(),
       started: () => startedRef.current,

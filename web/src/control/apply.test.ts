@@ -56,6 +56,7 @@ function rig(started = true) {
     setCamera: vi.fn(),
     setMainAudio: vi.fn(),
     setTransition: vi.fn(() => void events.push("setTransition")),
+    setStrength: vi.fn(() => void events.push("setStrength")),
     pick: vi.fn(() => new Promise<void>((r) => (release = r))),
     refresh: vi.fn(),
     started: () => started,
@@ -195,6 +196,36 @@ describe("B-06 controls (T13, SD8, SD22, AC14, AC20)", () => {
     after.applier.receive("d1", { type: "camera", seq: 2, deviceId: "remote:d9" });
     runFrame(32);
     expect(after.deps.setCamera).toHaveBeenCalledWith("remote:d9");
+  });
+});
+
+describe("the effect control (B-18 SD7, AC11, AC12; plan PD6)", () => {
+  it("reaches the strength in the next frame, before the engine draws, acknowledged in that batch", () => {
+    const r = rig();
+    runFrame(16);
+    r.applier.receive("d1", { type: "effect", seq: 7, profile: "w1", index: 2, value: 0.8 });
+    r.applier.receive("d2", { type: "effect", seq: 3, profile: "w1", index: 0, value: 0 });
+    expect(r.deps.setStrength).not.toHaveBeenCalled(); // never applied on receipt
+    runFrame(32);
+    expect(r.deps.setStrength).toHaveBeenNthCalledWith(1, "w1", 2, 0.8);
+    expect(r.deps.setStrength).toHaveBeenNthCalledWith(2, "w1", 0, 0);
+    expect(r.events.slice(-3)).toEqual(["setStrength", "setStrength", "draw"]);
+    expect(r.acks).toEqual([
+      [
+        { deviceId: "d1", seq: 7 },
+        { deviceId: "d2", seq: 3 },
+      ],
+    ]);
+  });
+
+  it("is acknowledged when the screen drops it too (a stale profile or index)", () => {
+    const r = rig();
+    // The dependency decides to drop: it changes nothing, yet the controller hears back.
+    vi.mocked(r.deps.setStrength).mockImplementation(() => {});
+    r.applier.receive("d1", { type: "effect", seq: 9, profile: "gone", index: 11, value: 1 });
+    runFrame(16);
+    expect(r.deps.setStrength).toHaveBeenCalledWith("gone", 11, 1);
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 9 }]]);
   });
 });
 

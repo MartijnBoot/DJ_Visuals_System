@@ -45,7 +45,10 @@ In the profile file:
   unique in the effect.
 - `code`: at most 8192 bytes (UTF-8).
 
-A file holding a custom effect is `formatVersion` 2.
+A file holding a custom effect is `formatVersion` 2. Any effect, built-in or custom, may also
+carry `"dj": true` (at most one effect per profile) or `"vj": true`: a strength fader for it on
+`/control` in that mode (B-18). A file in which any effect has one of them is `formatVersion` 3;
+versions 1 and 2 refuse both keys.
 
 ## Names
 

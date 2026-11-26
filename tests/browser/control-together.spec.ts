@@ -165,7 +165,6 @@ test("320×568, DJ: the disc and Recognisability together send throughout and th
     await touch(cdp, "touchMove", [disc(i / moves), dial(i / moves)]);
     await phone.waitForTimeout(20);
   }
-  const shown = (await phone.getByTestId("wheel-value").textContent())!;
   await touch(cdp, "touchEnd", []);
   await phone.waitForTimeout(300);
 
@@ -183,7 +182,9 @@ test("320×568, DJ: the disc and Recognisability together send throughout and th
   expect(budgetProblems(frames)).toEqual([]);
   const lastColour = colours.at(-1)!.message.value as string;
   const lastDial = dials.at(-1)!.message.recognisability as number;
-  expect(lastColour).toBe(shown);
+  // The wheel's own value, read once React has rendered the last move: reading it straight after
+  // the final touchMove raced the render and saw the move before (CI run 45496093447).
+  await expect(phone.getByTestId("wheel-value")).toHaveText(lastColour);
   await expect(phone.getByTestId("wheel-current")).toHaveAttribute("data-colour", lastColour);
   await expect.poll(() => panelValue(page, "recognisability")).toBe(lastDial);
   await expect(fader).toHaveAttribute("aria-valuenow", String(lastDial));
@@ -409,7 +410,23 @@ test("768×1024, VJ: a 240 px disc, swatch 3 recolours slot 3, a re-pick goes ba
   await touch(cdp, "touchStart", [disc(0)]);
   for (let i = 1; i <= 10; i++) await touch(cdp, "touchMove", [disc(i / 10)]);
   await touch(cdp, "touchEnd", []);
-  const dragged = (await vj.getByTestId("wheel-value").textContent())!;
+  // Settled: the wheel and the swatch (the screen's echo) show one colour, unchanged over a pause.
+  // Reading the wheel straight after touchEnd raced the render of the last move.
+  const settled = async () => {
+    const wheel = (await vj.getByTestId("wheel-value").textContent())!;
+    const echo = (await swatch3.getAttribute("data-colour"))!;
+    return wheel === echo ? wheel : null;
+  };
+  let dragged = "";
+  await expect
+    .poll(async () => {
+      const first = await settled();
+      await vj.waitForTimeout(150);
+      const again = await settled();
+      dragged = again ?? "";
+      return first !== null && first === again;
+    })
+    .toBe(true);
   expect(dragged).not.toBe("#ffcc00");
   await expect(swatch3).toHaveAttribute("data-colour", dragged);
   await expect(vj.locator('[data-testid=swatch][data-slot="0"]')).toHaveAttribute(

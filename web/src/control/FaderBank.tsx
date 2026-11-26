@@ -12,6 +12,10 @@ export interface FaderDefinition {
   label: string;
   value: number;
   onSend(value: number): void;
+  /** B-18 PD9: a stored value to tick on the track. */
+  mark?: number;
+  /** B-16 PD11: a change lets go of a drag (B-18: the profile an effect fader was shown for). */
+  layout?: string;
 }
 
 export interface FaderBankProps {

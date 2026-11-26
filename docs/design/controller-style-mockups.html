@@ -722,6 +722,46 @@
       .djv-control .djv-colour.is-locked .djv-fader-fill {
         background: var(--fill-locked);
       }
+
+      /* ---- B-18: the stored-value tick (PD9, AC17), as controller.css draws it ---- */
+      .djv-control .djv-fader-mark {
+        position: absolute;
+        left: calc(var(--cap-along) / 2 + var(--mark) * (100% - var(--cap-along)) - 1px);
+        top: var(--label-band);
+        bottom: calc(0px - var(--fader-edge));
+        width: 2px;
+        background: var(--text);
+        pointer-events: none;
+      }
+      .djv-control .djv-fader-mark::after {
+        content: "";
+        position: absolute;
+        left: -2px;
+        bottom: -3px;
+        width: 6px;
+        height: 6px;
+        background: inherit;
+        transform: rotate(45deg);
+      }
+      .djv-control .djv-fader.is-vertical .djv-fader-mark {
+        left: var(--label-band);
+        right: calc(0px - var(--fader-edge));
+        top: auto;
+        bottom: calc(
+          var(--cap-along) / 2 + var(--mark) * (100% - var(--readout-band) - var(--cap-along)) - 1px
+        );
+        width: auto;
+        height: 2px;
+      }
+      .djv-control .djv-fader.is-vertical .djv-fader-mark::after {
+        left: auto;
+        right: -3px;
+        top: -2px;
+        bottom: auto;
+      }
+      .djv-control .djv-bank.is-locked .djv-fader-mark {
+        background: var(--cap-locked);
+      }
     </style>
   </head>
   <body>
@@ -729,7 +769,9 @@
       <h1>Controller style — mockups</h1>
       <p>
         B-19, plan task T1; amended by B-16 (plan T6): the colour block pinned between the
-        scrolling area and the bank, never a dialog. The look of <code>/control</code> from
+        scrolling area and the bank, never a dialog; amended by B-18 (plan T7): the effect faders,
+        a third in the bank and the Effects section in VJ mode, each with a stored-value tick.
+        The look of <code>/control</code> from
         <code>docs/design/controller-style.md</code>, at real CSS pixels. Each frame stands in for
         the whole screen and scrolls inside itself. On a phone, turn it to landscape to see the
         568×320 frames at full size. Static: nothing here moves, sends or loads.
@@ -974,7 +1016,7 @@
         </figure>
 
         <figure class="mock-frame" id="frame-portrait-four">
-          <figcaption>DJ mode · four faders (capacity for B-18; faders 3 and 4 are placeholders) — bank 278 px and block 168 px of 568, about 74 px of scrolling area left: B-18 decides</figcaption>
+          <figcaption>DJ mode · four faders (capacity for B-18; faders 3 and 4 are placeholders) — bank 278 px and block 168 px of 568, about 74 px of scrolling area left: B-19's capacity, not shipped (B-18 shows at most three, below)</figcaption>
           <div class="mock-screen mock-320x568">
             <main class="djv-control" data-arrangement="horizontal">
               <div class="djv-status" data-link-group="ok">
@@ -1041,6 +1083,76 @@
                     <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
                     <span class="djv-fader-label">Fader 4</span>
                     <span class="djv-fader-readout">100</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-portrait-three">
+          <figcaption>DJ mode · a profile with a DJ-ticked effect (B-18): three faders — bank 216 px and block 168 px of 568, the scrolling area keeps 136 px; the tick on the smear fader is its stored strength (40)</figcaption>
+          <div class="mock-screen mock-320x568">
+            <main class="djv-control" data-arrangement="horizontal">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Neon Grid</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Camera</h2>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">USB Camera</button>
+                  </div>
+                </section>
+              </div>
+              <section class="djv-colour">
+                <div class="djv-colour-label"><h2 class="djv-legend">Colour 1 · primary</h2></div>
+                <div class="djv-disc"><span class="mock-disc"></span><span class="djv-marker" style="left: 72%; top: 30%"></span></div>
+                <div class="djv-colour-fader">
+                  <div class="djv-fader is-vertical" style="--level: 0.88">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Brightness</span>
+                    <span class="djv-fader-readout">88</span>
+                  </div>
+                </div>
+                <div class="djv-colour-info">
+                  <span class="djv-pair djv-pair-current"><span class="djv-pair-swatch" style="background: #e0328f"></span>#e0328f</span>
+                  <span class="djv-pair djv-pair-stored"><span class="djv-pair-swatch" style="background: #ff3fa4"></span>stored</span>
+                  <button type="button" class="djv-key djv-colour-reset">Reset</button>
+                </div>
+              </section>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.75; --mark: 0.4">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-mark"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">smear</span>
+                    <span class="djv-fader-readout">75</span>
                   </div>
                 </div>
               </div>
@@ -1277,7 +1389,7 @@
         </figure>
 
         <figure class="mock-frame" id="frame-landscape-four">
-          <figcaption>DJ mode · four faders (capacity for B-18) — bank 260 px and block 230 px of 568, about 78 px of scrolling area left: B-18 decides</figcaption>
+          <figcaption>DJ mode · four faders (capacity for B-18) — bank 260 px and block 230 px of 568, about 78 px of scrolling area left: B-19's capacity, not shipped (B-18 shows at most three, below)</figcaption>
           <div class="mock-screen mock-568x320">
             <main class="djv-control" data-arrangement="vertical">
               <div class="djv-status" data-link-group="ok">
@@ -1337,6 +1449,76 @@
                     <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
                     <span class="djv-fader-label">Fader 4</span>
                     <span class="djv-fader-readout">100</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-landscape-three">
+          <figcaption>DJ mode · a profile with a DJ-ticked effect (B-18): three faders — bank 198 px and block 230 px of 568, the scrolling area keeps 140 px; the tick on the smear fader is its stored strength (40)</figcaption>
+          <div class="mock-screen mock-568x320">
+            <main class="djv-control" data-arrangement="vertical">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Neon Grid</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Camera</h2>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">USB Camera</button>
+                  </div>
+                </section>
+              </div>
+              <section class="djv-colour">
+                <div class="djv-colour-label"><h2 class="djv-legend">Colour 1 · primary</h2></div>
+                <div class="djv-disc"><span class="mock-disc"></span><span class="djv-marker" style="left: 72%; top: 30%"></span></div>
+                <div class="djv-colour-fader">
+                  <div class="djv-fader is-vertical" style="--level: 0.88">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Brightness</span>
+                    <span class="djv-fader-readout">88</span>
+                  </div>
+                </div>
+                <div class="djv-colour-info">
+                  <span class="djv-pair djv-pair-current"><span class="djv-pair-swatch" style="background: #e0328f"></span>#e0328f</span>
+                  <span class="djv-pair djv-pair-stored"><span class="djv-pair-swatch" style="background: #ff3fa4"></span>stored</span>
+                  <button type="button" class="djv-key djv-colour-reset">Reset</button>
+                </div>
+              </section>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader is-vertical" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader is-vertical" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                  <div class="djv-fader is-vertical" style="--level: 0.75; --mark: 0.4">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-mark"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">smear</span>
+                    <span class="djv-fader-readout">75</span>
                   </div>
                 </div>
               </div>
@@ -1525,6 +1707,117 @@
                     <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
                     <span class="djv-fader-label">Audio reactivity</span>
                     <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-tablet-effects">
+          <figcaption>VJ mode · a profile with effect ticks (B-18): smear ticked DJ is the bank's third fader; zoom and Glow ticked VJ sit in the Effects section under Transition, each with its stored-value tick</figcaption>
+          <div class="mock-screen mock-768x1024">
+            <main class="djv-control" data-arrangement="vertical">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">VJ</button>
+                </div>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Neon Grid</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Mirror Hall</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Transition</h2>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Cut</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Crossfade</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Dissolve</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Wipe</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Beat cut</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Dip to colour</button>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.5">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Duration</span>
+                    <span class="djv-fader-readout">2.0 s</span>
+                  </div>
+                  <div class="djv-row">
+                    <button type="button" class="djv-key" aria-pressed="false">Keep colour</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Effects</h2>
+                  <div class="djv-fader" style="--level: 0.2; --mark: 0.2">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-mark"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">zoom</span>
+                    <span class="djv-fader-readout">20</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.85; --mark: 0.6">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-mark"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Glow</span>
+                    <span class="djv-fader-readout">85</span>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Camera</h2>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">USB Camera</button>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <h2 class="djv-legend">Palette</h2>
+                  <div class="djv-row">
+                    <button type="button" class="djv-swatch is-primary" aria-pressed="true" style="background: #ff3fa4"></button>
+                    <button type="button" class="djv-swatch" style="background: #2b6bff"></button>
+                    <button type="button" class="djv-swatch" style="background: #19d3c5"></button>
+                  </div>
+                </section>
+              </div>
+              <section class="djv-colour">
+                <div class="djv-colour-label"><h2 class="djv-legend">Colour 1 · primary</h2></div>
+                <div class="djv-disc"><span class="mock-disc"></span><span class="djv-marker" style="left: 72%; top: 30%"></span></div>
+                <div class="djv-colour-fader">
+                  <div class="djv-fader is-vertical" style="--level: 0.88">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Brightness</span>
+                    <span class="djv-fader-readout">88</span>
+                  </div>
+                </div>
+                <div class="djv-colour-info">
+                  <span class="djv-pair djv-pair-current"><span class="djv-pair-swatch" style="background: #ff3fa4"></span>#ff3fa4</span>
+                  <span class="djv-pair djv-pair-stored"><span class="djv-pair-swatch" style="background: #ff3fa4"></span>stored</span>
+                  <button type="button" class="djv-key djv-colour-reset">Reset</button>
+                </div>
+              </section>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader is-vertical" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader is-vertical" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                  <div class="djv-fader is-vertical" style="--level: 0.4; --mark: 0.4">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-mark"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">smear</span>
+                    <span class="djv-fader-readout">40</span>
                   </div>
                 </div>
               </div>

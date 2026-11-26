@@ -344,6 +344,46 @@
   text-align: center;
 }
 
+/* ---- The stored-value tick (B-18 SD6, PD9, AC17): a 2 px bar of --text across the groove at
+   the stored value, by the cap's maths, from the label band to the track's outer edge, so it shows
+   past the cap's ends when the cap sits on it, ending in a diamond notch: a shape, never colour
+   alone. Drawn under the cap. ---- */
+.djv-control .djv-fader-mark {
+  position: absolute;
+  left: calc(var(--cap-along) / 2 + var(--mark) * (100% - var(--cap-along)) - 1px);
+  top: var(--label-band);
+  bottom: calc(0px - var(--fader-edge));
+  width: 2px;
+  background: var(--text);
+  pointer-events: none;
+}
+.djv-control .djv-fader-mark::after {
+  content: "";
+  position: absolute;
+  left: -2px;
+  bottom: -3px;
+  width: 6px;
+  height: 6px;
+  background: inherit;
+  transform: rotate(45deg);
+}
+.djv-control .djv-fader.is-vertical .djv-fader-mark {
+  left: var(--label-band);
+  right: calc(0px - var(--fader-edge));
+  top: auto;
+  bottom: calc(
+    var(--cap-along) / 2 + var(--mark) * (100% - var(--readout-band) - var(--cap-along)) - 1px
+  );
+  width: auto;
+  height: 2px;
+}
+.djv-control .djv-fader.is-vertical .djv-fader-mark::after {
+  left: auto;
+  right: -3px;
+  top: -2px;
+  bottom: auto;
+}
+
 /* ---- The focus ring (SD11, AC21): every control, white outside a black halo, 3:1 wherever it
    lands. The waiting badge draws it inside (above). ---- */
 .djv-control :focus-visible {
@@ -362,6 +402,10 @@
 }
 .djv-control .djv-fader-slider[aria-disabled="true"] .djv-fader-fill {
   background: var(--fill-locked);
+}
+/* B-18 PD9: locked, the tick keeps its shape and takes the locked cap's colour. */
+.djv-control .djv-fader-slider[aria-disabled="true"] .djv-fader-mark {
+  background: var(--cap-locked);
 }
 
 /* ---- Sections: framed blocks with a legend printed on the panel ---- */
