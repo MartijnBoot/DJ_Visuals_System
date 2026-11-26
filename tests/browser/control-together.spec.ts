@@ -410,7 +410,23 @@ test("768×1024, VJ: a 240 px disc, swatch 3 recolours slot 3, a re-pick goes ba
   await touch(cdp, "touchStart", [disc(0)]);
   for (let i = 1; i <= 10; i++) await touch(cdp, "touchMove", [disc(i / 10)]);
   await touch(cdp, "touchEnd", []);
-  const dragged = (await vj.getByTestId("wheel-value").textContent())!;
+  // Settled: the wheel and the swatch (the screen's echo) show one colour, unchanged over a pause.
+  // Reading the wheel straight after touchEnd raced the render of the last move.
+  const settled = async () => {
+    const wheel = (await vj.getByTestId("wheel-value").textContent())!;
+    const echo = (await swatch3.getAttribute("data-colour"))!;
+    return wheel === echo ? wheel : null;
+  };
+  let dragged = "";
+  await expect
+    .poll(async () => {
+      const first = await settled();
+      await vj.waitForTimeout(150);
+      const again = await settled();
+      dragged = again ?? "";
+      return first !== null && first === again;
+    })
+    .toBe(true);
   expect(dragged).not.toBe("#ffcc00");
   await expect(swatch3).toHaveAttribute("data-colour", dragged);
   await expect(vj.locator('[data-testid=swatch][data-slot="0"]')).toHaveAttribute(
