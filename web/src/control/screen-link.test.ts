@@ -305,7 +305,14 @@ describe("toScreenState (SD5, SD8, AC26)", () => {
       effects: [],
       staged: null,
       scenes: null,
+      preview: "off",
     });
+  });
+
+  // B-07 T12 (PD2): the preview's word.
+  it("carries the preview's state", async () => {
+    const built = toScreenState({ ...(await facts("ok")), preview: "paused" });
+    expect(screenStateSchema.parse(built).preview).toBe("paused");
   });
 
   // B-07 PD2, PD3: the staged look as controllers show it.
@@ -547,5 +554,56 @@ describe("toScreenState's scenes (B-07 PD2)", () => {
     expect(screenStateSchema.safeParse(toScreenState({ ...facts, scenes: null })).success).toBe(
       true,
     );
+  });
+});
+
+describe("the preview (B-07 T12, PD14, PD15)", () => {
+  let onPreview: Mock<(message: unknown) => void>;
+  beforeEach(() => {
+    link.stop();
+    onPreview = vi.fn<(message: unknown) => void>();
+    link = createScreenLink({
+      url: "ws://127.0.0.1:8000/api/control/screen",
+      connect: () => new FakeSocket(),
+      buildState: () => state,
+      onControl,
+      onNewDevice,
+      onSetup,
+      onSenders,
+      onPreview,
+    });
+    link.start();
+    latest().open();
+  });
+
+  const candidate = { candidate: "candidate:1", sdpMid: "0", sdpMLineIndex: 0 };
+
+  it("hands the holder and the holder's setup to the preview, never to the remote sources", () => {
+    latest().deliver({ type: "preview", deviceId: "d1" });
+    latest().deliver({ type: "previewAnswer", deviceId: "d1", sdp: "v=0" });
+    latest().deliver({ type: "previewCandidate", deviceId: "d1", ...candidate });
+    expect(onPreview.mock.calls).toEqual([
+      [{ type: "preview", deviceId: "d1" }],
+      [{ type: "previewAnswer", deviceId: "d1", sdp: "v=0" }],
+      [{ type: "previewCandidate", deviceId: "d1", ...candidate }],
+    ]);
+    expect(onSetup).not.toHaveBeenCalled();
+  });
+
+  it("forgets the holder when the socket closes and when the page is superseded", () => {
+    latest().deliver({ type: "preview", deviceId: "d1" });
+    latest().drop();
+    expect(onPreview).toHaveBeenLastCalledWith({ type: "preview", deviceId: null });
+    vi.advanceTimersByTime(60_000);
+    latest().open();
+    latest().deliver({ type: "preview", deviceId: "d1" });
+    latest().deliver({ type: "superseded" });
+    expect(onPreview).toHaveBeenLastCalledWith({ type: "preview", deviceId: null });
+  });
+
+  it("relays the preview's offer and candidates to the server", () => {
+    expect(link.relay({ type: "previewOffer", deviceId: "d1", sdp: "v=0" })).toBe(true);
+    expect(link.relay({ type: "previewCandidate", deviceId: "d1", ...candidate })).toBe(true);
+    expect(types(latest()).slice(-2)).toEqual(["previewOffer", "previewCandidate"]);
   });
 });

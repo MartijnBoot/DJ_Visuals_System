@@ -8,6 +8,8 @@
 // nothing further (AC31). B-06 (T13): a sender's `offer` and `candidate` go to the page's
 // sources, which answer through `relay`; every status's senders go there too, so a sender that
 // left has its peer closed; and the state carries the remote cameras and the main audio.
+// B-07 (T12, PD14, PD15): the preview's holder and its setup go to the page's preview, never to
+// the remote sources; a close or a supersede forgets the holder; the state carries the preview.
 import {
   toScreenSchema,
   type AppliedEntry,
@@ -34,8 +36,16 @@ export type PanelAction = Extract<
 >;
 
 type FromSender = Extract<ToScreen, { type: "offer" | "candidate" }>;
-/** What the screen page sends a sender through the server (B-06 SD16). */
-export type ToSender = Extract<ScreenMessage, { type: "answer" | "candidate" | "stream" }>;
+/** What the screen page sends a sender through the server (B-06 SD16), or the preview's holder. */
+export type ToSender = Extract<
+  ScreenMessage,
+  { type: "answer" | "candidate" | "stream" | "previewOffer" | "previewCandidate" }
+>;
+/** B-07 PD15: the preview's holder (null: no one) and the holder's setup. */
+export type ToPreview = Extract<
+  ToScreen,
+  { type: "preview" | "previewAnswer" | "previewCandidate" }
+>;
 
 export interface ScreenLinkDeps {
   url: string;
@@ -52,6 +62,8 @@ export interface ScreenLinkDeps {
    * them; null when the list could not load. Without it the page asks for no list.
    */
   onScenes?(list: SceneEntry[] | null): void;
+  /** B-07 PD15: the preview's messages; `{ deviceId: null }` too when the socket goes. */
+  onPreview?(message: ToPreview): void;
 }
 
 /** A scene request as the page asks it; the link adds the `requestId` (PD9). */
@@ -101,6 +113,8 @@ export interface ScreenFacts {
   staged?: Staged | null;
   /** B-07 PD2: the saved scenes; null or absent when the list could not load. */
   scenes?: SceneEntry[] | null;
+  /** B-07 PD2: the preview stream's state; absent is off. */
+  preview?: ScreenState["preview"];
   /** B-06: the remote cameras, a picked remote camera's id, the main audio. */
   remote?: {
     cameras: ScreenState["cameras"];
@@ -125,6 +139,7 @@ export function toScreenState({
   remote,
   staged = null,
   scenes = null,
+  preview = "off",
 }: ScreenFacts) {
   const local = cameras.map(({ deviceId, label }) => ({ deviceId, label, remote: false }));
   const state: ScreenState = {
@@ -156,6 +171,7 @@ export function toScreenState({
     })),
     staged,
     scenes: scenes === null ? null : scenes.slice(0, 200).map(({ id, name }) => ({ id, name })),
+    preview,
   };
   return state;
 }
@@ -174,6 +190,8 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
     view = { ...view, ...next };
     listeners.forEach((l) => l());
   };
+  /** B-07 PD15: the page holds no stream once its socket is gone or superseded. */
+  const forgetHolder = () => deps.onPreview?.({ type: "preview", deviceId: null });
   const isOpen = () => !view.superseded && socket !== null && socket.readyState === OPEN;
   const write = (message: ScreenMessage) => socket!.send(JSON.stringify(message));
 
@@ -216,11 +234,13 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
     if (!result.success) return;
     const message = result.data;
     if (message.type === "control") return deps.onControl(message.deviceId, message.control);
-    if (message.type === "superseded") return update({ superseded: true });
+    if (message.type === "superseded") {
+      forgetHolder();
+      return update({ superseded: true });
+    }
     if (message.type === "offer" || message.type === "candidate") return deps.onSetup?.(message);
     if (message.type === "scenes.result") return onResult(message);
-    // B-07 T11: the preview's holder and setup reach the screen page; T12 routes them.
-    if (message.type !== "status") return;
+    if (message.type !== "status") return deps.onPreview?.(message);
     const fresh = message.status.devices.filter((d) => !seen.has(d.deviceId));
     for (const d of fresh) seen.add(d.deviceId);
     update({ status: message.status });
@@ -247,6 +267,7 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
       if (socket !== ws) return;
       socket = null;
       abandon();
+      forgetHolder();
       if (stopped || view.superseded) return;
       update({ connection: "down", status: null });
       timer = setTimeout(connect, backoff.next());

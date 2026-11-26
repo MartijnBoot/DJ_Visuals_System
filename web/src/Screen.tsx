@@ -18,7 +18,9 @@
 // pick reads it then (`profiles/active.ts`), and each frame tells the engine whether the audio
 // that feeds the looks is ok, for Beat cut (`remote/sources.ts`). Scenes (B-07): the panel's scene
 // row stages and goes through the applier, as a controller does, and asks the server over the
-// screen socket for the rest (rename, delete, export, import).
+// screen socket for the rest (rename, delete, export, import). The staged look's preview
+// (`scenes/preview.ts`) runs while a controller holds the stream and a staged look exists; each
+// frame it gets the output's features, video element and readings, never the output's engine.
 import { createFeatureSource, ZERO_FEATURES } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
 import {
@@ -52,6 +54,7 @@ import { Panel } from "./Panel.tsx";
 import { sharedToEngine } from "./profile-compat.ts";
 import { createActiveProfile } from "./profiles/active.ts";
 import { feedOf, matchFeed, type OnScreen, type VideoSender } from "./scenes/feed.ts";
+import { createPreview } from "./scenes/preview.ts";
 import { createStagedLook } from "./scenes/staged.ts";
 import { getProfile, listProfiles } from "./profiles/api.ts";
 import { loadProfileId, saveProfileId } from "./profiles/remembered.ts";
@@ -193,6 +196,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       api: { get: (id) => getProfile(id) },
       onChange: () => {
         link.markDirty();
+        preview.changed();
         setSceneView((view) => ({ ...view, staged: staged.state() }));
       },
     });
@@ -254,6 +258,14 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
     // B-06: the senders' labels, for log lines (never a device's own label, SD25).
     const labels = new Map<string, string>();
     let senders: Parameters<Sources["setSenders"]>[0] = [];
+    // B-07 (SD12, PD13): a second engine on a canvas never in the page, sent to the holder.
+    const preview = createPreview({
+      createEngine: (canvas, options) => createEngine(canvas, options),
+      createCanvas: () => document.createElement("canvas"),
+      staged: () => staged.definition(),
+      send: (message) => void link.relay(message),
+      onChange: () => link.markDirty(),
+    });
     const peers = createPeers({
       send: (message) => void link.relay(message),
       now: () => Date.now(),
@@ -270,6 +282,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
           profiles: { ...active.state(), reason: reasonOf(active.state()) },
           staged: staged.state(),
           scenes: sceneList,
+          preview: preview.state(),
           started: startedRef.current,
           ...(sourcesRef.current ? { remote: sourcesRef.current.facts(performance.now()) } : {}),
         }),
@@ -287,6 +300,14 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
         for (const s of list) labels.set(s.deviceId, s.label);
         senders = list;
         sourcesRef.current?.setSenders(list);
+      },
+      onPreview: (message) => {
+        if (message.type === "preview") return preview.holder(message.deviceId);
+        if (message.type === "previewAnswer") {
+          return void preview.answer(message.deviceId, message.sdp);
+        }
+        const { deviceId, candidate, sdpMid, sdpMLineIndex } = message;
+        void preview.candidate(deviceId, { candidate, sdpMid, sdpMLineIndex });
       },
       onScenes: (list) => {
         sceneList = list;
@@ -339,6 +360,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       senderState,
       changeTransition,
       setFeedNote,
+      preview,
       scenes: {
         stage: (id: string) => applier.local({ type: "stage", seq: 0, from: { scene: id } }),
         go: () => applier.local({ type: "go", seq: 0 }),
@@ -412,18 +434,21 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
     sourcesRef.current = sources;
     const unsubscribe = session.subscribe((state) => setCapture(state));
     let video: HTMLVideoElement | null = null;
+    let features = audioToEngine(ZERO_FEATURES);
     // Each frame reads the features just before the engine draws with them (frame-feed.ts).
     // B-04: received controls first, then this frame's acknowledgements and state. B-06: then the
     // sources decide this frame's video and features, from flags read now.
     const stopFeed = startFrameFeed(
       engine,
-      () => audioToEngine(sources.read(performance.now())),
+      () => (features = audioToEngine(sources.read(performance.now()))),
       () => {
         control.link.flush(control.applier.drain());
         sources.frame(performance.now());
         engine.setAudioOk(sources.audioOk(performance.now())); // Beat cut's rule (B-09 SD10)
         const next = sources.video();
         if (next !== video) engine.setSource((video = next));
+        // B-07 SD14: the preview yields to this engine's own readings (PD12).
+        control.preview.frame(performance.now(), features, video, engine.stats());
       },
     );
     return () => {
@@ -433,6 +458,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       sourcesRef.current = null;
       stopGuard();
       session.stop();
+      control.preview.holder(null);
       engine.stop();
       engineRef.current = null;
       sessionRef.current = null;
