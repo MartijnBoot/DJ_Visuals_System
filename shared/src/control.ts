@@ -137,6 +137,13 @@ export const controlSchema = z.discriminatedUnion("type", [
   message("unstage", { seq }),
   /** B-07 SD3, AC10: the staged look goes live by its own transition. */
   message("go", { seq }),
+  /**
+   * B-07 SD9, SD18: save the staged look as a scene, or replace `updateId`'s content. The screen
+   * page builds the scene; the server checks the name (1 to 60, trimmed, unique ignoring case).
+   */
+  message("saveScene", { seq, name: sceneName, updateId: id.optional() }),
+  message("renameScene", { seq, id, name: sceneName }),
+  message("deleteScene", { seq, id }),
 ]);
 export type Control = z.infer<typeof controlSchema>;
 export type ControlType = Control["type"];
@@ -247,6 +254,8 @@ export const screenStateSchema = z.strictObject({
   effects: z.array(effectEntrySchema).max(LIMITS.effects),
   /** B-07 PD2: the staged look, null while there is none; optional for the older fixtures. */
   staged: stagedSchema.nullable().optional(),
+  /** B-07 PD2: the saved scenes by name; null when the list could not load ("unavailable"). */
+  scenes: z.array(sceneEntrySchema).max(SCENE_LIMITS.scenes).nullable().optional(),
 });
 export type ScreenState = z.infer<typeof screenStateSchema>;
 

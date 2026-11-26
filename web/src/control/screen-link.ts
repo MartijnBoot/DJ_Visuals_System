@@ -14,6 +14,9 @@ import {
   type Control,
   type ControlStatus,
   type ScreenMessage,
+  type SceneEntry,
+  type SceneRequest,
+  type SceneResult,
   type ScreenState,
   type Staged,
   type ToScreen,
@@ -44,7 +47,19 @@ export interface ScreenLinkDeps {
   onSetup?(message: FromSender): void;
   /** The approved senders in each status (B-06). */
   onSenders?(senders: ControlStatus["senders"]): void;
+  /**
+   * B-07 PD9: the saved scenes, asked for on every open and replaced by every reply that carries
+   * them; null when the list could not load. Without it the page asks for no list.
+   */
+  onScenes?(list: SceneEntry[] | null): void;
 }
+
+/** A scene request as the page asks it; the link adds the `requestId` (PD9). */
+export type SceneAsk = SceneRequest extends infer R
+  ? R extends SceneRequest
+    ? Omit<R, "requestId">
+    : never
+  : never;
 
 export interface ScreenLinkView {
   connection: "connecting" | "open" | "down";
@@ -63,6 +78,8 @@ export interface ScreenLink {
   send(action: PanelAction): boolean;
   /** A setup message for a sender; false when the socket is not open (B-06). */
   relay(message: ToSender): boolean;
+  /** B-07 PD9: one scene request; its reply, or null when the socket is not open or closes. */
+  scenes(ask: SceneAsk): Promise<SceneResult | null>;
   view(): ScreenLinkView;
   subscribe(listener: () => void): () => void;
 }
@@ -82,6 +99,8 @@ export interface ScreenFacts {
   transition: TransitionChoice;
   /** B-07 PD2: the staged look as controllers show it; null or absent while there is none. */
   staged?: Staged | null;
+  /** B-07 PD2: the saved scenes; null or absent when the list could not load. */
+  scenes?: SceneEntry[] | null;
   /** B-06: the remote cameras, a picked remote camera's id, the main audio. */
   remote?: {
     cameras: ScreenState["cameras"];
@@ -105,6 +124,7 @@ export function toScreenState({
   transition,
   remote,
   staged = null,
+  scenes = null,
 }: ScreenFacts) {
   const local = cameras.map(({ deviceId, label }) => ({ deviceId, label, remote: false }));
   const state: ScreenState = {
@@ -135,6 +155,7 @@ export function toScreenState({
       vj,
     })),
     staged,
+    scenes: scenes === null ? null : scenes.slice(0, 200).map(({ id, name }) => ({ id, name })),
   };
   return state;
 }
@@ -156,6 +177,34 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
   const isOpen = () => !view.superseded && socket !== null && socket.readyState === OPEN;
   const write = (message: ScreenMessage) => socket!.send(JSON.stringify(message));
 
+  /** B-07 PD9: each scene request waits for its reply by id; a close answers them all null. */
+  let nextRequest = 0;
+  const waiting = new Map<number, (result: SceneResult | null) => void>();
+  const ask = (request: SceneAsk): Promise<SceneResult | null> => {
+    if (!isOpen()) return Promise.resolve(null);
+    const requestId = ++nextRequest;
+    write({ ...request, requestId } as ScreenMessage);
+    return new Promise((resolve) => waiting.set(requestId, resolve));
+  };
+  const abandon = () => {
+    for (const resolve of waiting.values()) resolve(null);
+    waiting.clear();
+  };
+  const onResult = (result: SceneResult) => {
+    const resolve = waiting.get(result.requestId);
+    if (!resolve) return; // not ours, or no longer waited for
+    waiting.delete(result.requestId);
+    if (result.list) deps.onScenes?.(result.list);
+    resolve(result);
+  };
+  /** On every open: the list, or null when it cannot be read. */
+  const listScenes = () => {
+    if (!deps.onScenes) return;
+    void ask({ type: "scenes.list" }).then((result) => {
+      if (!result?.ok) deps.onScenes?.(null);
+    });
+  };
+
   const onMessage = (data: string) => {
     let parsed: unknown;
     try {
@@ -169,7 +218,7 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
     if (message.type === "control") return deps.onControl(message.deviceId, message.control);
     if (message.type === "superseded") return update({ superseded: true });
     if (message.type === "offer" || message.type === "candidate") return deps.onSetup?.(message);
-    if (message.type === "scenes.result") return; // B-07: the page asks nothing yet (T7)
+    if (message.type === "scenes.result") return onResult(message);
     const fresh = message.status.devices.filter((d) => !seen.has(d.deviceId));
     for (const d of fresh) seen.add(d.deviceId);
     update({ status: message.status });
@@ -187,6 +236,7 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
       backoff.reset();
       dirty = true; // a (re)connected page sends its state first thing (SD13)
       update({ connection: "open" });
+      listScenes();
     };
     ws.onmessage = (event) => {
       if (socket === ws && !view.superseded) onMessage(event.data);
@@ -194,6 +244,7 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
     ws.onclose = () => {
       if (socket !== ws) return;
       socket = null;
+      abandon();
       if (stopped || view.superseded) return;
       update({ connection: "down", status: null });
       timer = setTimeout(connect, backoff.next());
@@ -210,6 +261,7 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
       if (timer) clearTimeout(timer);
       const current = socket;
       socket = null;
+      abandon();
       current?.close();
     },
     markDirty() {
@@ -235,6 +287,7 @@ export function createScreenLink(deps: ScreenLinkDeps): ScreenLink {
       write(message);
       return true;
     },
+    scenes: ask,
     view: () => view,
     subscribe(listener) {
       listeners.add(listener);

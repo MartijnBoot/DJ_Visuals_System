@@ -243,3 +243,74 @@ describe("the staged definition (SD1, SD18)", () => {
     });
   });
 });
+
+// B-07 T7 (SD3, SD11, AC6, AC21; plan PD3, PD4, PD8): staging a saved scene, the scene tie a Save
+// sets, and the reason a refused save, rename or delete gives.
+describe("a staged scene (AC6, SD11)", () => {
+  const scene = {
+    profile: {
+      ...cool,
+      palette: ["#ff00ff", "#00ffff"],
+      effects: [{ type: "smear" as const, amount: 0.9, vj: true }],
+    },
+    dials: { recognisability: 0.3, reactivity: 0.8 },
+    feed: { kind: "remote" as const, hint: "Safari on iPhone" },
+    transition: { kind: "wipe" as const, duration: 5 },
+  };
+
+  it("holds the scene's copy, palette, strengths, dials, feed and transition, tied to it", () => {
+    const { staged, get } = setup();
+    staged.fromScene(scene, "s1", "Warm crowd");
+    expect(staged.state()).toEqual({
+      id: "scene:s1",
+      name: "Warm crowd",
+      palette: ["#ff00ff", "#00ffff"],
+      storedPalette: ["#ff00ff", "#00ffff"],
+      primary: 1,
+      dials: { recognisability: 0.3, reactivity: 0.8 },
+      effects: [{ index: 0, name: "smear", stored: 0.9, value: 0.9, dj: false, vj: true }],
+      feed: { kind: "remote", label: "Safari on iPhone" },
+      transition: { kind: "wipe", duration: 5 },
+      fromScene: { id: "s1", name: "Warm crowd" },
+      settled: true,
+      reason: null,
+    });
+    expect(staged.definition()).toMatchObject({ stored: scene.profile, amounts: [0.9] });
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("a scene with no feed stages none", () => {
+    const { staged } = setup();
+    const { feed: _feed, ...noFeed } = scene;
+    staged.fromScene(noFeed, "s2", "Booth");
+    expect(staged.state()!.feed).toBeNull();
+  });
+
+  it("any later stage replaces the tie; a staged pick keeps it (PD4)", async () => {
+    const { staged } = setup({ c1: { kind: "ok", profile: stored("c1", cool) } });
+    staged.fromScene(scene, "s1", "Warm crowd");
+    await staged.pick("c1");
+    expect(staged.state()!.fromScene).toEqual({ id: "s1", name: "Warm crowd" });
+    staged.fromLive(live, warm.dials, null, transition);
+    expect(staged.state()!.fromScene).toBeNull();
+  });
+
+  it("a Save ties the look to what it was saved as; a reason shows until the next change", () => {
+    const { staged } = setup();
+    staged.fromLive(live, warm.dials, null, transition);
+    staged.tie({ id: "s9", name: "Saved" });
+    expect(staged.state()!.fromScene).toEqual({ id: "s9", name: "Saved" });
+    staged.setReason("That name is taken");
+    expect(staged.state()!.reason).toBe("That name is taken");
+    staged.setDials({ reactivity: 0.5 });
+    expect(staged.state()!.reason).toBeNull();
+  });
+
+  it("tie and setReason do nothing without a staged look", () => {
+    const { staged, onChange } = setup();
+    staged.tie({ id: "s9", name: "Saved" });
+    staged.setReason("x");
+    expect(staged.state()).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});

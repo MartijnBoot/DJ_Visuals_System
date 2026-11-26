@@ -533,6 +533,24 @@ describe("ending pairings (AC6, AC13, AC14, AC17)", () => {
     expect(relayed).toMatchObject({ control: { seq: 2, target: "staged" } });
     expect(a.client.ws.readyState).toBe(a.client.ws.OPEN);
   });
+
+  // B-07 T7 (SD18, AC38): a scene control is small; over 4 KB, or failing its schema, it is
+  // dropped with one warn naming its type, and the socket stays open.
+  it("drops an oversized saveScene or renameScene, and a stage with a bad from, one warn each (B-07 AC38)", async () => {
+    screen.send({ type: "state", state });
+    const a = await approved();
+    const long = "x".repeat(4200);
+    a.client.send({ type: "saveScene", seq: 1, name: long });
+    a.client.send({ type: "renameScene", seq: 2, id: "s1", name: long });
+    a.client.send({ type: "stage", seq: 3, from: { nowhere: "s1" } });
+    const dropped = () => lines.filter((l) => l.msg === "control message dropped");
+    await until(() => dropped().length === 3);
+    expect(dropped().map((l) => l.type)).toEqual(["saveScene", "renameScene", "stage"]);
+    a.client.send({ type: "saveScene", seq: 4, name: "Warm crowd" });
+    const relayed = await screen.find((m) => m.type === "control");
+    expect(relayed).toMatchObject({ control: { type: "saveScene", seq: 4 } });
+    expect(a.client.ws.readyState).toBe(a.client.ws.OPEN);
+  });
 });
 
 describe("logging (AC7, AC35, SD27)", () => {

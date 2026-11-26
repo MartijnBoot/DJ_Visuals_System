@@ -9,11 +9,18 @@ import {
   derivePrimary,
   type Feed,
   type Profile,
+  type SceneDefinition,
   type SceneTransition,
   type Staged,
 } from "@djv/shared";
 import type { ProfileResult } from "../profiles/api.ts";
-import { definitionOf, faderEntries, fetchReason, type LiveSnapshot } from "../profiles/active.ts";
+import {
+  SCENE_PREFIX,
+  definitionOf,
+  faderEntries,
+  fetchReason,
+  type LiveSnapshot,
+} from "../profiles/active.ts";
 import { BUILTIN_ID, builtinEntry } from "../profiles/builtin.ts";
 
 export type { LiveSnapshot } from "../profiles/active.ts";
@@ -51,6 +58,12 @@ export interface StagedLook {
   setFeed(feed: Feed | null): void;
   /** Kind and duration only: a scene holds no Keep colour (SD1, PD7). */
   setTransition(change: Partial<SceneTransition>): void;
+  /** B-07 AC6: a saved scene staged: its copy as the base, as stored, tied to it (SD11). */
+  fromScene(scene: SceneDefinition, id: string, name: string): void;
+  /** B-07 PD8: after a Save or Update the look is tied to what it was saved as. */
+  tie(scene: { id: string; name: string } | null): void;
+  /** B-07 PD3: why a save, rename or delete was refused; cleared by the next edit. */
+  setReason(reason: string | null): void;
   /** Unstage (AC7). */
   clear(): void;
   state(): Staged | null;
@@ -73,6 +86,7 @@ export function createStagedLook(deps: StagedDeps): StagedLook {
   const edit = (fn: (current: Look) => void) => {
     if (!look) return;
     fn(look);
+    look.reason = null; // a refusal's words belong to the look as it was
     changed();
   };
 
@@ -152,6 +166,33 @@ export function createStagedLook(deps: StagedDeps): StagedLook {
           duration: change.duration ?? l.transition.duration,
         };
       });
+    },
+    fromScene(scene, id, name) {
+      token++;
+      look = {
+        id: `${SCENE_PREFIX}${id}`,
+        name,
+        stored: scene.profile,
+        palette: [...scene.profile.palette],
+        amounts: scene.profile.effects.map((e) => e.amount),
+        dials: { ...scene.dials },
+        feed: scene.feed ?? null,
+        transition: { kind: scene.transition.kind, duration: scene.transition.duration },
+        fromScene: { id, name },
+        settled: true,
+        reason: null,
+      };
+      changed();
+    },
+    tie(scene) {
+      if (!look) return;
+      look.fromScene = scene;
+      changed();
+    },
+    setReason(reason) {
+      if (!look) return;
+      look.reason = reason;
+      changed();
     },
     clear() {
       if (!look) return;

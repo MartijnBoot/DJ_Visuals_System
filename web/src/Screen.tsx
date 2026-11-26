@@ -27,7 +27,7 @@ import {
   type LatencyReading,
   type RenderScale,
 } from "@djv/engine";
-import type { TransitionChoice } from "@djv/shared";
+import type { SceneEntry, TransitionChoice } from "@djv/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createLatencyWindow } from "../../engine/src/latency.ts";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "./capture/devices.ts";
@@ -215,7 +215,10 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       matchFeed: (feed) => matchFeed(feed, facts.current.cameras, videoSenders()),
       setFeedNote: (on) => setFeedNote(on),
       adopt: (look, choice) => active.adopt(look, choice),
+      scenes: { ask: (request) => link.scenes(request), list: () => sceneList },
     });
+    /** B-07 PD9: the saved scenes by name; null until listed, or when the list failed. */
+    let sceneList: SceneEntry[] | null = null;
     /** B-07 PD6: the camera on screen — what the sources draw, else the session's open camera. */
     const onScreen = (): OnScreen | null => {
       const drawn = sourcesRef.current?.analysing(performance.now()).video ?? null;
@@ -255,6 +258,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
           ...facts.current,
           profiles: { ...active.state(), reason: reasonOf(active.state()) },
           staged: staged.state(),
+          scenes: sceneList,
           started: startedRef.current,
           ...(sourcesRef.current ? { remote: sourcesRef.current.facts(performance.now()) } : {}),
         }),
@@ -272,6 +276,10 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
         for (const s of list) labels.set(s.deviceId, s.label);
         senders = list;
         sourcesRef.current?.setSenders(list);
+      },
+      onScenes: (list) => {
+        sceneList = list;
+        link.markDirty();
       },
     });
     /** Senders whose peer has been connected since their first offer (PD5). */

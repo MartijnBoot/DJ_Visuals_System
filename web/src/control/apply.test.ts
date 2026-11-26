@@ -2,11 +2,12 @@
 // are applied at the start of the next frame, before the engine draws, and acknowledged once per
 // frame. A controlled frame clock runs a frame's callbacks in registration order, as the browser
 // does (the same clock as `frame-feed.test.ts`).
-import type { Control, Staged } from "@djv/shared";
+import type { Control, SceneEntry, SceneResult, Staged } from "@djv/shared";
 import type { AudioFeatures, Dials, Engine } from "@djv/engine";
 import { DEFAULT_DIALS, ZERO_FEATURES } from "@djv/engine";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startFrameFeed } from "../frame-feed.ts";
+import { buildScene } from "../scenes/build.ts";
 import type { StagedDefinition, StagedLook } from "../scenes/staged.ts";
 import { createApplier, type ApplierDeps } from "./apply.ts";
 
@@ -52,8 +53,12 @@ const STAGED_DEF: StagedDefinition = {
 };
 
 function fakeStaged(exists: { current: boolean }) {
-  const look = { id: "w1", fromScene: { id: "s1", name: "Warm crowd" } } as Staged;
-  return {
+  const look = {
+    id: "w1",
+    fromScene: { id: "s1", name: "Warm crowd" },
+    settled: true,
+  } as Staged;
+  const fake = {
     fromLive: vi.fn(() => void (exists.current = true)),
     pick: vi.fn(async () => {}),
     setDials: vi.fn(),
@@ -65,7 +70,11 @@ function fakeStaged(exists: { current: boolean }) {
     clear: vi.fn(() => void (exists.current = false)),
     state: () => (exists.current ? look : null),
     definition: vi.fn(() => (exists.current ? STAGED_DEF : null)),
+    fromScene: vi.fn(() => void (exists.current = true)),
+    tie: vi.fn(),
+    setReason: vi.fn(),
   } satisfies StagedLook;
+  return Object.assign(fake, { look });
 }
 
 function rig(started = true, staging = false) {
@@ -120,6 +129,10 @@ function rig(started = true, staging = false) {
       events.push("adopt");
       return "done" as const;
     }),
+    scenes: {
+      ask: vi.fn(async (): Promise<SceneResult | null> => null),
+      list: vi.fn((): SceneEntry[] | null => [{ id: "s1", name: "Warm crowd" }]),
+    },
   };
   const applier = createApplier(deps);
   const acks: unknown[][] = [];
@@ -427,11 +440,14 @@ describe("stage and unstage (B-07 AC1, AC5, AC7, AC8)", () => {
     expect(r.acks).toEqual([[{ deviceId: "d1", seq: 3 }]]);
   });
 
-  it("stage a scene is acknowledged and changes nothing yet", () => {
+  it("a scene that cannot be fetched stages nothing, acknowledged at the reply", async () => {
     const r = rig();
     r.applier.receive("d1", { type: "stage", seq: 4, from: { scene: "s1" } });
     runFrame(16);
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+    runFrame(32);
     expect(stagedOf(r.deps).fromLive).not.toHaveBeenCalled();
+    expect(stagedOf(r.deps).fromScene).not.toHaveBeenCalled();
     expect(r.acks).toEqual([[{ deviceId: "d1", seq: 4 }]]);
   });
 
@@ -569,6 +585,181 @@ describe("go (B-07 AC10-AC12, AC15-AC17)", () => {
     r.applier.receive("d2", { type: "go", seq: 9 });
     runFrame(16);
     expect(r.deps.adopt).toHaveBeenCalledTimes(2);
+  });
+});
+
+// B-07 T7 (SD9, SD11, SD18, AC6, AC8, AC19-AC22, AC24; plan PD4, PD8, PD9, PD22): the scene
+// controls build on the screen page and ask the server over the screen socket only.
+describe("scene controls (B-07 AC6, AC19-AC22)", () => {
+  const flush = async () => {
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+  };
+  const reply = (over: Partial<SceneResult> = {}): SceneResult => ({
+    type: "scenes.result",
+    requestId: 1,
+    ok: true,
+    ...over,
+  });
+  const saved = {
+    id: "s7",
+    name: "Booth",
+    definition: buildScene(STAGED_DEF),
+    createdAt: "x",
+    updatedAt: "x",
+  };
+
+  it("saveScene sends the built scene under its name, then ties the look to it (AC19, PD8)", async () => {
+    const r = rig(true, true);
+    vi.mocked(r.deps.scenes.ask).mockResolvedValueOnce(reply({ scene: saved, list: [] }));
+    r.applier.receive("d1", { type: "saveScene", seq: 1, name: "Booth" });
+    runFrame(16);
+    expect(r.deps.scenes.ask).toHaveBeenCalledWith({
+      type: "scenes.save",
+      name: "Booth",
+      definition: buildScene(STAGED_DEF),
+    });
+    expect(r.acks).toEqual([]); // at its settle
+    await flush();
+    const s = stagedOf(r.deps);
+    expect(s.tie).toHaveBeenCalledWith({ id: "s7", name: "Booth" });
+    runFrame(32);
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 1 }]]);
+  });
+
+  it("an update names the scene the look came from, and only that one (AC21)", async () => {
+    const r = rig(true, true);
+    vi.mocked(r.deps.scenes.ask).mockResolvedValueOnce(reply({ scene: { ...saved, id: "s1" } }));
+    r.applier.receive("d1", { type: "saveScene", seq: 2, name: "Warm crowd", updateId: "s1" });
+    runFrame(16);
+    expect(r.deps.scenes.ask).toHaveBeenCalledWith(expect.objectContaining({ updateId: "s1" }));
+    r.applier.receive("d1", { type: "saveScene", seq: 3, name: "X", updateId: "s2" });
+    runFrame(32);
+    expect(r.deps.scenes.ask).toHaveBeenCalledTimes(1);
+    expect(stagedOf(r.deps).setReason).toHaveBeenCalledWith(expect.stringMatching(/came from/));
+  });
+
+  it("is refused while the look loads, sending nothing (spec, Edge cases)", () => {
+    const r = rig(true, true);
+    stagedOf(r.deps).look.settled = false;
+    r.applier.receive("d1", { type: "saveScene", seq: 4, name: "Booth" });
+    runFrame(16);
+    expect(r.deps.scenes.ask).not.toHaveBeenCalled();
+    expect(stagedOf(r.deps).setReason).toHaveBeenCalledWith("Wait for the look to load");
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 4 }]]);
+  });
+
+  it.each([
+    ["name_taken", "That name is taken"],
+    ["invalid", "A name is 1 to 60 characters"],
+    ["full", "Too many scenes"],
+    ["too_large", "The scene is too large"],
+  ] as const)(
+    "a %s refusal reaches the staged look's reason (AC20, AC24)",
+    async (reason, words) => {
+      const r = rig(true, true);
+      vi.mocked(r.deps.scenes.ask).mockResolvedValueOnce(reply({ ok: false, error: { reason } }));
+      r.applier.receive("d1", { type: "saveScene", seq: 5, name: "Booth" });
+      runFrame(16);
+      await flush();
+      expect(stagedOf(r.deps).setReason).toHaveBeenLastCalledWith(words);
+      expect(stagedOf(r.deps).tie).not.toHaveBeenCalled();
+    },
+  );
+
+  it("no screen socket is 'Scenes unavailable'", async () => {
+    const r = rig(true, true);
+    r.applier.receive("d1", { type: "saveScene", seq: 6, name: "Booth" });
+    runFrame(16);
+    await flush();
+    expect(stagedOf(r.deps).setReason).toHaveBeenLastCalledWith("Scenes unavailable");
+  });
+
+  it("with no staged look Save does nothing and is acknowledged", () => {
+    const r = rig(true, false);
+    r.applier.receive("d1", { type: "saveScene", seq: 7, name: "Booth" });
+    runFrame(16);
+    expect(r.deps.scenes.ask).not.toHaveBeenCalled();
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 7 }]]);
+  });
+
+  it("renameScene asks the server; renaming the tied scene renames the tie; a taken name is refused (AC22)", async () => {
+    const r = rig(true, true);
+    vi.mocked(r.deps.scenes.ask).mockResolvedValueOnce(
+      reply({ scene: { ...saved, id: "s1", name: "Hot crowd" } }),
+    );
+    r.applier.receive("d1", { type: "renameScene", seq: 8, id: "s1", name: "Hot crowd" });
+    runFrame(16);
+    await flush();
+    expect(r.deps.scenes.ask).toHaveBeenCalledWith({
+      type: "scenes.rename",
+      id: "s1",
+      name: "Hot crowd",
+    });
+    expect(stagedOf(r.deps).tie).toHaveBeenCalledWith({ id: "s1", name: "Hot crowd" });
+    vi.mocked(r.deps.scenes.ask).mockResolvedValueOnce(
+      reply({ ok: false, error: { reason: "name_taken" } }),
+    );
+    r.applier.receive("d1", { type: "renameScene", seq: 9, id: "s2", name: "Hot crowd" });
+    runFrame(32);
+    await flush();
+    expect(stagedOf(r.deps).setReason).toHaveBeenLastCalledWith("That name is taken");
+  });
+
+  it("deleteScene asks the server and leaves the tie named (AC21, AC22)", async () => {
+    const r = rig(true, true);
+    vi.mocked(r.deps.scenes.ask).mockResolvedValueOnce(reply({ list: [] }));
+    r.applier.receive("d1", { type: "deleteScene", seq: 10, id: "s1" });
+    runFrame(16);
+    await flush();
+    expect(r.deps.scenes.ask).toHaveBeenCalledWith({ type: "scenes.delete", id: "s1" });
+    expect(stagedOf(r.deps).tie).not.toHaveBeenCalled();
+    runFrame(32);
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 10 }]]);
+  });
+
+  it("stage a scene fetches it over the screen socket and stages its copy (AC6)", async () => {
+    const r = rig(true, false);
+    vi.mocked(r.deps.scenes.ask).mockResolvedValueOnce(reply({ scene: saved }));
+    r.applier.receive("d1", { type: "stage", seq: 11, from: { scene: "s7" } });
+    runFrame(16);
+    expect(r.deps.scenes.ask).toHaveBeenCalledWith({ type: "scenes.get", id: "s7" });
+    await flush();
+    expect(stagedOf(r.deps).fromScene).toHaveBeenCalledWith(saved.definition, "s7", "Booth");
+    expect(liveCalls(r.deps)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    runFrame(32);
+    expect(r.acks).toEqual([[{ deviceId: "d1", seq: 11 }]]);
+  });
+
+  it("stage from live while the live look came from a listed scene keeps its tie (PD22)", () => {
+    const r = rig();
+    r.deps.snapshot = () => ({ ...STAGED_DEF, id: "scene:s1" });
+    r.applier.receive("d1", { type: "stage", seq: 12, from: "live" });
+    runFrame(16);
+    expect(stagedOf(r.deps).fromLive).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "scene:s1" }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      { id: "s1", name: "Warm crowd" },
+    );
+  });
+
+  it("no scene control asks anything but scenes.* (AC8)", async () => {
+    const r = rig(true, true);
+    for (const control of [
+      { type: "saveScene", seq: 1, name: "A" },
+      { type: "renameScene", seq: 2, id: "s1", name: "B" },
+      { type: "deleteScene", seq: 3, id: "s1" },
+      { type: "stage", seq: 4, from: { scene: "s1" } },
+    ] as Control[])
+      r.applier.receive("d1", control);
+    runFrame(16);
+    await flush();
+    for (const [request] of vi.mocked(r.deps.scenes.ask).mock.calls) {
+      expect(request.type).toMatch(/^scenes\./);
+    }
+    expect(r.deps.refresh).not.toHaveBeenCalled();
+    expect(r.deps.pick).not.toHaveBeenCalled();
   });
 });
 
