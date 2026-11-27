@@ -103,9 +103,11 @@ test("dragging the wheel recolours the screen without a new program; Reset and a
   await vj.locator('[data-testid=swatch][data-slot="0"]').click();
   await expect(vj.getByTestId("wheel")).toHaveAttribute("data-slot", "0");
   await dragToRed(vj);
-  // The edge of the disc at the drag's last point: dark red, give or take a pixel of hue.
+  // The edge of the disc at the drag's last point: dark red, give or take a pixel of hue. Waited
+  // for: a read straight after `mouse.up` raced the render of the last move and saw the move
+  // before, #801212 (CI run 45858823060).
+  await expect(vj.getByTestId("wheel-value")).toHaveText(/^#800[0-9a-f]0[0-9a-f]$/);
   const red = (await vj.getByTestId("wheel-value").textContent())!;
-  expect(red).toMatch(/^#800[0-9a-f]0[0-9a-f]$/);
   const swatch = vj.locator('[data-testid=swatch][data-slot="0"]');
   await expect(swatch).toHaveAttribute("data-colour", red);
   await expect(vj.getByTestId("wheel-current")).toHaveAttribute("data-colour", red);

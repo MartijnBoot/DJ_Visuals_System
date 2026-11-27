@@ -8,6 +8,7 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { openDatabase } from "../src/db.ts";
 import { startFakeIssuer, type FakeIssuer } from "./fake-issuer.ts";
 import { baseEnv, freePort, spawnServer, type SpawnedServer } from "./spawn-server.ts";
 
@@ -259,6 +260,15 @@ describe("nothing of External control (AC4, PD10)", () => {
       expect(status).toBe(404);
     },
   );
+
+  it("holds an empty scenes table that nothing writes (B-07 AC27, PD10)", () => {
+    const db = openDatabase(join(tmp, "data", "djvisuals.sqlite"));
+    try {
+      expect(db.all("SELECT COUNT(*) AS n FROM scenes")).toEqual([{ n: 0 }]);
+    } finally {
+      db.close();
+    }
+  });
 
   it("never creates DATA_DIR/tls", () => {
     expect(existsSync(join(tmp, "data"))).toBe(true);

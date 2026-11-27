@@ -231,3 +231,30 @@ describe("time above budget at 50% (B-03 SD8)", () => {
     expect(controller.starvedFor(now())).toBe(0);
   });
 });
+
+describe("overBudget (B-07 PD11, SD14)", () => {
+  it("is false before the refresh estimate and at or under 1.1 × budget", () => {
+    const { controller, run, settle } = rig();
+    expect(controller.overBudget()).toBe(false);
+    settle(60);
+    expect(controller.overBudget()).toBe(false);
+    run(1000 / 60, 1500);
+    expect(controller.overBudget()).toBe(false);
+    // 18 ms against a 16.67 ms budget: over the period, at or under 1.1 × budget (18.33 ms).
+    run(18, 1500);
+    expect(controller.overBudget()).toBe(false);
+  });
+
+  it("is true above 1.1 × budget and false again once the mean is back under", () => {
+    const { controller, run, settle } = rig();
+    settle(60);
+    run(25, 1500);
+    expect(controller.overBudget()).toBe(true);
+    // It stays true through a step down: the reading is the frame time, not the step.
+    run(25, 3000);
+    expect(controller.scale()).toBeLessThan(1);
+    expect(controller.overBudget()).toBe(true);
+    run(1000 / 60, 1500);
+    expect(controller.overBudget()).toBe(false);
+  });
+});

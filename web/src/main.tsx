@@ -5,6 +5,7 @@ import { createSession, setHostedSession } from "./auth/session.ts";
 import { Builder } from "./builder/Builder.tsx";
 import { Controller } from "./control/Controller.tsx";
 import { readHealth, type PageMode } from "./health.ts";
+import { warmUpPeers } from "./peer-warm-up.ts";
 import { Screen } from "./Screen.tsx";
 import { Send } from "./send/Send.tsx";
 
@@ -47,4 +48,9 @@ const root = createRoot(document.getElementById("root")!);
 const render = (page: ReactNode) => root.render(<StrictMode>{page}</StrictMode>);
 if (path === "/control") render(<Controller />);
 else if (path === "/send") render(<Send />);
-else void readHealth().then((mode) => render(pageFor(mode)));
+else {
+  void readHealth().then((mode) => {
+    warmUpPeers(path, mode); // D-22: before the first frame, never inside one
+    render(pageFor(mode));
+  });
+}

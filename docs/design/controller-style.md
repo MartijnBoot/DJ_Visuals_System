@@ -16,6 +16,12 @@ Amended by B-18 (SD9), approval at `/review` · Spec:
 fader in the bank for the DJ-ticked effect, the Effects section in VJ mode, the stored-value tick,
 the three-fader Budget rows; no new token.
 
+Amended by B-07 (SD21), approval at `/review` · Spec:
+[phase-b-07-scenes](../specs/phase-b-07-scenes.md) · Plan:
+[phase-b-07-scenes](../plans/phase-b-07-scenes.md) (T8, the owner's answer to PD18, (a) to (g),
+2026-11-26): the SCENES section in VJ mode, the Editing switch, the staged scene tile, the name
+field, Delete's confirm, the preview frame and its lines, the Scenes Budget rows; no new token.
+
 The look of `/control`, and only `/control` (SD8). Every later B-19 task builds against this
 file: the tokens below become custom properties on `.djv-control` in
 `web/src/control/controller.css` under the same names, and `tests/meta/control-look.test.ts`
@@ -111,7 +117,8 @@ One dark theme; `prefers-color-scheme` is ignored (SD11).
   frame, `--radius-panel`, 10px padding. A section's heading today becomes its legend, in
   `--fs-legend` `--text-muted`, like a label printed on the panel: PROFILE, CAMERA, MAIN AUDIO,
   PALETTE, WAITING FOR APPROVAL, and TRANSITION in VJ mode (B-09, approved by the owner at its
-  plan's audit, 2026-11-23), and EFFECTS in VJ mode under it (B-18, below). No other heading is
+  plan's audit, 2026-11-23), EFFECTS in VJ mode under it (B-18, below), and SCENES in VJ mode as
+  the first section, above PROFILE (B-07, below). No other heading is
   added or removed. The mode toggle (DJ, VJ) is a row
   of two keys above the sections; VJ's status strip sits in a section without a legend, as today.
   The colour block is not in the scrolling area: it is pinned (below).
@@ -133,8 +140,8 @@ One dark theme; `prefers-color-scheme` is ignored (SD11).
   primary's edge nor the focus ring. Exactly one swatch carries it, the primary by default; the
   primary swatch then shows both marks (B-16 PD2).
 - **VJ status strip.** `--fs-note`, `--text-muted`, tabular figures, items with a 16px gap.
-- **Dialogs** (approvals only). `--panel`, 1px `--line` edge, `--radius-dialog`, 16px
-  padding, the page behind dimmed by a backdrop of black at 72%.
+- **Dialogs** (approvals, and since B-07 Delete's confirm). `--panel`, 1px `--line` edge,
+  `--radius-dialog`, 16px padding, the page behind dimmed by a backdrop of black at 72%.
 - **Focus ring** (every control, `:focus-visible`). A 3px `--focus` outline 2px outside the
   control, the 2px gap filled with `--focus-halo`. White against the dark page and panels, black
   against anything light, so it holds 3:1 wherever it lands.
@@ -180,6 +187,40 @@ shows it (the built-in type, or the custom effect's label), with the stored-valu
   profile's stack order, 8px apart (the section's gap), as B-09's Duration fader sits outside the
   bank. Absent when there is none, and in DJ mode. Height = 2 (frame) + 10 (pad) + 16 (legend) +
   (8 + 56)·n + 10 (pad) = **38 + 64·n** px: 166px with two.
+
+### The Scenes section (B-07 SD4, SD9–SD13; plan PD16, PD18, PD20)
+
+VJ mode only, the first section of the scrolling area, legend SCENES (PD18 a). Top to bottom:
+the preview frame (or its line), the Editing switch with its words, the keys Stage from live,
+Go and Unstage, the scene tiles, the name field with Save (or Update and Save as new), Rename and
+Delete, and the line "Feed: *label* (applies at Go)" when it applies. Every line uses
+`--fs-note` `--text-muted`, as the notes and reason lines do. While locked every key in the
+section takes the disabled look and sends nothing; the Editing switch stays live, like the mode
+toggle (it sends nothing).
+
+- **Editing switch** (PD18 b, PD20). A row of two keys like the mode toggle, labelled by an
+  "Editing" legend-style word before them (`--fs-legend` `--text-muted`): "Staged" and "Live",
+  the lit key on the choice. Hidden while no staged look exists; never in DJ mode. Beside it, in
+  `--fs-note` `--text-muted`, the words "The controls below edit the staged look" or "… the live
+  look", so the switch is said in words as well as by the lit key.
+- **Scene tiles** (PD18 c). The profile tiles' grid and keys; the staged scene's tile is a lit key,
+  marked the three ways of the active mark (surface, 3px `--text` edge, weight 800). "No scenes
+  yet" (`--fs-note`) for an empty list, "Scenes unavailable" when the list could not load.
+- **Name field** (PD18 d). The code field's frame — `--bg`, 1px `--line` edge, `--radius-key`, at
+  least `--target` tall, `--fs-body` — without upper case or letter spacing, filling the row's
+  width beside its keys; Save is a key beside it. When the staged look came from a listed scene the
+  key reads "Update *name*" and a second key "Save as new" sits beside it. A refusal shows in the
+  section's reason line under the field.
+- **Delete's confirm** (PD18 e). The dialog frame above, with "Delete *name*?" and two keys,
+  Delete and Cancel. Cancel sends nothing.
+- **Preview frame** (PD18 f, SD12–SD15). The `<video>` at the section's content width, 16:9, with
+  a 1px `--line` edge and no radius, on `--bg` until the first picture. On a viewport under 600px
+  tall or wide its height is capped at 112px (about 199×112), centred in the row. It is
+  decorative: never a target, never a focus stop, labelled "Preview of the staged look". In its
+  place, in `--fs-note` `--text-muted`: "Preview paused — busy" (under the last picture), "Preview
+  is on another controller" with a "Show preview here" key, "Preview unavailable". The page
+  scrolls to the section; at 320×568 the whole preview and Go are not in view together, accepted
+  by the owner (PD18 f).
 
 ### The fader
 
@@ -278,6 +319,7 @@ Text pairs need at least 4.5:1, non-text pairs at least 3:1 (SD11). The table is
 | N23 | `--cap-locked` | `--track` | 3 | 4.58 | The tick while locked, against the track (B-18) |
 | N24 | `--cap-locked` | `--hatch` | 3 | 3.82 | The tick while locked, against the hatching (B-18) |
 | N25 | `--cap-locked` | `--panel` | 3 | 4.77 | The locked tick's notch on the bank or a section (B-18) |
+| N26 | `--line` | `--panel` | 3 | 3.65 | The name field's and the preview frame's edge against the Scenes section (B-07) |
 
 The waiting badge is never disabled: the lock disables only Accept and Reject, and the pending list
 lasts until pairing ends (`web/src/control/device-link.ts:122`), so the badge stays focusable
@@ -376,6 +418,21 @@ measures them on the built page, the same to the pixel). B-18 shows at most thre
 four-fader rows are B-19's capacity, not a shipped layout; a fourth fader (B-23) comes back to
 this budget. In VJ mode the Effects section (38 + 64·n px tall) scrolls with the rest.
 
+**The Scenes section (B-07 PD18 g).** The section's content width = the scrolling area's width
+− 16 (its padding) − 2 (frame) − 20 (pad). The preview is 16:9 at that width, its height capped
+at 112px on a viewport under 600px tall or wide. With two faders in the bank (VJ, no DJ tick):
+
+| Viewport | Scrolling area wide | Content width | Preview | Section (staged look, three scenes; T9, before the preview frame) |
+|---|---|---|---|---|
+| 320×568 | 320 | 282 | 199×112 (capped) | 304×520 |
+| 320×640 | 320 | 282 | 199×112 (capped) | 304×520 |
+| 568×320 | 202 | 164 | 164×92 | 186×762 |
+| 768×1024 | 312 | 274 | 274×154 | 296×530 |
+| 1024×768 | 568 | 530 | 530×298 | 552×362 |
+
+The section scrolls with the rest; what it must keep is the brief's: no sideways scroll, every
+key at least 48×48, the colour block and the bank still pinned (AC35).
+
 Every number above is a CSS pixel in the mockups, which use these tokens.
 
 ## Mockups
@@ -389,6 +446,8 @@ Since B-16 every frame with a bank shows the pinned colour block — aimed at th
 DJ mode, at swatch 3 with the target mark in VJ mode, locked in the locked frames — and the colour
 wheel's dialog frame is gone. Since B-18 three more frames show the effect faders with their
 stored-value ticks: DJ mode with three faders in the bank at 320×568 and at 568×320, and VJ mode
-at 768×1024 with the effect fader in the bank and the Effects section under Transition. Open it on
+at 768×1024 with the effect fader in the bank and the Effects section under Transition. Since
+B-07 two more show the Scenes section in VJ mode with a staged look, the Editing switch and the
+preview frame: phone portrait (320×568, the capped preview) and tablet (768×1024). Open it on
 a phone and a tablet from the file; turn the phone to landscape to see the 568×320 frames at full
 size. Each frame scrolls inside itself like the page.

@@ -414,6 +414,46 @@
         border: 1px solid var(--line);
         border-radius: var(--radius-dialog);
       }
+      /* ---- The Scenes section (B-07 PD18): the preview frame, the name field. ---- */
+      .djv-control .djv-preview {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: var(--bg);
+        border: 1px solid var(--line);
+      }
+      .mock-320x568 .djv-preview,
+      .mock-568x320 .djv-preview {
+        max-height: 112px;
+        width: auto;
+        margin: 0 auto;
+      }
+      .djv-control .mock-picture {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: radial-gradient(circle at 35% 40%, #ff3fa4 0 18%, transparent 40%),
+          radial-gradient(circle at 70% 60%, #19d3c5 0 14%, transparent 36%), #1d1030;
+      }
+      .djv-control .djv-name {
+        -webkit-appearance: none;
+        appearance: none;
+        box-sizing: border-box;
+        flex: 1 1 8em;
+        min-width: 0;
+        min-height: var(--target);
+        padding: 8px 12px;
+        font: 600 var(--fs-body) / 20px var(--font);
+        color: var(--text);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-key);
+      }
+      .djv-control .djv-editing .djv-legend {
+        margin-right: var(--space-1);
+      }
+
       /* ---- The colour block (B-16 SD1, SD2, SD5, PD8, PD13): pinned between the scrolling
          middle and the bank, as in controller.css. ---- */
       .djv-control .djv-colour {
@@ -1818,6 +1858,196 @@
                     <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-mark"></span><span class="djv-fader-cap"></span></div>
                     <span class="djv-fader-label">smear</span>
                     <span class="djv-fader-readout">40</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ================================================================ Scenes (B-07) -->
+    <section class="mock-group" id="scenes">
+      <h2>Scenes (B-07) — VJ mode with a staged look</h2>
+      <div class="mock-row">
+        <figure class="mock-frame" id="frame-portrait-scenes">
+          <figcaption>Phone portrait, 320×568 · the staged look came from "Warm crowd" (its tile lit); the preview capped at 112 px tall; the staged feed differs from the live camera</figcaption>
+          <div class="mock-screen mock-320x568">
+            <main class="djv-control" data-arrangement="horizontal">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">VJ</button>
+                </div>
+                <section class="djv-section" aria-label="Scenes">
+                  <h2 class="djv-legend">Scenes</h2>
+                  <div class="djv-preview" role="img" aria-label="Preview of the staged look"><span class="mock-picture"></span></div>
+                  <div class="djv-row djv-editing">
+                    <span class="djv-legend">Editing</span>
+                    <button type="button" class="djv-key djv-mode" aria-pressed="true">Staged</button>
+                    <button type="button" class="djv-key djv-mode" aria-pressed="false">Live</button>
+                  </div>
+                  <div class="djv-note">The controls below edit the staged look</div>
+                  <div class="djv-row">
+                    <button type="button" class="djv-key">Stage from live</button>
+                    <button type="button" class="djv-key">Go</button>
+                    <button type="button" class="djv-key">Unstage</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Booth abstract</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Dock</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Warm crowd</button>
+                  </div>
+                  <div class="djv-row">
+                    <input class="djv-name" aria-label="Scene name" value="Warm crowd" />
+                  </div>
+                  <div class="djv-row">
+                    <button type="button" class="djv-key">Update Warm crowd</button>
+                    <button type="button" class="djv-key">Save as new</button>
+                    <button type="button" class="djv-key">Rename</button>
+                    <button type="button" class="djv-key">Delete</button>
+                  </div>
+                  <div class="djv-note">Feed: Phone (applies at Go)</div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                  </div>
+                </section>
+              </div>
+              <section class="djv-colour">
+                <div class="djv-colour-label"><h2 class="djv-legend">Colour 1 · primary</h2></div>
+                <div class="djv-disc"><span class="mock-disc"></span><span class="djv-marker" style="left: 30%; top: 40%"></span></div>
+                <div class="djv-colour-fader">
+                  <div class="djv-fader is-vertical" style="--level: 0.88">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Brightness</span>
+                    <span class="djv-fader-readout">88</span>
+                  </div>
+                </div>
+                <div class="djv-colour-info">
+                  <span class="djv-pair djv-pair-current"><span class="djv-pair-swatch" style="background: #ff3fa4"></span>#ff3fa4</span>
+                  <span class="djv-pair djv-pair-stored"><span class="djv-pair-swatch" style="background: #ff3fa4"></span>stored</span>
+                  <button type="button" class="djv-key djv-colour-reset">Reset</button>
+                </div>
+              </section>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
+                  </div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </figure>
+
+        <figure class="mock-frame" id="frame-tablet-scenes">
+          <figcaption>Tablet, 768×1024 · a look staged from live (no scene: Save only); another controller holds the preview; Delete's confirm in the dialog frame</figcaption>
+          <div class="mock-screen mock-768x1024">
+            <main class="djv-control" data-arrangement="vertical">
+              <div class="djv-status" data-link-group="ok">
+                <span class="djv-status-text">Connected</span>
+              </div>
+              <div class="djv-scroll">
+                <div class="djv-row">
+                  <button type="button" class="djv-key djv-mode" aria-pressed="false">DJ</button>
+                  <button type="button" class="djv-key djv-mode" aria-pressed="true">VJ</button>
+                </div>
+                <section class="djv-section" aria-label="Scenes">
+                  <h2 class="djv-legend">Scenes</h2>
+                  <div class="djv-note">Preview is on another controller</div>
+                  <div class="djv-row">
+                    <button type="button" class="djv-key">Show preview here</button>
+                  </div>
+                  <div class="djv-row djv-editing">
+                    <span class="djv-legend">Editing</span>
+                    <button type="button" class="djv-key djv-mode" aria-pressed="false">Staged</button>
+                    <button type="button" class="djv-key djv-mode" aria-pressed="true">Live</button>
+                  </div>
+                  <div class="djv-note">The controls below edit the live look</div>
+                  <div class="djv-row">
+                    <button type="button" class="djv-key">Stage from live</button>
+                    <button type="button" class="djv-key">Go</button>
+                    <button type="button" class="djv-key">Unstage</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Booth abstract</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Dock</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Warm crowd</button>
+                  </div>
+                  <div class="djv-row">
+                    <input class="djv-name" aria-label="Scene name" placeholder="Name" />
+                    <button type="button" class="djv-key">Save</button>
+                  </div>
+                  <div class="djv-row">
+                    <button type="button" class="djv-key">Rename</button>
+                    <button type="button" class="djv-key">Delete</button>
+                  </div>
+                  <div class="djv-dialog" role="dialog" aria-label="Delete scene">
+                    <span>Delete Dock?</span>
+                    <div class="djv-row">
+                      <button type="button" class="djv-key">Delete</button>
+                      <button type="button" class="djv-key">Cancel</button>
+                    </div>
+                  </div>
+                </section>
+                <section class="djv-section">
+                  <div class="djv-row">
+                    <h2 class="djv-legend">Profile</h2>
+                    <button type="button" class="djv-key">Refresh</button>
+                  </div>
+                  <div class="djv-grid">
+                    <button type="button" class="djv-key djv-tile" aria-pressed="true">Starry Night</button>
+                    <button type="button" class="djv-key djv-tile" aria-pressed="false">Built-in</button>
+                  </div>
+                </section>
+              </div>
+              <section class="djv-colour">
+                <div class="djv-colour-label"><h2 class="djv-legend">Colour 1 · primary</h2></div>
+                <div class="djv-disc"><span class="mock-disc"></span><span class="djv-marker" style="left: 30%; top: 40%"></span></div>
+                <div class="djv-colour-fader">
+                  <div class="djv-fader is-vertical" style="--level: 0.88">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Brightness</span>
+                    <span class="djv-fader-readout">88</span>
+                  </div>
+                </div>
+                <div class="djv-colour-info">
+                  <span class="djv-pair djv-pair-current"><span class="djv-pair-swatch" style="background: #ff3fa4"></span>#ff3fa4</span>
+                  <span class="djv-pair djv-pair-stored"><span class="djv-pair-swatch" style="background: #ff3fa4"></span>stored</span>
+                  <button type="button" class="djv-key djv-colour-reset">Reset</button>
+                </div>
+              </section>
+              <div class="djv-bank">
+                <div class="djv-bank-legend"><span class="djv-legend">Faders</span></div>
+                <div class="djv-bank-faders">
+                  <div class="djv-fader is-vertical" style="--level: 0.42">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Recognisability</span>
+                    <span class="djv-fader-readout">42</span>
+                  </div>
+                  <div class="djv-fader is-vertical" style="--level: 0.77">
+                    <div class="djv-fader-slider"><span class="djv-fader-fill"></span><span class="djv-fader-cap"></span></div>
+                    <span class="djv-fader-label">Audio reactivity</span>
+                    <span class="djv-fader-readout">77</span>
                   </div>
                 </div>
               </div>

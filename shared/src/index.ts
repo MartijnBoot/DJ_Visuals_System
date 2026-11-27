@@ -4,6 +4,7 @@ export * from "./cloud.ts";
 export * from "./control.ts";
 export * from "./profile.ts";
 export * from "./profile-api.ts";
+export * from "./scenes.ts";
 export * from "./sync.ts";
 export { nextFreeName } from "./names.ts";
 

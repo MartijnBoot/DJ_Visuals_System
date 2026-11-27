@@ -303,7 +303,36 @@ describe("toScreenState (SD5, SD8, AC26)", () => {
       mainAudio: null,
       transition: { kind: "wipe", duration: 4, keepColour: true },
       effects: [],
+      staged: null,
+      scenes: null,
+      preview: "off",
     });
+  });
+
+  // B-07 T12 (PD2): the preview's word.
+  it("carries the preview's state", async () => {
+    const built = toScreenState({ ...(await facts("ok")), preview: "paused" });
+    expect(screenStateSchema.parse(built).preview).toBe("paused");
+  });
+
+  // B-07 PD2, PD3: the staged look as controllers show it.
+  it("carries the staged look", async () => {
+    const staged = {
+      id: "w1",
+      name: "Warm",
+      palette: ["#000000", "#ff0000"],
+      storedPalette: ["#000000", "#ffffff"],
+      primary: 1,
+      dials: { recognisability: 0.1, reactivity: 0.2 },
+      effects: [],
+      feed: { kind: "remote" as const, label: "Chrome on Android" },
+      transition: { kind: "cut" as const, duration: 1 },
+      fromScene: null,
+      settled: false,
+      reason: null,
+    };
+    const built = toScreenState({ ...(await facts("ok")), staged });
+    expect(screenStateSchema.parse(built).staged).toEqual(staged);
   });
 
   // B-18 SD7, PD5: the active profile's flagged effects, live and stored.
@@ -406,5 +435,175 @@ describe("toScreenState with remote facts (B-06 T13, AC14, AC27)", () => {
     expect(built.cameraId).toBe("remote:d2");
     expect(built.mainAudio).toEqual({ choice: "remote", playing: "local", label: "Device 3" });
     expect(screenStateSchema.parse(built)).toEqual(built);
+  });
+});
+
+// B-07 T7 (SD7, SD18; plan PD9): scene requests over the screen socket, each with its own
+// requestId and promise; the list on every open, replaced by every reply that carries one.
+describe("scene requests (B-07 PD9)", () => {
+  let scenesLink: ScreenLink;
+  let onScenes: Mock<(list: unknown) => void>;
+  const scenesSocket = () => FakeSocket.all.at(-1)!;
+  const lastRequest = () => scenesSocket().sent.at(-1) as { type: string; requestId: number };
+
+  beforeEach(() => {
+    link.stop();
+    FakeSocket.all = [];
+    onScenes = vi.fn<(list: unknown) => void>();
+    scenesLink = createScreenLink({
+      url: "ws://127.0.0.1:8000/api/control/screen",
+      connect: () => new FakeSocket(),
+      buildState: () => state,
+      onControl: vi.fn(),
+      onNewDevice: vi.fn(),
+      onScenes,
+    });
+    scenesLink.start();
+  });
+  afterEach(() => scenesLink.stop());
+
+  it("asks for the list on every open and hands it on; a failed list is null", async () => {
+    scenesSocket().open();
+    expect(lastRequest()).toMatchObject({ type: "scenes.list" });
+    scenesSocket().deliver({
+      type: "scenes.result",
+      requestId: lastRequest().requestId,
+      ok: true,
+      list: [{ id: "s1", name: "Warm crowd" }],
+    });
+    expect(onScenes).toHaveBeenLastCalledWith([{ id: "s1", name: "Warm crowd" }]);
+    scenesSocket().drop();
+    vi.advanceTimersByTime(60_000);
+    scenesSocket().open();
+    scenesSocket().deliver({
+      type: "scenes.result",
+      requestId: lastRequest().requestId,
+      ok: false,
+      error: { reason: "invalid" },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onScenes).toHaveBeenLastCalledWith(null);
+  });
+
+  it("resolves a request's promise with its reply; a reply for an unknown id is ignored", async () => {
+    scenesSocket().open();
+    const asked = scenesLink.scenes({ type: "scenes.rename", id: "s1", name: "Booth" });
+    const sent = lastRequest();
+    expect(sent).toMatchObject({ type: "scenes.rename", id: "s1", name: "Booth" });
+    onScenes.mockClear();
+    scenesSocket().deliver({ type: "scenes.result", requestId: 9999, ok: true, list: [] });
+    expect(onScenes).not.toHaveBeenCalled();
+    const reply = {
+      type: "scenes.result" as const,
+      requestId: sent.requestId,
+      ok: true,
+      list: [{ id: "s1", name: "Booth" }],
+    };
+    scenesSocket().deliver(reply);
+    await expect(asked).resolves.toEqual(reply);
+    expect(onScenes).toHaveBeenLastCalledWith([{ id: "s1", name: "Booth" }]); // the list replaced
+  });
+
+  it("a request while closed, or one in flight when the socket closes, resolves null", async () => {
+    await expect(scenesLink.scenes({ type: "scenes.list" })).resolves.toBeNull();
+    scenesSocket().open();
+    const asked = scenesLink.scenes({ type: "scenes.get", id: "s1" });
+    scenesSocket().drop();
+    await expect(asked).resolves.toBeNull();
+  });
+
+  it("a reply without a list leaves the list alone", async () => {
+    scenesSocket().open();
+    onScenes.mockClear();
+    const asked = scenesLink.scenes({ type: "scenes.get", id: "s1" });
+    scenesSocket().deliver({
+      type: "scenes.result",
+      requestId: lastRequest().requestId,
+      ok: false,
+      error: { reason: "missing" },
+    });
+    await asked;
+    expect(onScenes).not.toHaveBeenCalled();
+  });
+});
+
+describe("toScreenState's scenes (B-07 PD2)", () => {
+  it("carries the list, and null when it could not load", () => {
+    const facts = {
+      profiles: createActiveProfile({
+        api: {
+          list: async () => ({ kind: "ok" as const, profiles: [] }),
+          get: async () => ({ kind: "missing" as const }),
+        },
+        storage: { load: () => null, save: () => {} },
+        setProfile: async () => {},
+        setDials: () => {},
+        log: () => {},
+      }).state(),
+      dials: { recognisability: 0.4, reactivity: 0.6 },
+      capture: { camera: "ok" as const, audio: "ok" as const, cameraId: "cam-1" },
+      cameras: [],
+      started: true,
+      transition: { kind: "cut" as const, duration: 2, keepColour: false },
+    };
+    expect(toScreenState({ ...facts, scenes: [{ id: "s1", name: "A" }] }).scenes).toEqual([
+      { id: "s1", name: "A" },
+    ]);
+    expect(toScreenState({ ...facts, scenes: null }).scenes).toBeNull();
+    expect(screenStateSchema.safeParse(toScreenState({ ...facts, scenes: null })).success).toBe(
+      true,
+    );
+  });
+});
+
+describe("the preview (B-07 T12, PD14, PD15)", () => {
+  let onPreview: Mock<(message: unknown) => void>;
+  beforeEach(() => {
+    link.stop();
+    onPreview = vi.fn<(message: unknown) => void>();
+    link = createScreenLink({
+      url: "ws://127.0.0.1:8000/api/control/screen",
+      connect: () => new FakeSocket(),
+      buildState: () => state,
+      onControl,
+      onNewDevice,
+      onSetup,
+      onSenders,
+      onPreview,
+    });
+    link.start();
+    latest().open();
+  });
+
+  const candidate = { candidate: "candidate:1", sdpMid: "0", sdpMLineIndex: 0 };
+
+  it("hands the holder and the holder's setup to the preview, never to the remote sources", () => {
+    latest().deliver({ type: "preview", deviceId: "d1" });
+    latest().deliver({ type: "previewAnswer", deviceId: "d1", sdp: "v=0" });
+    latest().deliver({ type: "previewCandidate", deviceId: "d1", ...candidate });
+    expect(onPreview.mock.calls).toEqual([
+      [{ type: "preview", deviceId: "d1" }],
+      [{ type: "previewAnswer", deviceId: "d1", sdp: "v=0" }],
+      [{ type: "previewCandidate", deviceId: "d1", ...candidate }],
+    ]);
+    expect(onSetup).not.toHaveBeenCalled();
+  });
+
+  it("forgets the holder when the socket closes and when the page is superseded", () => {
+    latest().deliver({ type: "preview", deviceId: "d1" });
+    latest().drop();
+    expect(onPreview).toHaveBeenLastCalledWith({ type: "preview", deviceId: null });
+    vi.advanceTimersByTime(60_000);
+    latest().open();
+    latest().deliver({ type: "preview", deviceId: "d1" });
+    latest().deliver({ type: "superseded" });
+    expect(onPreview).toHaveBeenLastCalledWith({ type: "preview", deviceId: null });
+  });
+
+  it("relays the preview's offer and candidates to the server", () => {
+    expect(link.relay({ type: "previewOffer", deviceId: "d1", sdp: "v=0" })).toBe(true);
+    expect(link.relay({ type: "previewCandidate", deviceId: "d1", ...candidate })).toBe(true);
+    expect(types(latest()).slice(-2)).toEqual(["previewOffer", "previewCandidate"]);
   });
 });

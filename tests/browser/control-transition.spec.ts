@@ -85,7 +85,8 @@ test("VJ mode shows the Transition section under Profiles: Cut pressed, 2.0 s, t
   const sections = await phone
     .locator("section[aria-label]")
     .evaluateAll((all) => all.map((s) => s.getAttribute("aria-label")));
-  expect(sections.slice(0, 2)).toEqual(["Profiles", "Transition"]);
+  // B-07 PD17: the Scenes section comes first in VJ mode; Transition still sits under Profiles.
+  expect(sections.slice(0, 3)).toEqual(["Scenes", "Profiles", "Transition"]);
   const section = phone.getByRole("region", { name: "Transition" });
   await expect(section.getByRole("heading", { name: "Transition" })).toBeVisible();
   for (const kind of KINDS) {

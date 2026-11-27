@@ -4,6 +4,7 @@
 // offer's Opus line asks for stereo music. A new connection starts paused; the screen's `stream`
 // sets `active` on the encodings of its kind (SD12), so a sender of both pauses its video apart. No `connected` within 10 s of the offer is the AC13
 // state. `close` keeps the tracks (a screen reload, SD18); `end` stops them (the pairing ended).
+// B-07 (T12, PD13, PD14): the screen's preview reuses it with one video track held to 10 fps.
 import type { DeviceMessage, SendKind } from "@djv/shared";
 import { opusMusic } from "../remote/sdp.ts";
 
@@ -21,6 +22,8 @@ export interface SenderPeerDeps {
   stream: MediaStream;
   createPeer?: (config: RTCConfiguration) => RTCPeerConnection;
   send(message: Setup): void;
+  /** B-07 PD13: caps the video encoding's frame rate; absent for `/send`, which sets none. */
+  maxFramerate?: number;
   /** The state or `active` changed. */
   onChange?(): void;
 }
@@ -103,7 +106,14 @@ export function createSenderPeer(deps: SenderPeerDeps): SenderPeer {
         connection.addTransceiver(track, {
           direction: "sendonly",
           streams: [deps.stream],
-          sendEncodings: [audio ? { active: false, maxBitrate: AUDIO_BITRATE } : { active: false }],
+          sendEncodings: [
+            audio
+              ? { active: false, maxBitrate: AUDIO_BITRATE }
+              : {
+                  active: false,
+                  ...(deps.maxFramerate ? { maxFramerate: deps.maxFramerate } : {}),
+                },
+          ],
         });
       }
       connection.addEventListener("icecandidate", (event) => {

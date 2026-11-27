@@ -118,6 +118,28 @@ const tileOf = (phone: Page, stored: Stored) =>
 const value = (phone: Page) => phone.getByTestId("wheel-value");
 const onScreen = (phone: Page) => phone.getByTestId("wheel-current");
 
+/**
+ * The held drag's last move has landed: A's wheel and the screen's colour on B agree, and still
+ * agree one poll later. Reading A's value straight after the last `touchMove` raced the render of
+ * that move and took the move before (CI run 45858823060: `#ff6022`, the screen ended on `#ff4903`).
+ */
+async function settled(a: Page, b: Page): Promise<string> {
+  let last: string | null = null;
+  let held = "";
+  await expect
+    .poll(async () => {
+      const shown = (await value(a).textContent())!;
+      const echo = await onScreen(b).getAttribute("data-colour");
+      const agree = shown === echo ? shown : null;
+      const steady = agree !== null && agree === last;
+      last = agree;
+      if (steady) held = agree;
+      return steady;
+    })
+    .toBe(true);
+  return held;
+}
+
 /** The wheel's hex value equals the screen's colour for its slot. */
 async function expectOnScreenValue(phone: Page) {
   await expect
@@ -300,7 +322,7 @@ test("a pointer cancel mid-drag lets go: nothing after it, the screen's value ba
     await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: at(i / 8) });
   }
   await expect.poll(async () => (await colourSends(a)).all).toBeGreaterThan(0);
-  const held = (await value(a).textContent())!;
+  const held = await settled(a, b);
   await expect(onScreen(b)).toHaveAttribute("data-colour", held);
   // While A's finger still holds the disc, B moves the slot elsewhere.
   const fromB = await discKeys(b, "ArrowLeft", 24);

@@ -16,7 +16,11 @@
 // Transitions (B-09): the current choice is loaded from `djv.transition` at mount and is part of
 // the state every controller mirrors; a `transition` control merges into it and saves it. Each
 // pick reads it then (`profiles/active.ts`), and each frame tells the engine whether the audio
-// that feeds the looks is ok, for Beat cut (`remote/sources.ts`).
+// that feeds the looks is ok, for Beat cut (`remote/sources.ts`). Scenes (B-07): the panel's scene
+// row stages and goes through the applier, as a controller does, and asks the server over the
+// screen socket for the rest (rename, delete, export, import). The staged look's preview
+// (`scenes/preview.ts`) runs while a controller holds the stream and a staged look exists; each
+// frame it gets the output's features, video element and readings, never the output's engine.
 import { createFeatureSource, ZERO_FEATURES } from "@djv/audio";
 import processorUrl from "@djv/audio/processor?worker&url";
 import {
@@ -27,7 +31,7 @@ import {
   type LatencyReading,
   type RenderScale,
 } from "@djv/engine";
-import type { TransitionChoice } from "@djv/shared";
+import type { SceneEntry, Staged, TransitionChoice } from "@djv/shared";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createLatencyWindow } from "../../engine/src/latency.ts";
 import { listDevices, supportsSystemAudio, type DeviceOption } from "./capture/devices.ts";
@@ -38,7 +42,7 @@ import { createVideo, hasFrame, videoReady } from "./capture/video.ts";
 import { createApplier } from "./control/apply.ts";
 import { openSocket } from "./control/device-link.ts";
 import { hostedSession } from "./auth/session.ts";
-import { createScreenLink, toScreenState } from "./control/screen-link.ts";
+import { createScreenLink, toScreenState, type SceneAsk } from "./control/screen-link.ts";
 import type { AudioSource } from "./remote/main-audio.ts";
 import { createPeers } from "./remote/peers.ts";
 import { createSources, type Sources } from "./remote/sources.ts";
@@ -49,12 +53,21 @@ import { Overlay } from "./Overlay.tsx";
 import { Panel } from "./Panel.tsx";
 import { sharedToEngine } from "./profile-compat.ts";
 import { createActiveProfile } from "./profiles/active.ts";
+import { feedOf, matchFeed, type OnScreen, type VideoSender } from "./scenes/feed.ts";
+import { createPreview } from "./scenes/preview.ts";
+import { previewReadings } from "./scenes/readings.ts";
+import { createStagedLook } from "./scenes/staged.ts";
 import { getProfile, listProfiles } from "./profiles/api.ts";
 import { loadProfileId, saveProfileId } from "./profiles/remembered.ts";
 import { loadTransition, saveTransition } from "./profiles/transition.ts";
 import { createWakeLock } from "./wake-lock.ts";
 
 const IDLE: SessionState = { camera: "idle", audio: "idle", video: null, contextState: "none" };
+
+/** B-07 AC16: the note when Go finds no camera for a scene's feed. */
+const FEED_NOTE = "Feed unavailable — kept the current camera";
+/** B-06 SD21: a sender's camera id. */
+const REMOTE_ID = "remote:";
 
 /** What the panel shows of the remote sources (B-06 AC14, SD22). */
 interface PanelRemote {
@@ -165,8 +178,29 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
   );
   const [profiles, setProfiles] = useState(() => active.state());
   useEffect(() => active.subscribe(() => setProfiles(active.state())), [active]);
+  // B-07 AC16, PD6: the feed note, held until the next Go or pick, shown through the profile
+  // reason line when the look has no reason of its own (the panel and every controller).
+  const feedNote = useRef(false);
+  const [noted, setNoted] = useState(false);
+  const reasonOf = (state: ReturnType<typeof active.state>) =>
+    state.reason ?? (feedNote.current ? FEED_NOTE : null);
+
+  // B-07 (SD10): what the panel's scene row shows — the list and the staged look.
+  const [sceneView, setSceneView] = useState<{ list: SceneEntry[] | null; staged: Staged | null }>({
+    list: null,
+    staged: null,
+  });
 
   const [control] = useState(() => {
+    // B-07 (SD2): the staged look, beside the live one; a change marks the next frame's state.
+    const staged = createStagedLook({
+      api: { get: (id) => getProfile(id) },
+      onChange: () => {
+        link.markDirty();
+        preview.changed();
+        setSceneView((view) => ({ ...view, staged: staged.state() }));
+      },
+    });
     const applier = createApplier({
       dials: () => facts.current.dials,
       setDials: (next) => applyDials(next),
@@ -176,13 +210,63 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       setMainAudio: (source) => sourcesRef.current?.setMainAudio(source),
       setTransition: (change) => changeTransition(change),
       setStrength: (profile, index, value) => active.setStrength(profile, index, value),
-      pick: (id) => active.pick(id),
+      pick: (id) => {
+        setFeedNote(false);
+        return active.pick(id);
+      },
       refresh: () => void active.open(),
       started: () => startedRef.current,
+      staged,
+      snapshot: () => active.snapshot(),
+      feedOnScreen: () => feedOf(onScreen(), facts.current.cameras, videoSenders()),
+      feedOf: (id) =>
+        feedOf(
+          id.startsWith(REMOTE_ID)
+            ? { kind: "remote", deviceId: id.slice(REMOTE_ID.length) }
+            : { kind: "local", deviceId: id },
+          facts.current.cameras,
+          videoSenders(),
+        ),
+      transition: () => facts.current.transition,
+      matchFeed: (feed) => matchFeed(feed, facts.current.cameras, videoSenders()),
+      setFeedNote: (on) => setFeedNote(on),
+      adopt: (look, choice) => active.adopt(look, choice),
+      scenes: { ask: (request) => link.scenes(request), list: () => sceneList },
     });
+    /** B-07 PD9: the saved scenes by name; null until listed, or when the list failed. */
+    let sceneList: SceneEntry[] | null = null;
+    /** B-07 PD6: the camera on screen — what the sources draw, else the session's open camera. */
+    const onScreen = (): OnScreen | null => {
+      const drawn = sourcesRef.current?.analysing(performance.now()).video ?? null;
+      if (drawn) return { kind: "remote", deviceId: drawn };
+      const capture = sessionRef.current?.state();
+      return capture?.camera === "ok" && capture.cameraId
+        ? { kind: "local", deviceId: capture.cameraId }
+        : null;
+    };
+    /** The senders whose video is connected now, with their hints (B-04 SD26). */
+    const videoSenders = (): VideoSender[] =>
+      (sourcesRef.current?.facts(performance.now()).cameras ?? []).flatMap(({ deviceId }) => {
+        const sender = senders.find((s) => `${REMOTE_ID}${s.deviceId}` === deviceId);
+        return sender ? [{ deviceId: sender.deviceId, hint: sender.hint }] : [];
+      });
+    const setFeedNote = (on: boolean) => {
+      if (feedNote.current === on) return;
+      feedNote.current = on;
+      setNoted(on);
+      link.markDirty();
+    };
     // B-06: the senders' labels, for log lines (never a device's own label, SD25).
     const labels = new Map<string, string>();
     let senders: Parameters<Sources["setSenders"]>[0] = [];
+    // B-07 (SD12, PD13): a second engine on a canvas never in the page, sent to the holder.
+    const preview = createPreview({
+      createEngine: (canvas, options) => createEngine(canvas, options),
+      createCanvas: () => document.createElement("canvas"),
+      staged: () => staged.definition(),
+      send: (message) => void link.relay(message),
+      onChange: () => link.markDirty(),
+    });
     const peers = createPeers({
       send: (message) => void link.relay(message),
       now: () => Date.now(),
@@ -196,7 +280,10 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       buildState: () =>
         toScreenState({
           ...facts.current,
-          profiles: active.state(),
+          profiles: { ...active.state(), reason: reasonOf(active.state()) },
+          staged: staged.state(),
+          scenes: sceneList,
+          preview: preview.state(),
           started: startedRef.current,
           ...(sourcesRef.current ? { remote: sourcesRef.current.facts(performance.now()) } : {}),
         }),
@@ -215,7 +302,29 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
         senders = list;
         sourcesRef.current?.setSenders(list);
       },
+      onPreview: (message) => {
+        if (message.type === "preview") return preview.holder(message.deviceId);
+        if (message.type === "previewAnswer") {
+          return void preview.answer(message.deviceId, message.sdp);
+        }
+        const { deviceId, candidate, sdpMid, sdpMLineIndex } = message;
+        void preview.candidate(deviceId, { candidate, sdpMid, sdpMLineIndex });
+      },
+      onScenes: (list) => {
+        sceneList = list;
+        link.markDirty();
+        setSceneView((view) => ({ ...view, list }));
+      },
     });
+    /** B-07 (SD10): the panel's scene requests; a rename keeps the staged look tied (as `apply`). */
+    const askScenes = async (request: SceneAsk) => {
+      const result = await link.scenes(request);
+      const scene = request.type === "scenes.rename" && result?.ok ? result.scene : undefined;
+      if (scene && staged.state()?.fromScene?.id === scene.id) {
+        staged.tie({ id: scene.id, name: scene.name });
+      }
+      return result;
+    };
     /** Senders whose peer has been connected since their first offer (PD5). */
     const reached = new Set<string>();
     /**
@@ -244,7 +353,21 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       setTransition(next);
       link.markDirty();
     };
-    return { applier, link, peers, senders: () => senders, senderState, changeTransition };
+    return {
+      applier,
+      link,
+      peers,
+      senders: () => senders,
+      senderState,
+      changeTransition,
+      setFeedNote,
+      preview,
+      scenes: {
+        stage: (id: string) => applier.local({ type: "stage", seq: 0, from: { scene: id } }),
+        go: () => applier.local({ type: "go", seq: 0 }),
+        ask: askScenes,
+      },
+    };
   });
   // B-12 SD1, AC21: hosted use has no External control and no remote input, so the screen link
   // never starts and `/api/control/screen` is never asked for.
@@ -312,18 +435,21 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
     sourcesRef.current = sources;
     const unsubscribe = session.subscribe((state) => setCapture(state));
     let video: HTMLVideoElement | null = null;
+    let features = audioToEngine(ZERO_FEATURES);
     // Each frame reads the features just before the engine draws with them (frame-feed.ts).
     // B-04: received controls first, then this frame's acknowledgements and state. B-06: then the
     // sources decide this frame's video and features, from flags read now.
     const stopFeed = startFrameFeed(
       engine,
-      () => audioToEngine(sources.read(performance.now())),
+      () => (features = audioToEngine(sources.read(performance.now()))),
       () => {
         control.link.flush(control.applier.drain());
         sources.frame(performance.now());
         engine.setAudioOk(sources.audioOk(performance.now())); // Beat cut's rule (B-09 SD10)
         const next = sources.video();
         if (next !== video) engine.setSource((video = next));
+        // B-07 SD14: the preview yields to this engine's own readings (PD12).
+        control.preview.frame(performance.now(), features, video, previewReadings(engine.stats()));
       },
     );
     return () => {
@@ -333,6 +459,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
       sourcesRef.current = null;
       stopGuard();
       session.stop();
+      control.preview.holder(null);
       engine.stop();
       engineRef.current = null;
       sessionRef.current = null;
@@ -472,14 +599,18 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
           cap={cap}
           onCap={setCap}
           read={read}
-          profiles={profiles}
-          onProfile={(id) => void active.pick(id)}
+          profiles={noted ? { ...profiles, reason: reasonOf(profiles) } : profiles}
+          onProfile={(id) => {
+            control.setFeedNote(false);
+            void active.pick(id);
+          }}
           transition={transition}
           onTransition={control.changeTransition}
           control={controlView}
           onControl={(action) => void control.link.send(action)}
           {...(hosted ? { hosted: { signedOut, onSignInAgain: () => void hosted.signIn() } } : {})}
           cloud={cloud}
+          {...(hosted ? {} : { scenes: { ...sceneView, ...control.scenes } })}
         />
       )}
     </>

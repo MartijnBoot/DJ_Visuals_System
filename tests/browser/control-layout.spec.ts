@@ -612,3 +612,32 @@ test("in DJ mode the wheel aims at the primary slot and says so: Colour 2 · pri
   await expect(phone.page.getByTestId("wheel")).toHaveAttribute("data-slot", "1");
   await expect(phone.page.getByTestId("wheel-label")).toHaveText("Colour 2 · primary");
 });
+
+// B-07 T9 (AC35; plan PD18 g): VJ mode with a staged look and three scenes keeps the brief at the
+// five sizes: no sideways scroll, every target at least 48×48, the colour block and the bank
+// still pinned. The Scenes section's height at each size is recorded for the brief's Budget.
+test("at five sizes, the Scenes section with a staged look and three scenes keeps the layout (B-07 AC35)", async ({
+  page,
+  browser,
+}) => {
+  const phone = await paired(page, browser, PORTRAIT);
+  await phone.page.getByTestId("mode-vj").click();
+  await phone.page.getByTestId("stage-live").click();
+  for (const name of ["Warm crowd", "Booth abstract", "Dock"]) {
+    await phone.page.getByTestId("scene-name").fill(name);
+    await phone.page.getByTestId(/^scene-save(-new)?$/).click();
+    await expect(phone.page.locator("[data-testid=scene-tile]", { hasText: name })).toBeVisible();
+  }
+  const heights: string[] = [];
+  for (const viewport of FIVE) {
+    await phone.page.setViewportSize(viewport);
+    const where = `${viewport.width}×${viewport.height}`;
+    expect(await fitProblems(phone.page), where).toEqual([]);
+    expect(await inView(phone.page, phone.page.getByTestId("fader-bank")), where).toBe(true);
+    expect(await inView(phone.page, phone.page.getByTestId("wheel")), where).toBe(true);
+    const section = await box(phone.page.getByRole("region", { name: "Scenes" }));
+    heights.push(`${where}: ${Math.round(section.width)}×${Math.round(section.height)}`);
+  }
+  test.info().annotations.push({ type: "scenes section", description: heights.join("; ") });
+  console.log(`scenes section: ${heights.join("; ")}`);
+});

@@ -18,17 +18,18 @@ its exit criteria produce the app shell the items are built into. Phase 0 is not
 
 | # | ID | Feature | Size | Status |
 |---|---|---|---|---|
-| 1 | B-17 | Echo as a built-in effect | S | idea |
-| 2 | B-14 | Image assets in profiles | M | idea |
-| 3 | B-07 | Scenes | M | idea |
-| 4 | B-10 | Global colour layer | S | idea |
-| 5 | B-11 | "No camera" as a feed option | S | idea |
-| 6 | B-13 | Selling it | L | idea |
-| 7 | B-15 | iPad as an audio source | L | idea |
-| 8 | B-20 | Profile authoring kit for outside designers | M | idea |
-| 9 | B-21 | Profile preview without the app | L | idea |
-| 10 | B-24 | The builder in the controller's look | M | idea |
-| 11 | B-25 | The panel, `/send` and `/trust` in the same look | M | idea |
+| 1 | B-27 | Choose per effect whether the recognisability dial drives it | S | idea |
+| 2 | B-26 | Soft focus as a built-in effect | S | idea |
+| 3 | B-17 | Echo as a built-in effect | S | idea |
+| 4 | B-14 | Image assets in profiles | M | idea |
+| 5 | B-10 | Global colour layer | S | idea |
+| 6 | B-11 | "No camera" as a feed option | S | idea |
+| 7 | B-13 | Selling it | L | idea |
+| 8 | B-15 | iPad as an audio source | L | idea |
+| 9 | B-20 | Profile authoring kit for outside designers | M | idea |
+| 10 | B-21 | Profile preview without the app | L | idea |
+| 11 | B-24 | The builder in the controller's look | M | idea |
+| 12 | B-25 | The panel, `/send` and `/trust` in the same look | M | idea |
 
 ## Items
 
@@ -259,9 +260,9 @@ secure context for `getUserMedia` on remote devices: decide it once here, for bo
 
 ### B-07 — Scenes
 
-- **Status:** idea
+- **Status:** specced → `docs/specs/phase-b-07-scenes.md`
 - **Added:** 2026-11-12
-- **Size:** M
+- **Size:** L (the interview added a staged look and a preview streamed to the controller)
 
 **Problem.** A set has moments: a crowd shot with warm colours, a booth shot abstracted and
 fast. Switching between them today means changing a feed, a profile and the dials one by one.
@@ -827,3 +828,70 @@ behaviour.
 
 **Touches.** A guess: `web/src/Panel.tsx`, `web/src/send/`, `/trust` in `server/src/control/`, and
 their browser tests. Amends B-19 SD8 for these surfaces. Depends on B-24.
+
+### B-26 — Soft focus as a built-in effect
+
+- **Status:** idea
+- **Added:** 2026-11-26
+- **Size:** S (a guess)
+
+(B-22 and B-23 are taken on the local branch `fix/d-18-gate-ceiling`, not yet merged here.)
+
+**Problem.** An artist cannot make the soft, low-resolution picture on purpose. The automatic
+quality scaler (`engine/src/scale.ts`) produces it only as a side effect of load, and `pixelate`
+gives hard blocks, not a smooth soft picture.
+
+**Idea.** A new effect in the builder's list that renders everything before it at a lower
+resolution and stretches it back up smoothly. Effects after it in the list, such as grain and
+edges, stay sharp. Its strength runs from sharp (none) to very coarse, roughly a sixteenth of the
+screen's resolution (proposed). The artist can choose whether the recognisability dial drives it
+(B-27). The automatic scaler stays as it is.
+
+**Why it matters.** It gives artists the soft, dreamy, VHS-like looks that today only appear by
+accident under load.
+
+**Not this.** A performance setting. A replacement for, or a change to, the automatic scaler. A
+blocky look, which `pixelate` already gives.
+
+**Open questions.**
+
+- How it stacks with the automatic render scale.
+- Whether it is a new render pass or a shader trick, and its cost in frame time.
+- Whether a new effect type means a new profile file `formatVersion`.
+- Where it sits among the built-ins' fixed order, and its default strength.
+- Whether it gets a DJ or VJ fader through B-18.
+
+**Touches.** A guess: `engine/` (a lower-resolution pass), `shared/src/profile.ts` (the effect
+list), the builder's effect list, `pnpm profile:check`, `docs/custom-effects.md`, the B-02 effect
+table. No server change. Depends on B-27. Same shape as B-17.
+
+### B-27 — Choose per effect whether the recognisability dial drives it
+
+- **Status:** idea
+- **Added:** 2026-11-26
+- **Size:** S (a guess)
+
+**Problem.** Which effects the recognisability dial moves is fixed by effect type: `pixelate`,
+`posterise` and `smear` follow it and the other nine never do (`EFFECTS` in
+`engine/src/profile.ts`). Only custom effects have a per-effect flag. An artist cannot make `zoom`
+follow the dial, or stop `pixelate` following it.
+
+**Idea.** In the builder every effect gets an option "follows the recognisability dial". Each
+built-in keeps today's value as its default, so existing profiles look the same.
+
+**Why it matters.** The profile's author decides which effects the DJ's dial moves, as B-18 lets
+the author decide which effects get a fader.
+
+**Not this.** A change to how existing profiles look. New dials. Audio bindings, which are a
+separate mechanism.
+
+**Open questions.**
+
+- Whether the flag is a new field on built-in effects and needs a new `formatVersion`, and what a
+  profile file without it means.
+- How each effect behaves when its strength is scaled by the dial.
+- How it sits in the builder next to B-18's DJ and VJ toggles.
+- Whether the guarded profile compat checks in `docs/invariants.md` are touched.
+
+**Touches.** A guess: `engine/src/profile.ts` (`EFFECTS`), `shared/src/profile.ts`, the builder,
+the B-02 effect table and SD2. Split out of B-26.

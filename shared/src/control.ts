@@ -4,6 +4,8 @@
 // receives. Field names are the plan's; colours are `#rrggbb` as in the profile.
 import { z } from "zod";
 import { LIMITS } from "./profile.ts";
+import { SCENE_LIMITS, sceneEntrySchema, sceneIssueSchema, storedSceneSchema } from "./scenes.ts";
+import { transitionDuration, transitionKind } from "./transition.ts";
 
 /** A device socket's message size limit (SD20). */
 export const MAX_DEVICE_MESSAGE = 4096;
@@ -47,6 +49,11 @@ const code = z
   .string()
   .length(CODE_LENGTH)
   .regex(new RegExp(`^[${CODE_ALPHABET}]+$`), "not a pairing code");
+/** B-07 PD9: pairs a screen socket's scene request with its reply. */
+const requestId = z.number().int().nonnegative();
+/** Checked by the server (`sceneNameSchema`, 1 to 60 trimmed), so a refusal can say why. */
+const sceneName = z.string().max(200);
+
 /** 128 bits as base64url: 22 characters. */
 const key = z.string().regex(/^[A-Za-z0-9_-]{22}$/, "not a session key");
 
@@ -71,12 +78,8 @@ const candidateShape = {
 const message = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) =>
   z.strictObject({ type: z.literal(type), ...shape });
 
-/** B-09 SD1, SD19: how a pick switches. */
-export const TRANSITION_KINDS = ["cut", "crossfade", "dissolve", "wipe", "beatCut", "dip"] as const;
-export const transitionKind = z.enum(TRANSITION_KINDS);
-export type TransitionKind = z.infer<typeof transitionKind>;
-/** B-09 SD6: the duration in seconds. */
-const transitionDuration = z.number().min(0.5).max(8);
+export { TRANSITION_KINDS, transitionDuration, transitionKind } from "./transition.ts";
+export type { TransitionKind } from "./transition.ts";
 
 /** B-09 SD5, SD9: the current transition, in the screen state and in `djv.transition`. */
 export const transitionChoiceSchema = z.strictObject({
@@ -88,18 +91,24 @@ export type TransitionChoice = z.infer<typeof transitionChoiceSchema>;
 
 // ---- Controls: what a controller asks the screen page to do. Each carries `seq`. ----
 
+/** B-07 SD4, PD1: which look a control edits; absent is the live look, as before B-07. */
+export const CONTROL_TARGETS = ["live", "staged"] as const;
+export type ControlTarget = (typeof CONTROL_TARGETS)[number];
+const target = z.enum(CONTROL_TARGETS).optional();
+
 export const controlSchema = z.discriminatedUnion("type", [
-  message("pick", { seq, id }),
+  message("pick", { seq, id, target }),
   message("dials", {
     seq,
     recognisability: unit.optional(),
     reactivity: unit.optional(),
+    target,
   }).refine((m) => m.recognisability !== undefined || m.reactivity !== undefined, {
     message: "names at least one dial",
   }),
-  message("colour", { seq, slot, value: colour }),
-  message("resetColour", { seq, slot }),
-  message("camera", { seq, deviceId: z.string().min(1).max(500) }),
+  message("colour", { seq, slot, value: colour, target }),
+  message("resetColour", { seq, slot, target }),
+  message("camera", { seq, deviceId: z.string().min(1).max(500), target }),
   message("refresh", { seq }),
   /** B-06 SD22: the main-audio choice. */
   message("mainAudio", { seq, source: z.enum(["remote", "local"]) }),
@@ -109,11 +118,32 @@ export const controlSchema = z.discriminatedUnion("type", [
     kind: transitionKind.optional(),
     duration: transitionDuration.optional(),
     keepColour: z.boolean().optional(),
+    target,
   }).refine((m) => m.kind !== undefined || m.duration !== undefined || m.keepColour !== undefined, {
     message: "names at least one of kind, duration and keepColour",
   }),
   /** B-18 SD7: one effect's live strength, by its place in the named profile's stack. */
-  message("effect", { seq, profile: id, index: effectIndex, value: unit }),
+  message("effect", { seq, profile: id, index: effectIndex, value: unit, target }),
+  /** B-07 SD3, PD1: a new staged look from the live one, a profile or a saved scene. */
+  message("stage", {
+    seq,
+    from: z.union([
+      z.literal("live"),
+      z.strictObject({ profile: id }),
+      z.strictObject({ scene: id }),
+    ]),
+  }),
+  /** B-07 AC7: the staged look is discarded. */
+  message("unstage", { seq }),
+  /** B-07 SD3, AC10: the staged look goes live by its own transition. */
+  message("go", { seq }),
+  /**
+   * B-07 SD9, SD18: save the staged look as a scene, or replace `updateId`'s content. The screen
+   * page builds the scene; the server checks the name (1 to 60, trimmed, unique ignoring case).
+   */
+  message("saveScene", { seq, name: sceneName, updateId: id.optional() }),
+  message("renameScene", { seq, id, name: sceneName }),
+  message("deleteScene", { seq, id }),
 ]);
 export type Control = z.infer<typeof controlSchema>;
 export type ControlType = Control["type"];
@@ -138,6 +168,11 @@ export const deviceMessageSchema = z.discriminatedUnion("type", [
   message("reject", { deviceId }),
   message("offer", { sdp }),
   message("candidate", candidateShape),
+  // B-07 PD1, PD15: the preview, a controller only. It asks to watch (or stops), and answers the
+  // screen's offer through the server, which relays only the holder's.
+  message("previewStream", { watching: z.boolean() }),
+  message("previewAnswer", { sdp }),
+  message("previewCandidate", candidateShape),
 ]);
 export type DeviceMessage = z.infer<typeof deviceMessageSchema>;
 
@@ -156,6 +191,32 @@ export const effectEntrySchema = z.strictObject({
   vj: z.boolean(),
 });
 export type EffectEntry = z.infer<typeof effectEntrySchema>;
+
+/**
+ * B-07 PD3: the staged look as every controller shows it; its definition stays on the screen
+ * page (SD18). `id` is the source profile's id, or `scene:<id>` for a scene's copy.
+ */
+export const stagedSchema = z.strictObject({
+  id,
+  name: z.string().max(200),
+  palette: z.array(colour).min(LIMITS.paletteMin).max(LIMITS.paletteMax),
+  storedPalette: z.array(colour).min(LIMITS.paletteMin).max(LIMITS.paletteMax),
+  primary: slot,
+  dials: z.strictObject({ recognisability: unit, reactivity: unit }),
+  effects: z.array(effectEntrySchema).max(LIMITS.effects),
+  /** The feed Go will switch to (SD6): a local camera's label or a sender's hint. */
+  feed: z
+    .strictObject({ kind: z.enum(["local", "remote"]), label: z.string().max(500) })
+    .nullable(),
+  transition: z.strictObject({ kind: transitionKind, duration: transitionDuration }),
+  /** SD11: the scene the look came from, until it is staged from something else. */
+  fromScene: z.strictObject({ id, name: z.string().max(200) }).nullable(),
+  /** False while a staged pick loads: Save waits for it (spec, Edge cases). */
+  settled: z.boolean(),
+  /** A staged pick's failure, or why a save, rename or delete was refused. */
+  reason: z.string().max(500).nullable(),
+});
+export type Staged = z.infer<typeof stagedSchema>;
 
 export const screenStateSchema = z.strictObject({
   profiles: z.array(z.strictObject({ id, name: z.string().max(200) })).max(1000),
@@ -196,6 +257,12 @@ export const screenStateSchema = z.strictObject({
   transition: transitionChoiceSchema,
   /** B-18 SD7, PD1, PD5: the active profile's effects ticked DJ or VJ, in stack order. */
   effects: z.array(effectEntrySchema).max(LIMITS.effects),
+  /** B-07 PD2: the staged look, null while there is none; optional for the older fixtures. */
+  staged: stagedSchema.nullable().optional(),
+  /** B-07 PD2: the saved scenes by name; null when the list could not load ("unavailable"). */
+  scenes: z.array(sceneEntrySchema).max(SCENE_LIMITS.scenes).nullable().optional(),
+  /** B-07 PD2, PD12: the preview stream — none held, running, or paused for the output. */
+  preview: z.enum(["off", "on", "paused"]).optional(),
 });
 export type ScreenState = z.infer<typeof screenStateSchema>;
 
@@ -235,6 +302,10 @@ export const toDeviceSchema = z.discriminatedUnion("type", [
   message("candidate", candidateShape),
   /** B-06 SD12: pause (false) or resume (true) the sender's encoding of one kind. */
   message("stream", { kind: sendKind, active: z.boolean() }),
+  /** B-07 PD15: whether this controller holds the preview stream; sent on each change. */
+  message("preview", { holder: z.boolean() }),
+  message("previewOffer", { sdp }),
+  message("previewCandidate", candidateShape),
 ]);
 export type ToDevice = z.infer<typeof toDeviceSchema>;
 
@@ -256,8 +327,44 @@ export const screenMessageSchema = z.discriminatedUnion("type", [
   message("answer", { deviceId, sdp }),
   message("candidate", { deviceId, ...candidateShape }),
   message("stream", { deviceId, kind: sendKind, active: z.boolean() }),
+  /** B-07 PD1: the preview's setup, for the holder only (PD15). */
+  message("previewOffer", { deviceId, sdp }),
+  message("previewCandidate", { deviceId, ...candidateShape }),
+  // B-07 PD9: scenes, request and reply. A name and a definition are checked by the server, which
+  // answers why it refused; a message that fails here is dropped with a warn and gets no reply.
+  message("scenes.list", { requestId }),
+  message("scenes.get", { requestId, id }),
+  message("scenes.save", {
+    requestId,
+    name: sceneName,
+    definition: z.unknown(),
+    /** Replace this scene's content, keeping its id and name (SD9). */
+    updateId: id.optional(),
+  }),
+  message("scenes.rename", { requestId, id, name: sceneName }),
+  message("scenes.delete", { requestId, id }),
+  /** One part of an import; stored at the last part, all or nothing (PD9). */
+  message("scenes.import", {
+    requestId,
+    importId: z.number().int().nonnegative(),
+    part: z.number().int().nonnegative(),
+    parts: z.number().int().min(1).max(SCENE_LIMITS.scenes),
+    scenes: z.array(z.unknown()).min(1).max(SCENE_LIMITS.scenes),
+  }),
 ]);
 export type ScreenMessage = z.infer<typeof screenMessageSchema>;
+export type SceneRequest = Extract<ScreenMessage, { type: `scenes.${string}` }>;
+
+/** B-07 PD9: why the server stored nothing. */
+export const SCENE_ERRORS = [
+  "name_taken",
+  "missing",
+  "too_large",
+  "full",
+  "invalid",
+  "unusable",
+] as const;
+export type SceneError = (typeof SCENE_ERRORS)[number];
 
 // ---- Server → screen page. ----
 
@@ -290,8 +397,26 @@ export const toScreenSchema = z.discriminatedUnion("type", [
   message("superseded", {}),
   message("offer", { deviceId, sdp }),
   message("candidate", { deviceId, ...candidateShape }),
+  /** B-07 PD15: the controller holding the preview stream, or null when none does. */
+  message("preview", { deviceId: deviceId.nullable() }),
+  message("previewAnswer", { deviceId, sdp }),
+  message("previewCandidate", { deviceId, ...candidateShape }),
+  /** B-07 PD9: the answer to one `scenes.*` request; a change carries the new list. */
+  message("scenes.result", {
+    requestId,
+    ok: z.boolean(),
+    list: z.array(sceneEntrySchema).max(SCENE_LIMITS.scenes).optional(),
+    scene: storedSceneSchema.optional(),
+    error: z
+      .strictObject({
+        reason: z.enum(SCENE_ERRORS),
+        issues: z.array(sceneIssueSchema).max(100).optional(),
+      })
+      .optional(),
+  }),
 ]);
 export type ToScreen = z.infer<typeof toScreenSchema>;
+export type SceneResult = Extract<ToScreen, { type: "scenes.result" }>;
 
 const KNOWN_TYPES: ReadonlySet<string> = new Set([
   ...deviceMessageSchema.options.map((o) => o.shape.type.value),

@@ -158,6 +158,9 @@ test("hosted use shows no External control, QR codes or senders, and says where 
   await expect(page.getByTestId("control-switch")).toHaveCount(0);
   await expect(page.locator("svg[data-testid*='qr'], [data-testid*='qr']")).toHaveCount(0);
   await expect(page.getByText("Senders", { exact: false })).toHaveCount(0);
+  // B-07 AC27: no scene row in the panel (and no /control, so no Scenes section, below).
+  await expect(page.getByTestId("panel-scene-picker")).toHaveCount(0);
+  await expect(page.getByTestId("panel-scene-import")).toHaveCount(0);
   expect(sockets).toEqual([]); // no screen socket in hosted use
   await page.goto(`${hosted!.cloud.origin}/control`);
   expect((await page.request.get(`${hosted!.cloud.origin}/control`)).status()).toBe(404);

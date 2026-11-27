@@ -7,17 +7,35 @@
 // SD8, SD22): senders' cameras in the camera picker, and a "main audio" row with the playing
 // source's line while an audio sender is approved. B-09 (SD8, PD19): under the profile picker, a
 // transition select, a duration slider with its seconds readout (off for Cut and Beat cut) and a
-// Keep colour checkbox, each changing the page's one choice.
+// Keep colour checkbox, each changing the page's one choice. B-07 (SD8, SD10, PD19): under them, a
+// scene row — a picker, Stage, Go, Rename (a prompt), Delete (a confirm), Export and Import — and
+// its status line; no staged editing and no picture; absent in hosted use.
 import type { AudioFeatures } from "@djv/audio";
-import type { TransitionChoice, TransitionKind } from "@djv/shared";
+import {
+  sceneNameSchema,
+  type SceneEntry,
+  type SceneResult,
+  type Staged,
+  type TransitionChoice,
+  type TransitionKind,
+} from "@djv/shared";
 import type { Dials, RenderScale } from "@djv/engine";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DeviceOption } from "./capture/devices.ts";
 import type { AudioChoice } from "./capture/remembered.ts";
 import type { SessionState } from "./capture/session.ts";
 import { ExternalControl, type SenderEntry, type SenderState } from "./control/ExternalControl.tsx";
-import type { PanelAction, ScreenLinkView } from "./control/screen-link.ts";
-import type { ActiveState } from "./profiles/active.ts";
+import { refusalOf } from "./control/apply.ts";
+import type { PanelAction, SceneAsk, ScreenLinkView } from "./control/screen-link.ts";
+import { SCENE_PREFIX, type ActiveState } from "./profiles/active.ts";
+import { download } from "./profiles/file.ts";
+import {
+  exportScenes,
+  importParts,
+  readSceneImport,
+  sceneIssueLine,
+  toSceneImportIssue,
+} from "./scenes/file.ts";
 import { durationAt, formatDuration, positionOf } from "./profiles/transition.ts";
 import type { AudioSource } from "./remote/main-audio.ts";
 import { CloudRow } from "./cloud/CloudRow.tsx";
@@ -71,10 +89,24 @@ export interface PanelProps {
   hosted?: { signedOut: boolean; onSignInAgain(): void };
   /** B-12 (UI "Panel, cloud row"): a local install with cloud settings; absent otherwise. */
   cloud?: boolean;
+  /** B-07 (SD10): the scene row's facts and actions; absent in hosted use (SD7). */
+  scenes?: PanelScenes;
+}
+
+export interface PanelScenes {
+  /** The saved scenes by name; null when the list could not load. */
+  list: SceneEntry[] | null;
+  staged: Staged | null;
+  /** Stage a saved scene (AC6) and Go (SD3), applied at the next frame as a controller's. */
+  stage(id: string): void;
+  go(): void;
+  /** One request over the screen socket; null when it is not open. */
+  ask(request: SceneAsk): Promise<SceneResult | null>;
 }
 
 export function Panel(props: PanelProps) {
   const { started, capture, dials, read, mainAudio } = props;
+  const fromScene = props.profiles.activeId.startsWith(SCENE_PREFIX);
   const [features, setFeatures] = useState(() => read(performance.now()));
 
   // The meters follow the features once per animation frame, so a test reading them sees
@@ -154,9 +186,11 @@ export function Panel(props: PanelProps) {
             data-testid="profile-picker"
             disabled={!props.profiles.loaded}
             style={FIT}
-            value={props.profiles.selectedId}
+            value={fromScene ? "" : props.profiles.selectedId}
             onChange={(e) => props.onProfile(e.target.value)}
           >
+            {/* B-07 PD5: a scene's look is no profile, so the picker selects none. */}
+            {fromScene && <option value="" disabled hidden />}
             {props.profiles.entries.map((entry) => (
               <option key={entry.id} value={entry.id}>
                 {entry.name}
@@ -216,6 +250,7 @@ export function Panel(props: PanelProps) {
           />
         )}
       </Row>
+      {props.scenes && !props.hosted && <SceneRow scenes={props.scenes} />}
       <a href="/builder" data-testid="open-builder" style={{ color: "#fff" }}>
         Open builder
       </a>
@@ -286,5 +321,170 @@ export function Panel(props: PanelProps) {
         />
       )}
     </section>
+  );
+}
+
+const plural = (n: number) => `${n} scene${n === 1 ? "" : "s"}`;
+
+/**
+ * B-07 (SD8, SD9, SD10, AC6, AC22, AC25; plan PD9, PD19): the scene row. Rename asks through
+ * `window.prompt` and Delete through `window.confirm`, so the panel gets no text field. Export
+ * fetches every scene and downloads one file; Import checks the file here, then sends it in parts
+ * the server stores all or nothing. The status line says what happened, or why nothing did.
+ */
+function SceneRow({ scenes }: { scenes: PanelScenes }) {
+  const { list, staged } = scenes;
+  const [chosen, setChosen] = useState("");
+  const [status, setStatus] = useState<string[]>([]);
+  const importId = useRef(0);
+  const selected = list?.find((s) => s.id === chosen) ?? list?.[0] ?? null;
+  const say = (...lines: string[]) => setStatus(lines);
+
+  const rename = async (scene: SceneEntry) => {
+    const answer = window.prompt("Rename scene", scene.name);
+    if (answer === null || answer.trim() === scene.name) return;
+    const name = sceneNameSchema.safeParse(answer);
+    if (!name.success) return say("A name is 1 to 60 characters");
+    const result = await scenes.ask({ type: "scenes.rename", id: scene.id, name: name.data });
+    say(result?.ok ? `Renamed to ${name.data}` : refusalOf(result));
+  };
+
+  const remove = async (scene: SceneEntry) => {
+    if (!window.confirm(`Delete ${scene.name}?`)) return;
+    const result = await scenes.ask({ type: "scenes.delete", id: scene.id });
+    say(result?.ok ? `Deleted ${scene.name}` : refusalOf(result));
+  };
+
+  const exportAll = async () => {
+    const result = await exportScenes(list ?? [], async (id) => {
+      const reply = await scenes.ask({ type: "scenes.get", id });
+      return reply?.ok ? (reply.scene ?? null) : null;
+    });
+    if (result.kind === "empty") return say("No scenes to export");
+    if (result.kind === "failed") return say("Export failed: a scene could not be read");
+    download(result.text, result.fileName);
+    say(`Exported ${plural(result.count)}`);
+  };
+
+  const importFile = async (file: File) => {
+    const read = readSceneImport(await file.text());
+    if (read.kind === "not_json") return say("Not a scenes file");
+    if (read.kind === "unsupported_version")
+      return say("This file's format version is not supported");
+    if (read.kind === "invalid") return say(...read.issues.map(sceneIssueLine));
+    const parts = importParts(read.file.scenes);
+    const id = ++importId.current;
+    for (const [part, chunk] of parts.entries()) {
+      const result = await scenes.ask({
+        type: "scenes.import",
+        importId: id,
+        part,
+        parts: parts.length,
+        scenes: chunk,
+      });
+      if (!result?.ok) {
+        const issues = result?.error?.issues ?? [];
+        if (issues.length === 0) return say(refusalOf(result));
+        return say(...issues.map((i) => sceneIssueLine(toSceneImportIssue(i))));
+      }
+    }
+    say(`Imported ${plural(read.file.scenes.length)}`);
+  };
+
+  const keys = { display: "flex", flexWrap: "wrap", gap: 6 } as const;
+  return (
+    <>
+      <Row label="scene">
+        {(id) => (
+          <select
+            id={id}
+            data-testid="panel-scene-picker"
+            style={FIT}
+            disabled={!list || list.length === 0}
+            value={selected?.id ?? ""}
+            onChange={(e) => setChosen(e.target.value)}
+          >
+            {!list && (
+              <option value="" disabled>
+                Scenes unavailable
+              </option>
+            )}
+            {list?.length === 0 && (
+              <option value="" disabled>
+                No scenes yet
+              </option>
+            )}
+            {list?.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
+      </Row>
+      <div style={keys}>
+        <button
+          type="button"
+          data-testid="panel-scene-stage"
+          disabled={!selected}
+          onClick={() => selected && scenes.stage(selected.id)}
+        >
+          Stage
+        </button>
+        <button type="button" data-testid="panel-scene-go" disabled={!staged} onClick={scenes.go}>
+          Go
+        </button>
+        <button
+          type="button"
+          data-testid="panel-scene-rename"
+          disabled={!selected}
+          onClick={() => selected && void rename(selected)}
+        >
+          Rename
+        </button>
+        <button
+          type="button"
+          data-testid="panel-scene-delete"
+          disabled={!selected}
+          onClick={() => selected && void remove(selected)}
+        >
+          Delete
+        </button>
+        <button
+          type="button"
+          data-testid="panel-scene-export"
+          disabled={!list || list.length === 0}
+          onClick={() => void exportAll()}
+        >
+          Export
+        </button>
+        <label>
+          Import{" "}
+          <input
+            type="file"
+            accept=".json,application/json"
+            data-testid="panel-scene-import"
+            disabled={!list}
+            style={FIT}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = ""; // the same file again is a second import
+              setStatus([]);
+              if (file) void importFile(file);
+            }}
+          />
+        </label>
+      </div>
+      {staged && (
+        <div data-testid="panel-scene-staged">staged: {staged.fromScene?.name ?? staged.name}</div>
+      )}
+      {status.length > 0 && (
+        <div data-testid="panel-scene-status">
+          {status.map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

@@ -1,6 +1,7 @@
 # ADR 0002: Remote input may cross the LAN, opt-in and peer to peer
 
-Date: 2026-11-16 · Status: Accepted (by the approval of the B-06 spec, 2026-11-16) ·
+Date: 2026-11-16 · Status: Accepted (by the approval of the B-06 spec, 2026-11-16); amended by
+[0004](0004-scene-preview-to-controllers.md) (screen → controller preview) ·
 Rests on: [0001](0001-setup-decision-record.md)
 
 ## Context

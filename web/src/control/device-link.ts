@@ -5,7 +5,7 @@
 // through `DeviceLinkDeps`, so it is tested without a browser. Rules beyond the pairing link's:
 // - The controls are locked until the screen's state has arrived on this connection; a control
 //   sent while locked is dropped, never queued (SD12).
-import type { Control, DeviceEntry, ScreenState } from "@djv/shared";
+import type { Control, DeviceEntry, DeviceMessage, ScreenState, ToDevice } from "@djv/shared";
 import {
   createPairLink,
   type AfterPairing,
@@ -67,6 +67,12 @@ export type ControlInput = Control extends infer C
     : never
   : never;
 export type Approval = { type: "accept" | "reject"; deviceId: string };
+/** B-07 PD1: the preview's messages, out (no `seq`, no acknowledgement) and in. */
+export type PreviewOut = Extract<
+  DeviceMessage,
+  { type: "previewStream" | "previewAnswer" | "previewCandidate" }
+>;
+export type PreviewIn = Extract<ToDevice, { type: "previewOffer" | "previewCandidate" }>;
 
 export interface LinkView {
   status: LinkStatus;
@@ -77,6 +83,8 @@ export interface LinkView {
   pending: DeviceEntry[];
   /** This device's own id, once approved. */
   deviceId: string | null;
+  /** B-07 PD15: this controller holds the preview stream. */
+  previewHolder: boolean;
 }
 
 export interface DeviceLink {
@@ -85,6 +93,10 @@ export interface DeviceLink {
   /** A control's `seq`, `true` for an approval, or null when dropped (locked). */
   send(message: ControlInput): number | null;
   send(message: Approval): true | null;
+  /** B-07 PD14: a preview message on the socket; false while locked. */
+  preview(message: PreviewOut): boolean;
+  /** B-07 PD14: the screen's offer and candidates; one listener. */
+  onPreview(listener: ((message: PreviewIn) => void) | null): void;
   view(): LinkView;
   roundTrip(): RoundTripReading;
   subscribe(listener: () => void): () => void;
@@ -97,6 +109,8 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
   let state: ScreenState | null = null;
   let pending: DeviceEntry[] = [];
   let seq = 0;
+  let previewHolder = false;
+  let onPreview: ((message: PreviewIn) => void) | null = null;
 
   const snapshot = (): LinkView => {
     const status = link.status();
@@ -107,6 +121,7 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
       state,
       pending,
       deviceId: link.deviceId(),
+      previewHolder,
     };
   };
   // One object per change, so a React `useSyncExternalStore` sees a stable snapshot.
@@ -132,13 +147,22 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
         return link.set("live");
       case "applied":
         return trip.applied(message.seq, deps.now());
+      case "preview":
+        previewHolder = message.holder;
+        return emit();
+      case "previewOffer":
+      case "previewCandidate":
+        return onPreview?.(message);
       default:
         return; // a sender's messages are never sent to a controller
     }
   };
 
   const link = createPairLink<"screen_off" | "live">(deps, {
-    onChange: emit,
+    onChange: () => {
+      if (link.status() !== "live") previewHolder = false; // the hub tells it again on a welcome
+      emit();
+    },
     onMessage,
     onEnded: () => void (pending = []),
   });
@@ -161,6 +185,8 @@ export function createDeviceLink(deps: DeviceLinkDeps): DeviceLink {
     start: () => link.start(),
     submitCode: (raw) => link.submitCode(raw),
     send,
+    preview: (message) => link.status() === "live" && link.send(message),
+    onPreview: (listener) => void (onPreview = listener),
     view: () => (current ??= snapshot()),
     roundTrip: () => trip.read(deps.now()),
     subscribe(listener) {

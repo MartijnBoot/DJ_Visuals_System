@@ -89,6 +89,20 @@ export interface Engine {
   setProfile(profile: Profile, options?: SetProfileOptions): Promise<void>;
   /** Called when the guard bypasses custom effects (B-03 SD8, PD8); returns an unsubscribe. */
   onGuard(listener: (event: GuardEvent) => void): () => void;
+  /**
+   * B-07 PD11: stops the frame, deletes every program, texture and target the engine made and
+   * removes its canvas listeners; a pending `setProfile` rejects. Idempotent; the engine draws
+   * no more after it.
+   */
+  dispose(): void;
+}
+
+/** B-07 PD11: what a second instance (the staged look's preview) needs; the output passes none. */
+export interface EngineOptions {
+  /** Draws at this size instead of the canvas's layout size (a canvas outside the DOM). */
+  size?: { width: number; height: number };
+  /** Skips frames closer than `1000 / maxFps` ms to the last one drawn. */
+  maxFps?: number;
 }
 
 export interface SetProfileOptions {
@@ -247,7 +261,9 @@ const keyOf = (profile: Profile) =>
 /** The effect types alone, for a log line: never the code. */
 const typesOf = (profile: Profile) => profile.effects.map((e) => e.type).join(",");
 
-export function createEngine(canvas: HTMLCanvasElement): Engine {
+export function createEngine(canvas: HTMLCanvasElement, options: EngineOptions = {}): Engine {
+  const fixedSize = options.size ?? null;
+  const minIntervalMs = options.maxFps ? 1000 / options.maxFps : 0;
   // No multisampling: the look is drawn into single-sampled targets, so a multisampled canvas
   // would only cost memory (and before D-14 a blit could not write to one).
   const gl = canvas.getContext("webgl2", { antialias: false });
@@ -484,21 +500,38 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     return { width: video.videoWidth, height: video.videoHeight };
   };
 
+  /** B-07 PD11: with `maxFps`, when the next frame may draw; frames before it skip. */
+  let nextDrawAt = 0;
+  const due = (timestamp: number): boolean => {
+    if (minIntervalMs === 0) return true;
+    if (timestamp < nextDrawAt) return false;
+    // On pace, the next slot; after a gap (a stop, a long frame), a full interval from now.
+    nextDrawAt =
+      timestamp - nextDrawAt >= minIntervalMs
+        ? timestamp + minIntervalMs
+        : nextDrawAt + minIntervalMs;
+    return true;
+  };
+
   const frame = (timestamp: number) => {
     handle = requestAnimationFrame(frame);
     if (lost) return; // nothing can draw until the context is restored (B-03 AC12)
-    advance(timestamp);
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+    if (due(timestamp)) {
+      advance(timestamp);
+      const width = fixedSize?.width ?? canvas.clientWidth;
+      const height = fixedSize?.height ?? canvas.clientHeight;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      if (width > 0 && height > 0) {
+        draw(timestamp, width, height);
+        // Submit time minus capture time, once per new window of audio (SD15, PD21).
+        latency.recordFrame(features.capturedAt, performance.now());
+      }
     }
-    if (width > 0 && height > 0) {
-      draw(timestamp, width, height);
-      // Submit time minus capture time, once per new window of audio (SD15, PD21).
-      latency.recordFrame(features.capturedAt, performance.now());
-    }
+    // Every frame of the loop is recorded, a skipped one too: a capped engine's scale and guard
+    // read the page's frame time, not its own cap, so 10 fps never reads as over budget.
     frames.record(timestamp);
     scaler.record(timestamp);
     guardSlow(timestamp);
@@ -506,9 +539,10 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 
   /** The WebGL context is lost: every GL object is gone and nothing draws (B-03 AC12). */
   let lost = false;
+  let disposed = false;
 
   // Preventing the default asks the browser to restore the context (B-03 SD8).
-  canvas.addEventListener("webglcontextlost", (event) => {
+  const onContextLost = (event: Event) => {
     event.preventDefault();
     lost = true;
     // Every target is gone with the context: the restore draws the incoming look alone (AC11).
@@ -518,14 +552,15 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       pending.reject(new Error("the WebGL context was lost"));
       pending = null;
     }
-  });
+  };
+  canvas.addEventListener("webglcontextlost", onContextLost);
 
   /**
    * Everything is made again: texture, targets (on the next frame) and the active profile's
    * program, linked at once and without custom effects, so the picture returns on the next
    * frame. A profile with custom effects keeps them off until it is picked again (PD8).
    */
-  canvas.addEventListener("webglcontextrestored", () => {
+  const onContextRestored = () => {
     lost = false;
     parallel = gl.getExtension("KHR_parallel_shader_compile") as unknown as ParallelCompile | null;
     cache.clear();
@@ -552,7 +587,8 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
     customSince = null;
     active.fresh = true;
     emitGuard({ kind: "contextLost", customBypassed: hadCustom });
-  });
+  };
+  canvas.addEventListener("webglcontextrestored", onContextRestored);
 
   /** The program key whose custom effects the guard turned off, until a pick or another key. */
   let bypassed: string | null = null;
@@ -786,14 +822,45 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
 
   return {
     start() {
-      if (handle === null) handle = requestAnimationFrame(frame);
+      if (handle === null && !disposed) handle = requestAnimationFrame(frame);
     },
     stop() {
       if (handle !== null) cancelAnimationFrame(handle);
       handle = null;
     },
     stats() {
-      return { ...frames.read(performance.now()), renderScale: scaler.scale() };
+      return {
+        ...frames.read(performance.now()),
+        renderScale: scaler.scale(),
+        overBudget: scaler.overBudget(),
+        transitioning: outgoing !== null || (pending?.wait ?? null) !== null,
+      };
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      if (handle !== null) cancelAnimationFrame(handle);
+      handle = null;
+      canvas.removeEventListener("webglcontextlost", onContextLost);
+      canvas.removeEventListener("webglcontextrestored", onContextRestored);
+      if (pending?.linking) {
+        gl.deleteProgram(pending.linking.program);
+        gl.deleteShader(pending.linking.vertex);
+        gl.deleteShader(pending.linking.fragment);
+      }
+      pending?.reject(new Error("the engine was disposed"));
+      pending = null;
+      for (const look of [active, outgoing]) if (look) dropTargets(gl, look);
+      outgoing = null;
+      transition = null;
+      const programs = new Set([...cache.values()].map((entry) => entry.program));
+      programs.add(active.linked.program);
+      for (const program of programs) gl.deleteProgram(program);
+      cache.clear();
+      gl.deleteProgram(present.program);
+      gl.deleteProgram(mix.program);
+      gl.deleteTexture(sourceTexture);
+      guardListeners.clear();
     },
     latency() {
       return latency.read(performance.now());
@@ -814,6 +881,7 @@ export function createEngine(canvas: HTMLCanvasElement): Engine {
       scaler.setCap(cap);
     },
     setProfile(profile, options = {}) {
+      if (disposed) return Promise.reject(new Error("the engine was disposed"));
       if (lost) {
         // Nothing links now; the restore draws this one (without custom effects).
         if (options.pick || keyOf(profile) !== bypassed) bypassed = null;

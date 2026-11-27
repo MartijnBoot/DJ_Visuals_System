@@ -78,9 +78,19 @@ describe("migrations at boot (AC3, AC5, AC6)", () => {
   it("first boot applies every migration and app_meta holds schema_created_at", async () => {
     const first = track(spawnServer(await env()));
     await first.waitForLine((l) => l.msg === "listening");
-    expect(appliedNames(first)).toEqual(["0001_init.sql", "0002_profiles.sql", "0003_sync.sql"]);
+    expect(appliedNames(first)).toEqual([
+      "0001_init.sql",
+      "0002_profiles.sql",
+      "0003_sync.sql",
+      "0004_scenes.sql",
+    ]);
     await first.kill();
-    expect(readRecorded()).toEqual(["0001_init.sql", "0002_profiles.sql", "0003_sync.sql"]);
+    expect(readRecorded()).toEqual([
+      "0001_init.sql",
+      "0002_profiles.sql",
+      "0003_sync.sql",
+      "0004_scenes.sql",
+    ]);
     expect(readAppMeta().schema_created_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
@@ -124,13 +134,22 @@ describe("an upgrade from schema version 1 (B-02 AC20)", () => {
     const port = await freePort();
     const upgraded = track(spawnServer(await env({ PORT: String(port) })));
     await upgraded.waitForLine((l) => l.msg === "listening");
-    expect(appliedNames(upgraded)).toEqual(["0002_profiles.sql", "0003_sync.sql"]);
+    expect(appliedNames(upgraded)).toEqual([
+      "0002_profiles.sql",
+      "0003_sync.sql",
+      "0004_scenes.sql",
+    ]);
     const health = (await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()) as {
       schemaVersion: number;
     };
-    expect(health.schemaVersion).toBe(3);
+    expect(health.schemaVersion).toBe(4);
     await upgraded.kill();
-    expect(readRecorded()).toEqual(["0001_init.sql", "0002_profiles.sql", "0003_sync.sql"]);
+    expect(readRecorded()).toEqual([
+      "0001_init.sql",
+      "0002_profiles.sql",
+      "0003_sync.sql",
+      "0004_scenes.sql",
+    ]);
     expect(readAppMeta().schema_created_at).toBe(createdAt);
   });
 });
@@ -165,7 +184,7 @@ describe("an upgrade from schema version 2 (B-12 T3, AC8)", () => {
 
     const upgraded = track(spawnServer(await env()));
     await upgraded.waitForLine((l) => l.msg === "listening");
-    expect(appliedNames(upgraded)).toEqual(["0003_sync.sql"]);
+    expect(appliedNames(upgraded)).toEqual(["0003_sync.sql", "0004_scenes.sql"]);
     await upgraded.kill();
     const after = openDatabase(join(dataDir, "djvisuals.sqlite"));
     try {
@@ -230,7 +249,12 @@ describe("pnpm migrate (AC8)", () => {
   it("applies pending migrations, then none, and never listens", async () => {
     const first = track(spawnServer(await env(), { entry: migrateCli }));
     expect((await first.exited).code).toBe(0);
-    expect(appliedNames(first)).toEqual(["0001_init.sql", "0002_profiles.sql", "0003_sync.sql"]);
+    expect(appliedNames(first)).toEqual([
+      "0001_init.sql",
+      "0002_profiles.sql",
+      "0003_sync.sql",
+      "0004_scenes.sql",
+    ]);
     expect(first.lines().filter((l) => l.msg === "listening")).toHaveLength(0);
     expect(readAppMeta().schema_created_at).toBeDefined();
 

@@ -11,6 +11,7 @@ at 23:00 without the author present.
 | [`rollback.md`](rollback.md) | Back to the previous release by hand; target 5 minutes (B-12) | — |
 | [`restore.md`](restore.md) | The newest backup into the cloud, and rebuilding a reclaimed VM (B-12) | — (H9) |
 | `incident.md` | Detect, declare, mitigate, communicate, resolve, post-mortem | not written yet |
+| [Human checks for scenes](#human-checks-for-scenes-b-07-h1-to-h3) | The output under a fade with the preview on, stage-edit-Go-recall on a phone, a scene's feed on real phones (B-07 H1 to H3) | — |
 
 A rollback that has not been rehearsed does not exist (non-negotiable 13). Every rehearsal leaves
 a record in [rehearsals/](rehearsals/).
@@ -177,3 +178,25 @@ screen machine and a phone, and are recorded under `docs/runbooks/rehearsals/` a
    playing, Beat cut cuts on a beat.
 3. **Remembered:** reload the screen page: the `s` panel and the phone show the same type,
    duration and Keep colour as before.
+
+## Human checks for scenes (B-07 H1 to H3)
+
+The gate proves staging, the preview's path and Go structurally, by pixels under software WebGL on
+`127.0.0.1`; these run on the owner's screen machine and phones, recorded under
+`docs/runbooks/rehearsals/<date>-b07-human-checks.md` (the `rehearsals/README.md` template) and in
+[the plan](../plans/phase-b-07-scenes.md#human-steps) when done.
+
+1. **H1 — The output comes first (AC41):** `pnpm start`, Start, open the overlay (`o`), switch
+   External control on and pair a phone in VJ mode. Stage from live so the preview shows on the
+   phone. Choose Crossfade, 8.0 s, and Go between the two heaviest profiles. During the fade the
+   overlay's latency p95 stays at or below 50 ms, the output's frame rate stays at the display's
+   refresh rate, and the phone says "Preview paused — busy"; the preview comes back about 2 s after
+   the fade ends.
+2. **H2 — Stage, edit, Go, recall (AC42):** on the phone, Stage from live, then change the profile,
+   a colour and a strength; each shows in the preview and nothing of it on the output. Go with a
+   Crossfade. Save as "Warm crowd", reload the screen page, tap the "Warm crowd" tile and Go: the
+   output shows the saved look.
+3. **H3 — The feed (AC43):** pair a second phone as a camera (`/send`), pick it, Stage from live and
+   save a scene. Re-pair that phone (or restart the server and pair again), stage the scene and
+   Go: with one phone whose hint matches, the camera switches to it; with two phones of the same
+   kind, or none, the note "Feed unavailable — kept the current camera" shows and the camera stays.

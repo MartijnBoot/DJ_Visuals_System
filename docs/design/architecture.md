@@ -5,11 +5,13 @@ The system as built at the end of B-12 (hosted home on Oracle Cloud): specs
 [phase-b-01-live-visual-engine](../specs/phase-b-01-live-visual-engine.md),
 [phase-b-02-visual-profiles](../specs/phase-b-02-visual-profiles.md),
 [phase-b-04-live-set-controls](../specs/phase-b-04-live-set-controls.md),
-[phase-b-06-remote-input-devices](../specs/phase-b-06-remote-input-devices.md) and
-[phase-b-12-hosted-home-oracle](../specs/phase-b-12-hosted-home-oracle.md), decisions in the
+[phase-b-06-remote-input-devices](../specs/phase-b-06-remote-input-devices.md),
+[phase-b-12-hosted-home-oracle](../specs/phase-b-12-hosted-home-oracle.md) and, amended by B-07,
+[phase-b-07-scenes](../specs/phase-b-07-scenes.md), decisions in the
 [Setup Decision Record](../adr/0001-setup-decision-record.md),
-[ADR 0002](../adr/0002-remote-input-over-the-lan.md) and
-[ADR 0003](../adr/0003-hosting-on-oracle-synced-profiles.md). Plans read this and do not
+[ADR 0002](../adr/0002-remote-input-over-the-lan.md),
+[ADR 0003](../adr/0003-hosting-on-oracle-synced-profiles.md) and
+[ADR 0004](../adr/0004-scene-preview-to-controllers.md). Plans read this and do not
 redesign it; a change here is an owner stop (CLAUDE.md). Diagrams stay text so they diff.
 
 ## Overview
@@ -28,7 +30,11 @@ and a device socket over HTTPS; every change goes over the server to the screen 
 applies it and mirrors its state back (External control, below). Remote input (B-06, ADR 0002)
 lets a paired device send its camera or its audio from `/send`: the media goes peer to peer to
 the screen page over the LAN, never through the server, which relays only the WebRTC setup
-(Remote input, below). The same process also runs as the cloud (B-12, ADR 0003): in hosted
+(Remote input, below). Scenes (B-07) stage a look beside the live one, edited from a controller
+while the output keeps playing, previewed on that controller from a second engine on the screen
+machine (ADR 0004: one low-resolution stream, peer to peer), made live by Go, and saved as
+self-contained scenes in the local database over the screen socket (Scenes, below). The same
+process also runs as the cloud (B-12, ADR 0003): in hosted
 mode on an Oracle VM behind Caddy, signed in, with no External control; a local install with
 cloud settings syncs its profiles with it (Hosting and sync, below). Five workspace packages:
 
@@ -68,11 +74,11 @@ browser check runs only against `pnpm start`.
 
 | Module | Owns | Public surface | Must not |
 |---|---|---|---|
-| `engine/` | The WebGL2 context, the animation loop, the look (one shader pass composed from a profile, `shader.ts`; its constants and B-01's reference mapping in `look.ts`), the profile model, strength formula and built-in profile (`profile.ts`), render scaling (`scale.ts`), transitions (B-09: up to two looks a frame, each a `Look` with its own dials and targets, `look-state.ts`, mixed by one pass; their maths and Beat cut's wait in `transition.ts`), the latency record (`latency.ts`), frame statistics; custom effects wrapped into the pass, the flash limiter, the runtime guard and context-loss recovery (B-03), compile errors located to effect and line (`compile-error.ts`); its own `AudioFeatures`, `Dials` (`features.ts`) and `Profile` | `createEngine(canvas)` returning `{ start, stop, stats, latency, setFeatures, setDials, setAudioOk, setSource, setScaleCap, setProfile(profile, { pick, transition }), onGuard }`, `BUILT_IN_PROFILE`, `EFFECTS`, `effectStrength`, `DEFAULT_DIALS`, `ZERO_FEATURES`, `WebGL2UnavailableError`, `ProfileSupersededError`, `ProfileCompileError`, `locateErrors` (`engine/src/index.ts`) | Declare or import any package, including `audio/` and `shared/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
+| `engine/` | The WebGL2 context, the animation loop, the look (one shader pass composed from a profile, `shader.ts`; its constants and B-01's reference mapping in `look.ts`), the profile model, strength formula and built-in profile (`profile.ts`), render scaling (`scale.ts`), transitions (B-09: up to two looks a frame, each a `Look` with its own dials and targets, `look-state.ts`, mixed by one pass; their maths and Beat cut's wait in `transition.ts`), the latency record (`latency.ts`), frame statistics; custom effects wrapped into the pass, the flash limiter, the runtime guard and context-loss recovery (B-03), compile errors located to effect and line (`compile-error.ts`); its own `AudioFeatures`, `Dials` (`features.ts`) and `Profile` | `createEngine(canvas, { size?, maxFps? })` returning `{ start, stop, stats, latency, setFeatures, setDials, setAudioOk, setSource, setScaleCap, setProfile(profile, { pick, transition }), onGuard, dispose }`; `stats()` carries `overBudget` and `transitioning` (B-07 PD11; the output passes no options), `BUILT_IN_PROFILE`, `EFFECTS`, `effectStrength`, `DEFAULT_DIALS`, `ZERO_FEATURES`, `WebGL2UnavailableError`, `ProfileSupersededError`, `ProfileCompileError`, `locateErrors` (`engine/src/index.ts`) | Declare or import any package, including `audio/` and `shared/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
 | `audio/` | The `AudioWorklet` processor (`djv-features`, `audio/src/processor.ts`), the analysis maths as pure functions (`analysis.ts`; every number in `constants.ts`), the `AudioFeatures` contract (`features.ts`), the main-thread source that maps the worklet's clock and decays stale features (`source.ts`, `clock.ts`), the synthetic feature loop for the builder's preview (`synthetic.ts`) | `createFeatureSource(context, stream, moduleUrl)` resolving to `{ read(now), stop, lastBlockAt }`, `createAnalyser`, `windowFrames`, `createClockMap`, `decayFeatures`, `syntheticFeatures`, `AudioFeatures`, `ZERO_FEATURES` (`audio/src/index.ts`); the worklet file as `@djv/audio/processor` | Declare or import any package, including `engine/`; use Node types (`tests/meta/engine-boundary.test.ts`) |
-| `web/` | The screen page at `/`, the builder at `/builder`, the External control page at `/control` and the sending page at `/send` (`web/src/main.tsx` reads `location.pathname`; no router), the screen's control client and the controller (`web/src/control/`; the controller's look is the style brief [controller-style.md](controller-style.md), shipped as `controller.css` in a `<style>` under `.djv-control` on `/control` only), the screen's remote sources (`web/src/remote/`) and the sender (`web/src/send/`), the capture session (`web/src/capture/`), the panel and its profile picker (`profiles/active.ts`), the overlay, the wake lock, the health and profile clients (`profiles/api.ts`), the builder (`web/src/builder/`: list, editor reducer, custom effect row, preview with live compile and frame time, conflict, export, import and Replace); wiring `audio/` and `shared/` to `engine/` (`features-compat.ts`, `profile-compat.ts`, checked both ways by `tests/meta/features-compat.test.ts` and `tests/meta/profile-compat.test.ts`) | The built app in `web/dist` | Import from `server/`; read the environment |
-| `server/` | Configuration, logging, the database and migrations, the profile store (`server/src/profiles/store.ts`, the only SQL for profiles, the sync columns and tombstones included) and routes (`routes.ts`), HTTP, External control (`server/src/control/`: pairing, the LAN listener, the sockets, relaying, the trust page), the local certificate authority (`server/src/tls/`: DER, the two certificate shapes, the store under `DATA_DIR/tls/`); B-12: token verification and the guard (`server/src/auth/`), the per-address rate window (`rate-window.ts`), the cloud's sync endpoints (`server/src/sync/`), the local install's sign-in, sync run and scheduler (`server/src/cloud/`, the session file only in `session-store.ts`), the backup routine (`server/src/backup/`, `backup-cli.ts`) | `GET /api/health`, the profile endpoints below, `GET /builder`, static `web/dist`, the screen socket `/api/control/screen`; on the LAN listener while switched on, over HTTPS only, `GET /control`, `GET /send`, `GET /trust`, `GET /assets/*`, the device socket `/api/control/device`; `pnpm migrate` | Listen on anything but `127.0.0.1`, except the External control listener on private IPv4 addresses while switched on; read the environment outside `config.ts` |
-| `shared/` | The schemas both sides validate against: health (with `mode`, `cloud`, `signIn`), the profile and its file format (`profile.ts`, with the optional `primary` and `derivePrimary`, the custom effect and its code checks, the fader flags and format versions 1, 2 and 3), the endpoint bodies and error shapes (`profile-api.ts`, with the optional `conflictCopy`), the "Name (n)" rule (`names.ts`), every External control message both ways and its limits (`control.ts`), the sync bodies (`sync.ts`) and the cloud row's status (`cloud.ts`) | `healthResponseSchema`, `profileSchema`, `profileFileSchema`, `toProfileFile`, `SUPPORTED_FORMAT_VERSIONS`, `isSupportedFormatVersion`, `derivePrimary`, `customCodeIssues`, `storedProfileSchema`, `updateProfileSchema`, `issuesFrom`, `nextFreeName`, `LIMITS`, `CUSTOM_LIMITS`, the control schemas and constants (`shared/src/index.ts`) | — |
+| `web/` | The screen page at `/`, the builder at `/builder`, the External control page at `/control` and the sending page at `/send` (`web/src/main.tsx` reads `location.pathname`; no router), the screen's control client and the controller (`web/src/control/`; the controller's look is the style brief [controller-style.md](controller-style.md), shipped as `controller.css` in a `<style>` under `.djv-control` on `/control` only), the screen's remote sources (`web/src/remote/`) and the sender (`web/src/send/`), the staged look, feed matching, scene building, the scenes file, the preview's pause rule and second engine (`web/src/scenes/`, B-07), the capture session (`web/src/capture/`), the panel and its profile picker (`profiles/active.ts`), the overlay, the wake lock, the health and profile clients (`profiles/api.ts`), the builder (`web/src/builder/`: list, editor reducer, custom effect row, preview with live compile and frame time, conflict, export, import and Replace); wiring `audio/` and `shared/` to `engine/` (`features-compat.ts`, `profile-compat.ts`, checked both ways by `tests/meta/features-compat.test.ts` and `tests/meta/profile-compat.test.ts`) | The built app in `web/dist` | Import from `server/`; read the environment |
+| `server/` | Configuration, logging, the database and migrations, the profile store (`server/src/profiles/store.ts`, the only SQL for profiles, the sync columns and tombstones included) and routes (`routes.ts`), HTTP, External control (`server/src/control/`: pairing, the LAN listener, the sockets, relaying, the preview holder, the screen socket's scene requests in `scenes.ts`, the trust page), the scene store (`server/src/scenes/store.ts`, the only SQL for scenes, built only in local mode; B-07), the local certificate authority (`server/src/tls/`: DER, the two certificate shapes, the store under `DATA_DIR/tls/`); B-12: token verification and the guard (`server/src/auth/`), the per-address rate window (`rate-window.ts`), the cloud's sync endpoints (`server/src/sync/`), the local install's sign-in, sync run and scheduler (`server/src/cloud/`, the session file only in `session-store.ts`), the backup routine (`server/src/backup/`, `backup-cli.ts`) | `GET /api/health`, the profile endpoints below, `GET /builder`, static `web/dist`, the screen socket `/api/control/screen`; on the LAN listener while switched on, over HTTPS only, `GET /control`, `GET /send`, `GET /trust`, `GET /assets/*`, the device socket `/api/control/device`; `pnpm migrate` | Listen on anything but `127.0.0.1`, except the External control listener on private IPv4 addresses while switched on; read the environment outside `config.ts` |
+| `shared/` | The schemas both sides validate against: health (with `mode`, `cloud`, `signIn`), the profile and its file format (`profile.ts`, with the optional `primary` and `derivePrimary`, the custom effect and its code checks, the fader flags and format versions 1, 2 and 3), the endpoint bodies and error shapes (`profile-api.ts`, with the optional `conflictCopy`), the "Name (n)" rule (`names.ts`), every External control message both ways and its limits (`control.ts`), the scene, its feed and transition, the scenes file and its limits (`scenes.ts`, B-07), the sync bodies (`sync.ts`) and the cloud row's status (`cloud.ts`) | `healthResponseSchema`, `profileSchema`, `profileFileSchema`, `toProfileFile`, `SUPPORTED_FORMAT_VERSIONS`, `isSupportedFormatVersion`, `derivePrimary`, `customCodeIssues`, `storedProfileSchema`, `updateProfileSchema`, `issuesFrom`, `nextFreeName`, `LIMITS`, `CUSTOM_LIMITS`, the control schemas and constants (`shared/src/index.ts`) | — |
 
 `shared/`, `engine/` and `audio/` export their `src/index.ts`; there is no build step for the
 server or those packages. Only `web/` is built, by Vite, into `web/dist`; the worklet reaches
@@ -300,7 +306,9 @@ the pairing and relays.
   pending; five wrong codes from one IP within 60 s refuse it for 60 s. New code, Disconnect,
   switching off or a restart end pairings; a key from another IP ends that approval.
 - **Message flow** (`control/hub.ts`). An approved device's controls (`pick`, `dials`, `colour`,
-  `resetColour`, `camera`, `refresh`, each with a `seq`) go to the target screen as
+  `resetColour`, `camera`, `refresh`, `mainAudio` (B-06), `transition` (B-09), `effect` (B-18),
+  and B-07's `stage`, `unstage`, `go`, `saveScene`, `renameScene`, `deleteScene`; seven of them may
+  carry `target: "staged"`, Scenes below; each with a `seq`) go to the target screen as
   `control { deviceId }`; the last screen page to connect is the target and an older one gets
   `superseded`. The screen page queues them and applies them at the start of the next frame, in
   the frame feed's `beforeFrame`, registered before the engine's own frame callback
@@ -360,7 +368,9 @@ media passes it.
   hello, key, backoff and refusal rules are `web/src/control/pair-link.ts`, which `device-link.ts`
   and `send-link.ts` share.
 - **The relay** (`control/hub.ts`, `control/device.ts`). A sender's socket may send `hello`,
-  `offer` and `candidate`, nothing else (a control from it is dropped with one `warn`). They go
+  `offer` and `candidate`, nothing else (a control, a scene message or a preview message from it is
+  dropped with one `warn`); a controller's never sends `offer` or `candidate`, and its preview
+  setup is relayed apart (Scenes, below). They go
   to the target screen with the sender's `deviceId`; the screen's `answer`, `candidate` and
   `stream { kind, active }` go back to that sender. When the target screen (re)connects, each sender is
   told `screen { connected }` and offers again; a screen reload leaves the senders' capture
@@ -416,6 +426,69 @@ media passes it.
   `tests/browser/sender-client.ts` is a scripted sender that makes its own media;
   `tests/browser/remote-e2e.spec.ts` runs the whole scenario with real `/control` and `/send`
   pages. The gate proves structure and order; the millisecond bounds are the owner's checks.
+
+## Scenes
+
+B-07 (spec [phase-b-07-scenes](../specs/phase-b-07-scenes.md),
+[ADR 0004](../adr/0004-scene-preview-to-controllers.md)): a VJ-mode controller stages a look
+beside the live one, edits it while the output keeps playing, watches it in a small preview, and
+makes it live with Go; a staged look can be saved as a scene and staged again later. The screen
+page holds the staged look; the server stores scenes and relays the preview's setup; no media and
+no definition passes through a controller's state.
+
+```
+  controller (VJ, /control)            Node 24 process                    screen page (127.0.0.1)
+ +-----------------------------+      +-------------------------------+   +-----------------------+
+ | Scenes.tsx: Stage, Go, Save |----->| hub.ts: controls -> screen    |-->| apply.ts: target      |
+ |   Editing switch -> target  | WSS  |   previewHolder (one device)  |   |   scenes/staged.ts    |
+ | preview-peer.ts (answer) <--|<-----|   previewOffer/Answer/Cand.   |<->|   scenes/preview.ts   |
+ |   <video> 320x180, 10 fps   |      | control/scenes.ts <-- scenes.*|<--|   (2nd engine, peer)  |
+ +--------------+--------------+      | scenes/store.ts -> SQLite     |   |   screen-link.ts      |
+                ^                     +-------------------------------+   +-----------+-----------+
+                +------- preview media: RTP over UDP, host candidates only -----------+
+```
+
+- **The staged look** (`web/src/scenes/staged.ts`). A pure sibling of the live look (`profiles/
+  active.ts`): the source profile (or a scene's copy) with its own palette, strengths, dials, feed
+  and transition, its `fromScene` tie, `settled` and a reason. It touches no engine and writes no
+  profile. A control with `target: "staged"` (`pick`, `dials`, `colour`, `resetColour`, `camera`,
+  `transition`, `effect`) edits it (`web/src/control/apply.ts`); with no target, or `"live"`, every
+  control does what it did before B-07. `stage { from }` makes it from the live look, a profile or
+  a saved scene; `unstage` discards it. The state every controller mirrors carries it as `staged`
+  (no definition), the scenes list as `scenes` (ids and names; `null` is "Scenes unavailable") and
+  the preview's word as `preview`.
+- **Go** (PD5, PD6). A matched feed is switched first through the sources' own camera choice
+  (`web/src/scenes/feed.ts`: a local camera by id, else one unique label; a remote one by one
+  unique hint); no match keeps the camera and shows "Feed unavailable — kept the current camera".
+  Then `active.adopt()` runs the pick's own path — token, supersede, failure — with the staged
+  look's transition and no Keep colour; a scene's look is `scene:<id>`, never listed as a profile
+  and never written to `djv.profile`. The staged look is then a copy of the new live one.
+- **Saving** (PD8, PD9). The screen page builds the scene (`web/src/scenes/build.ts`: the profile
+  copy with the staged palette and strengths baked in, the dials, the feed, the transition) and
+  asks the server over the screen socket: `scenes.list`, `scenes.get`, `scenes.save` (or update),
+  `scenes.rename`, `scenes.delete`, `scenes.import` in parts, each answered by `scenes.result`
+  with the new list after a change (`server/src/control/scenes.ts`). Names are 1 to 60 characters,
+  unique ignoring case; at most 200 scenes of at most 128 KiB each; an import stores all or
+  nothing at its last part. The panel's scene row stages, goes, renames (a prompt), deletes (a
+  confirm), exports and imports `<name>.djv-scenes.json` (`web/src/scenes/file.ts`); no staged
+  editing and no picture on the panel.
+- **The preview** (ADR 0004, PD11 to PD16). The screen page runs a second engine on a canvas that
+  is never in the page, at 320×180 and 10 fps (`createEngine`'s `size` and `maxFps`), fed the
+  output's features and video element each frame, drawing the staged look; it runs exactly while a
+  controller holds the stream and a staged look exists, and is disposed otherwise. It pauses
+  while the output's engine reads over budget or draws a transition, and runs again after 2 s of
+  neither (`web/src/scenes/pause.ts`); paused, it draws nothing and the controller keeps the last
+  picture. `captureStream(10)` feeds the sender's own peer (`web/src/send/peer.ts`, one video
+  track, `maxFramerate` 10, no ICE server). The hub keeps one holder: a controller's
+  `previewStream { watching }` takes the stream over, the old holder hears `preview { holder:
+  false }`, the screen `preview { deviceId }`; the holder's socket closing, its approval ending,
+  or the screen going clears it. The screen's `previewOffer` and `previewCandidate` reach the
+  holder only, the holder's `previewAnswer` and `previewCandidate` the screen only; anyone else's
+  is dropped at `debug`. A controller watches from its own Stage and "Show preview here", stops on
+  Unstage, on leaving VJ mode and while its page is hidden (`web/src/control/Scenes.tsx`,
+  `preview-peer.ts`), and says "Preview unavailable" after 10 s without a connection.
+- **Hosted.** A hosted server builds no scene store and opens no screen socket, so it never
+  offers scenes; its database holds the `scenes` table empty (PD10).
 
 ## Latency and render scale
 
@@ -501,7 +574,10 @@ by the required `APP_MODE`.
 - **Tables.** `schema_migrations(name, applied_at)`, owned by the runner; `app_meta(key, value)`,
   created by `server/migrations/0001_init.sql` with one row, `schema_created_at`; and
   `profiles(id, name COLLATE NOCASE UNIQUE, revision, definition, created_at, updated_at)`
-  from `0002_profiles.sql`, where `definition` is the JSON of palette, dials and effects. The
+  from `0002_profiles.sql`, where `definition` is the JSON of palette, dials and effects;
+  `scenes(id, name COLLATE NOCASE UNIQUE, definition, created_at, updated_at)` from
+  `0004_scenes.sql` (B-07), where `definition` is the JSON of the profile copy, dials, feed and
+  transition, checked on write and read like a profile's, with no sync columns. The
   built-in profile is code, not a row. Row validity is checked on every read: a `definition`
   that fails the shared schema is left out of the list (one `warn` per id per process, the id
   only) and answered 422 by `GET /api/profiles/:id`, so the screen falls back to the built-in.
@@ -521,6 +597,8 @@ by the required `APP_MODE`.
   External control: `djv.controlAddress` on the screen machine (the address for the QR code);
   `djv.controlKey` (the session key) and `djv.controlMode` (`dj` or `vj`) on a controller's LAN
   origin; `djv.sendKey` and `djv.sendChoice` (what it sends and from which device) on a sender's.
+  Scenes add nothing: a scene's Go never writes `djv.profile`; a Go that switches the camera writes
+  `djv.sources` as a camera tap does (B-07).
 - **Certificates.** `DATA_DIR/tls/root.key`, `root.crt`, `server.key`, `server.crt` (PEM), made at
   the first switch-on (B-06). Git ignores `data/`, the default location
   (`tests/meta/tls-boundary.test.ts`). The restore plan is to delete the folder; every device then
@@ -586,7 +664,8 @@ is reported the same way. `scripts/dev.ts` learns `PORT` for the Vite proxy by i
   only on a user action in the panel or on a paired controller (Start, opening the panel,
   picking a profile, a controller connecting or pressing Refresh); no media endpoint exists
   (`docs/invariants.md`, `tests/browser/live.spec.ts`). A sender's peer connection is not an
-  HTTP request, and the screen page opens no further socket for it. Every page load also reads
+  HTTP request, and the screen page opens no further socket for it. Scenes (B-07) ride the screen
+  socket, and the preview is a peer connection, so neither adds a request. Every page load also reads
   `/api/health` once, for the mode (B-12 PD8). In hosted use there is no screen socket, and the
   provider's token endpoint is asked only within a user's profile action
   (`tests/browser/hosted.spec.ts`); the local cloud row asks `/api/cloud/*` only when the panel
@@ -600,6 +679,10 @@ is reported the same way. `scripts/dev.ts` learns `PORT` for the Vite proxy by i
   User-Agent, a device hint, a camera label or a colour. Senders (B-06) are logged as "sender
   <step>" with the sequence label and the role; a certificate issued with its addresses and
   expiry date, never a key; setup messages at `debug`, type only, never an SDP or a candidate.
+  Scenes (B-07) log "scene saved", "updated", "renamed", "deleted" with the id and "scenes
+  imported" with the count and ids, never a name or a definition; "preview stream opened" and
+  "ended" with the controller's sequence label. A Go logs the look's id in the browser
+  (`scene:<id>` for a scene), never a name; the preview logs nothing.
   The browser logs capture state changes (for remote audio `remote audio lost`, `fallback
   local`, `restored remote`, by sequence label) and profile switches at info level, and guard
   events at warn with the profile id, without device labels, media data or profile code

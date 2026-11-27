@@ -17,6 +17,10 @@ export interface FrameStats {
 export interface EngineStats extends FrameStats {
   /** The internal render resolution as a share of the canvas: 1, 0.75 or 0.5. */
   renderScale: number;
+  /** B-07 PD11: the scale controller's own over-budget reading of the last frame. */
+  overBudget: boolean;
+  /** B-07 PD11: a transition draws two looks, or a Beat cut waits for its beat. */
+  transitioning: boolean;
 }
 
 export interface FrameStatsRecorder {

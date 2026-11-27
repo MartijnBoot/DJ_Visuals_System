@@ -142,7 +142,7 @@ afterEach(async () => {
 
 describe("a good release (AC28)", () => {
   it("switches current, restarts once, migrates, and keeps the old release on disk", async () => {
-    release("new", "ok", ["0004_extra.sql", "CREATE TABLE extra (id INTEGER PRIMARY KEY);\n"]);
+    release("new", "ok", ["0005_extra.sql", "CREATE TABLE extra (id INTEGER PRIMARY KEY);\n"]);
     expect(await run("new")).toEqual({ ok: true });
     expect(basename(currentRelease(root)!)).toBe("new");
     expect(existsSync(join(root, "releases", "old"))).toBe(true);
@@ -156,7 +156,7 @@ describe("a good release (AC28)", () => {
 
 describe("a release whose health check fails (AC28)", () => {
   it("switches back, restores the pre-deploy copy with the service stopped, and names health", async () => {
-    release("new", "fail", ["0004_extra.sql", "CREATE TABLE extra (id INTEGER PRIMARY KEY);\n"]);
+    release("new", "fail", ["0005_extra.sql", "CREATE TABLE extra (id INTEGER PRIMARY KEY);\n"]);
     expect(await run("new")).toEqual({ ok: false, step: "health", rolledBack: true });
     expect(basename(currentRelease(root)!)).toBe("old");
     expect(events).toEqual(["restart new", "stop", "start old"]);
@@ -172,7 +172,7 @@ describe("a release whose health check fails (AC28)", () => {
 
 describe("a release whose migration fails (AC30)", () => {
   it("never moves current or restarts, and wrote the backup before the migration ran", async () => {
-    release("new", "ok", ["0004_broken.sql", "INSERT INTO no_such_table (x) VALUES (1);\n"]);
+    release("new", "ok", ["0005_broken.sql", "INSERT INTO no_such_table (x) VALUES (1);\n"]);
     expect(await run("new")).toEqual({ ok: false, step: "migrate", rolledBack: false });
     expect(basename(currentRelease(root)!)).toBe("old");
     expect(events).toEqual([]);
@@ -193,13 +193,13 @@ describe("a release whose migration fails (AC30)", () => {
 describe("a re-run of a failed deploy of the same commit (review finding 5)", () => {
   it("takes a fresh backup and deploys, after a failed migration and after a failed health check", async () => {
     const dir = release("new", "ok", [
-      "0004_extra.sql",
+      "0005_extra.sql",
       "INSERT INTO no_such_table (x) VALUES (1);\n",
     ]);
     expect(await run("new")).toMatchObject({ ok: false, step: "migrate" });
     writeFileSync(join(dir, "health.txt"), "fail");
     writeFileSync(
-      join(dir, "server", "migrations", "0004_extra.sql"),
+      join(dir, "server", "migrations", "0005_extra.sql"),
       "CREATE TABLE extra (id INTEGER PRIMARY KEY);\n",
     );
     expect(await run("new")).toMatchObject({ ok: false, step: "health", rolledBack: true });

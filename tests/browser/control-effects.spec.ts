@@ -240,7 +240,10 @@ test("the stored value is a tick on the track, 3:1 against it and a shape, not a
     expect(contrast(look.notchColour, look.track)).toBeGreaterThanOrEqual(3);
     // The dials carry no tick: they have no stored value on the controller.
     await expect(phone.getByTestId("dial-recognisability-mark")).toHaveCount(0);
-    // It stays at the stored value while the value moves.
+    // It stays at the stored value while the value moves. B-07 (owner, 2026-11-26): the Scenes
+    // section above can put the fader below the fold, and focusing it would then scroll the page;
+    // it is scrolled into view first, so the box compares the tick on the track, not the scroll.
+    await fader.scrollIntoViewIfNeeded();
     const before = (await mark.boundingBox())!;
     await fader.focus();
     await fader.press("End");
