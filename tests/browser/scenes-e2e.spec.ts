@@ -19,6 +19,7 @@ import {
   type Stored,
 } from "./fixtures/profiles.ts";
 import { near, patch } from "./helpers.ts";
+import { IGNORE_BUDGET_FLAG } from "../../web/src/scenes/readings.ts";
 
 const TABLET = { width: 768, height: 1024 };
 /** A colour only the blue profile's definition holds: one in a log line is a definition leaking. */
@@ -165,11 +166,18 @@ test("stage, edit, preview, Go; save, rename, delete; restart and reload; the pr
 
   const evidence: Evidence = { console: [], peers: [], screen: [], controllers: [] };
   await watch(page.context(), evidence);
+  // D-24: on a CI runner software WebGL keeps this screen over budget for good, and the preview
+  // then pauses by design (SD14) and never shows a picture; the pause rule is `pause.test.ts`'s.
+  // Transitions still pause it. Set before the page loads, and kept across its reloads.
+  await page.addInitScript((flag) => {
+    (window as unknown as Record<string, unknown>)[flag] = true;
+  }, IGNORE_BUDGET_FLAG);
   page.on("request", (r) => evidence.screen.push(requestLine(r.method(), r.url())));
   page.on("websocket", (ws) => evidence.screen.push(`WS ${new URL(ws.url()).pathname}`));
   const codes: string[] = [];
   const keys: string[] = [];
-  await page.setViewportSize(TABLET);
+  // The screen at the gate's own viewport, as every other screen test (B-01 SD17): at a tablet's
+  // size a CI runner draws it over budget even at 50% (D-24). The controllers are tablets.
   await page.goto(`${server.origin}/`);
   codes.push(await switchOn(page));
   const first = await controller(page, evidence);
@@ -270,6 +278,12 @@ test("stage, edit, preview, Go; save, rename, delete; restart and reload; the pr
     });
 
     await test.step("a scene whose copy holds a custom effect stages and goes (AC26)", async () => {
+      // D-24: from here the preview yields to the output again, as in the product. A preview held
+      // at full cost keeps a CI runner over budget at 50%, and after 3 s of that with a custom
+      // effect live the slow-GPU guard (B-03 SD8) rightly switches the effect off.
+      await page.evaluate((flag) => {
+        (window as unknown as Record<string, unknown>)[flag] = false;
+      }, IGNORE_BUDGET_FLAG);
       await profileTile(second, customP).click(); // a staged pick
       await expect(profileTile(second, customP)).toHaveAttribute("aria-pressed", "true");
       await second.getByTestId("scene-name").fill("Custom paint");

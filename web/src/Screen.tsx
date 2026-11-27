@@ -55,6 +55,7 @@ import { sharedToEngine } from "./profile-compat.ts";
 import { createActiveProfile } from "./profiles/active.ts";
 import { feedOf, matchFeed, type OnScreen, type VideoSender } from "./scenes/feed.ts";
 import { createPreview } from "./scenes/preview.ts";
+import { previewReadings } from "./scenes/readings.ts";
 import { createStagedLook } from "./scenes/staged.ts";
 import { getProfile, listProfiles } from "./profiles/api.ts";
 import { loadProfileId, saveProfileId } from "./profiles/remembered.ts";
@@ -448,7 +449,7 @@ export function Screen({ cloud = false }: { cloud?: boolean } = {}) {
         const next = sources.video();
         if (next !== video) engine.setSource((video = next));
         // B-07 SD14: the preview yields to this engine's own readings (PD12).
-        control.preview.frame(performance.now(), features, video, engine.stats());
+        control.preview.frame(performance.now(), features, video, previewReadings(engine.stats()));
       },
     );
     return () => {
